@@ -2,7 +2,8 @@
 // VERSION is defined by scripts/bundle.mjs from package.json.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { effectiveConfigJson, loadConfig } from './config.mjs'
+import { DEFAULTS, effectiveConfigJson, loadConfig } from './config.mjs'
+import { activateHooks, commitMsg, hooksActive, preCommit, prePush } from './githooks.mjs'
 import { fail, repositoryRoot } from './util.mjs'
 
 const HELP = `ResaLedger ${VERSION}
@@ -11,6 +12,8 @@ Usage: node ledger/scripts/records.mjs <command>
 
 Commands:
   config    print the effective configuration
+  hooks [--activate]
+            say whether the git hooks are active; --activate turns them on
   version   print the version
   help      print this help
 `
@@ -47,11 +50,59 @@ function configCommand() {
   console.log(effectiveConfigJson(config))
 }
 
+/** All of stdin as text, or '' when there is nothing to read. */
+function readStdin() {
+  if (process.stdin.isTTY) return ''
+  try {
+    return readFileSync(0, 'utf8')
+  } catch (error) {
+    if (error.code === 'EOF' || error.code === 'EAGAIN') return ''
+    throw error
+  }
+}
+
+function hooksCommand(args) {
+  let root
+  try {
+    root = repositoryRoot()
+  } catch {
+    fail('not inside a git repository')
+  }
+  const dir = loadConfig(workingTreeReader(root)).config?.dir ?? DEFAULTS.dir
+  const guard = `node ${dir}/scripts/records.mjs`
+  const activate = args.includes('--activate')
+  if (activate) {
+    const result = activateHooks()
+    if (result === 'activated') console.log('✔ git hooks turned on: core.hooksPath is .githooks')
+    else if (result === 'active') console.log('✔ core.hooksPath is already .githooks')
+    else {
+      console.error(`✖ core.hooksPath is already "${result.foreign}", so ResaLedger changed nothing.
+  Call the guard from those hooks instead:
+    ${guard} pre-commit            (pre-commit)
+    ${guard} commit-msg "$1"       (commit-msg)
+    ${guard} pre-push "$@"         (pre-push, with its stdin)`)
+      process.exit(1)
+    }
+  }
+  if (hooksActive()) console.log('✔ the git hooks are active in this clone')
+  else if (activate) fail('.githooks/commit-msg is missing or is not the ResaLedger hook; run "npx resaledger update" to restore it')
+  else {
+    console.error(`✖ the git hooks are not active in this clone; run "${guard} hooks --activate"`)
+    process.exit(1)
+  }
+}
+
 export function main(argv) {
   const [command = 'help'] = argv
   if (command === 'version' || command === '--version') console.log(VERSION)
   else if (command === 'help' || command === '--help') process.stdout.write(HELP)
   else if (command === 'config') configCommand()
+  else if (command === 'hooks') hooksCommand(argv.slice(1))
+  else if (command === 'pre-commit') preCommit()
+  else if (command === 'commit-msg') {
+    if (!argv[1]) fail('commit-msg needs the message file, as git passes it: commit-msg <file>')
+    commitMsg(argv[1])
+  } else if (command === 'pre-push') prePush(readStdin())
   else fail(`unknown command "${command}"; run "help" for the list`)
 }
 
