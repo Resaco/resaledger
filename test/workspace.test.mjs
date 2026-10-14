@@ -1,12 +1,12 @@
 // The workspace: readers over the working tree, the index and a commit; loading and checking
-// every record; what counts as code; and the code fingerprint.
+// every record; what counts as code; the code fingerprint; and the check command through the bundle.
 import assert from 'node:assert/strict'
 import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { parseConfig } from '../src/guard/config.mjs'
 import { checkWorkspace, fingerprint, isCode, loadWorkspace, treeReader } from '../src/guard/workspace.mjs'
-import { repository } from './helpers.mjs'
+import { PACKAGE, repository, run, temporary } from './helpers.mjs'
 
 const CONFIG = parseConfig('{ "version": 2 }').config
 
@@ -281,5 +281,61 @@ describe('fingerprint', () => {
   test('the working tree is not a fingerprint source', () => {
     const r = repositoryWith()
     assert.throws(() => fingerprint({ kind: 'worktree', root: r.root }, CONFIG), /use index or commit/)
+  })
+})
+
+describe('the check command', () => {
+  const guard = join(temporary(), 'records.mjs')
+
+  test('the bundle builds', () => {
+    const built = run(PACKAGE, process.execPath, [join(PACKAGE, 'scripts', 'bundle.mjs'), '--out', guard])
+    assert.equal(built.status, 0, built.out)
+  })
+
+  test('passes on a valid workspace and fails on an invalid one', () => {
+    const r = repositoryWith()
+    const passed = r.node(guard, 'check')
+    assert.equal(passed.status, 0, passed.out)
+    assert.equal(passed.out, '✔ records valid: 3 tasks, 1 decisions, 1 log entries\n')
+
+    r.write('ledger/tasks/S3-serve.md', '# S3 Serve\n\n- Status: maybe\n')
+    r.write('ledger/tasks/S4.md', 'no heading\n')
+    const failed = r.node(guard, 'check')
+    assert.equal(failed.status, 1)
+    assert.equal(
+      failed.out,
+      [
+        '✖ ledger/tasks/S3-serve.md:3: "maybe" is not a status. Write one of todo, doing, blocked, done, dropped',
+        '✖ ledger/tasks/S4.md:1: the task has no heading. Start the file with "# <id> <title>", such as "# S4 Store projects and documents"',
+        ''
+      ].join('\n')
+    )
+    // The index and HEAD still hold the valid records.
+    assert.equal(r.node(guard, 'check', '--index').status, 0)
+    assert.equal(r.node(guard, 'check', '--rev', 'HEAD').status, 0)
+    r.git('add', '-A')
+    assert.equal(r.node(guard, 'check', '--index').status, 1)
+    r.commit('broken')
+    assert.equal(r.node(guard, 'check', '--rev', 'HEAD').status, 1)
+    assert.equal(r.node(guard, 'check', '--rev', 'HEAD~1').status, 0)
+  })
+
+  test('prints a problem with no line without a line number, and refuses bad options', () => {
+    const files = { ...VALID }
+    delete files['ledger/README.md']
+    const r = repositoryWith(files)
+    const failed = r.node(guard, 'check')
+    assert.equal(failed.status, 1)
+    assert.match(failed.out, /^✖ ledger\/README\.md: the workspace README is missing/m)
+
+    const missingConfig = repository()
+    const noConfig = missingConfig.node(guard, 'check')
+    assert.equal(noConfig.status, 1)
+    assert.match(noConfig.out, /✖ \.resaledger\.json: \.resaledger\.json is missing/)
+
+    assert.equal(r.node(guard, 'check', '--bogus').status, 1)
+    assert.match(r.node(guard, 'check', '--rev').out, /--rev needs a revision/)
+    assert.match(r.node(guard, 'check', '--rev', 'no-such-rev').out, /git ls-tree failed/)
+    assert.match(r.node(guard, 'help').out, /check +validate the records/)
   })
 })
