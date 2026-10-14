@@ -13,6 +13,8 @@ const TASK_SECTIONS = { plan: 'Plan', handoff: 'Handoff', notes: 'Notes' }
 const TASK_TITLE_MAX = 100
 const TASK_HANDOFF_MAX = 1500
 const TASK_SLUG_MAX = 40
+// Latin letters that NFKD does not split into a base letter and a mark.
+const TASK_SLUG_LETTERS = { ß: 'ss', æ: 'ae', œ: 'oe', ø: 'o', đ: 'd', ł: 'l', þ: 'th', Æ: 'AE', Œ: 'OE', Ø: 'O', Đ: 'D', Ł: 'L', Þ: 'TH' }
 const TASK_FILE_NAME = /^([A-Z]{1,4}\d+(?:\.\d+)*)(?:-[^/]+)?\.md$/
 const TASK_ID_HINT = 'one to four capital letters, a number and optional .number parts, such as S4, S4.1 or API12'
 
@@ -247,6 +249,13 @@ export function validateTask(task, context) {
     const path = resolveLinkPath(task.file, link.path)
     if (path === null) report(link.line, `the link ${link.target} points outside the repository. Link to a file inside it`)
     else if (!context.exists(path)) report(link.line, `the link ${link.target} points to ${path}, which does not exist. Fix the path or add the file`)
+    else if (link.anchor && path.endsWith('.md') && !(planField && link.line === planField.line)) {
+      // The Plan link's anchor is checked above, with a hint; every other anchor here.
+      const target = context.read(path)
+      const wanted = link.anchor.toLowerCase()
+      if (target !== null && !headings(target).some((heading) => heading.anchor === wanted))
+        report(link.line, `the link ${link.target} points to #${link.anchor}, which is not a heading in ${path}. Fix the anchor or link to the file without it`)
+    }
   }
   return problems
 }
@@ -300,6 +309,7 @@ export function validateTaskSet(tasks, context) {
 /** A file-name slug: lowercase ASCII words joined by hyphens, at most 40 characters, or ''. */
 export function slugify(title) {
   const slug = title
+    .replace(/[ßæœøđłþÆŒØĐŁÞ]/g, (letter) => TASK_SLUG_LETTERS[letter])
     .normalize('NFKD')
     .replace(/\p{M}/gu, '')
     .toLowerCase()

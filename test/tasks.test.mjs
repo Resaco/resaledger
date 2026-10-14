@@ -450,3 +450,32 @@ describe('slugify and taskFileName', () => {
     assert.equal(taskFileName('ledger', 'S4.1', '???'), 'ledger/tasks/S4.1.md')
   })
 })
+
+test('an anchor in any link into a Markdown file must be a heading there', () => {
+  const text = [
+    '# S9 Anchors',
+    '',
+    '- Status: todo',
+    '',
+    '## Notes',
+    '',
+    'See [the design](../plan/S-server.md#storage) and [the gap](../plan/S-server.md#missing).'
+  ].join('\n')
+  const task = parseTask('ledger/tasks/S9-anchors.md', text)
+  const files = new Map([['ledger/plan/S-server.md', '# S\n\n## Storage\n\nRows.\n']])
+  const context = {
+    exists: (path) => files.has(path),
+    read: (path) => files.get(path) ?? null,
+    planStatus: () => null,
+    taskIds: new Set(['S9']),
+    config: { dir: 'ledger', wip: 3 }
+  }
+  const problems = validateTask(task, context)
+  assert.equal(problems.length, 1, JSON.stringify(problems))
+  assert.match(problems[0].message, /#missing/)
+})
+
+test('slugify writes Latin letters that do not decompose as plain ASCII', () => {
+  assert.equal(slugify('Straße und Øresund'), 'strasse-und-oresund')
+  assert.equal(slugify('Æble þing'), 'aeble-thing')
+})
