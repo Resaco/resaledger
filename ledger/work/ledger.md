@@ -35,12 +35,12 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 ## G: Brand and graphics
 
 ### G1 Brand concepts
-- Status: doing
+- Status: blocked
 - Lane: main
 - Depends on: —
 - Plan: [G-brand.md](../plan/G-brand.md#g1-brand-concepts)
 - Evidence: —
-- Notes: A designer agent is making three concept directions in Affinity. Next: the owner picks one; the working files stay outside this repository.
+- Notes: Waiting for the owner: three variants of the ruled-lanes mark (C1 parallel, C2 converging, C3 merging) and a six-frame storyboard of the animated explanation are ready for review, with the designer recommending C1. The owner picks the variant, decides whether the spray treatment belongs on the mark or only on covers, and approves the typeface. The working files stay outside this repository.
 
 ### G2 Final logo and cover
 - Status: todo
@@ -66,11 +66,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: Merged in 003227c. The bundler's conventions are summarised in [modules.md](../plan/modules.md#conventions). The repository's gates now run the bundle check on every code commit and `npm test` in `verify`.
 
 ### F2 CI for this repository, and the hygiene checks
-- Status: todo
+- Status: doing
 - Depends on: F1
 - Plan: [F-foundation.md](../plan/F-foundation.md#f2-ci-for-this-repository-and-the-hygiene-checks)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `f2-ci-hygiene` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ## R: The record format
 

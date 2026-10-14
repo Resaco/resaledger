@@ -8,7 +8,7 @@ Building. The specification and the plan are approved; the build starts with the
 
 ## Active work
 
-[R3](work/ledger.md#r3-task-files) and [R4](work/ledger.md#r4-decisions-log-entries-plans-and-the-workspace-readme), with workers. [G1](work/ledger.md#g1-brand-concepts): three brand concepts, being made in Affinity.
+[R3](work/ledger.md#r3-task-files), [R4](work/ledger.md#r4-decisions-log-entries-plans-and-the-workspace-readme) and [F2](work/ledger.md#f2-ci-for-this-repository-and-the-hygiene-checks), with workers. [G1](work/ledger.md#g1-brand-concepts): the concepts wait for the owner's choice.
 
 ## Last verified
 
@@ -20,4 +20,4 @@ Review R3 and R4 when their workers report, then start R5; start F2 when a slot 
 
 ## Waiting for the owner
 
-- Pick one of the brand concepts ([G1](work/ledger.md#g1-brand-concepts)) when they are ready.
+- Pick one of the brand concepts ([G1](work/ledger.md#g1-brand-concepts)): C1, C2 or C3, the spray treatment, and the typeface.
