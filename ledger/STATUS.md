@@ -4,11 +4,11 @@ Updated: 2026-10-15 · by the lead agent
 
 ## Phase
 
-S, research and the specification. The specification is written and waits for the owner's review. No product code exists yet, by design.
+The specification is approved. The build plan is written and waits for the owner's review; no product code exists yet. Brand concepts are being made alongside.
 
 ## Active work
 
-[G1](work/ledger.md#g1-brand-concepts): brand concepts, being made. [S4](work/ledger.md#s4-the-owners-decisions-on-the-specification) waits for the owner.
+[G1](work/ledger.md#g1-brand-concepts): three brand concepts, being made in Affinity.
 
 ## Last verified
 
@@ -16,10 +16,10 @@ S, research and the specification. The specification is written and waits for th
 
 ## Next step
 
-The owner reviews [the specification](plan/spec.md) and makes the decisions in [section 21](plan/spec.md#21-decisions-for-the-owner). After that, the specification becomes plan sections and ledger tasks (phase 2), which the owner reviews before the build starts.
+The owner reviews [the plan](plan/README.md): 43 tasks in 12 phases, each with a plan section and acceptance checks. After the review, the build starts with [F1](work/ledger.md#f1-package-source-layout-bundler-and-test-harness).
 
 ## Waiting for the owner
 
-- Approve [the specification](plan/spec.md), or say what to change.
-- Decide the cut of guard-only mode ([section 21](plan/spec.md#21-decisions-for-the-owner)). The name (ResaLedger), the licence, the commit identity and a separate plan review were decided on 15 October.
+- Review [the plan](plan/README.md).
+- Permission to install Node 20 and 22 with nvm, and VHS with Homebrew ([plan](plan/README.md#waiting-for-the-owner)).
 - Pick one of the brand concepts ([G1](work/ledger.md#g1-brand-concepts)) when they are ready.

@@ -13,3 +13,7 @@ Studied thirteen neighbouring projects through their repositories and issues, me
 ## 2026-10-15 · The owner's first decisions, and the brand work starts
 
 The owner decided the licence (MIT, copyright Resaco Oy), the commit identity (the GitHub no-reply address, no AI co-author lines), a separate review of the plan, that nothing derived from private projects enters this repository, and the name: ResaLedger. The specification now uses the new name, and the predecessor keeps its own name, agent-ledger 0.x, where the text is about it. The brand concepts (G1) started, in a dark graffiti style with a refined grain that follows the Resa product family.
+
+## 2026-10-15 · The plan
+
+The owner cut guard-only mode, put a `changes` command into 1.0, accepted that the predecessor's name shows in the history, and approved the specification. The specification became [a plan](../plan/README.md) of 43 tasks in 12 phases, each with a plan section and acceptance checks, and the ledger lists them with their dependencies. The guard will be developed as modules bundled into one file, so that up to three workers can build it in parallel; workers change code and tests only, and the records stay with the lead until this repository moves to the 1.0 format (M4).

@@ -19,3 +19,7 @@ Decisions the owner made, and significant technical decisions made inside an app
 | 2026-10-15 | Nothing derived from private projects goes into this repository, not even anonymised numbers. The specification's evidence appendix was removed for this reason. | Niko Alho |
 | 2026-10-15 | The plan is reviewed separately from the specification, before the build starts. | Niko Alho |
 | 2026-10-15 | The product is named ResaLedger: the npm package and command `resaledger`, the repository `Resaco/resaledger`, the configuration file `.resaledger.json`. The workspace folder stays `ledger/`. Its visual identity follows the Resa product family, in a dark graffiti style with a refined grain, designed in Affinity. | Niko Alho |
+| 2026-10-15 | Guard-only mode (0.x `mode: guard`) is not part of 1.0; repositories that use it stay on 0.x. | Niko Alho |
+| 2026-10-15 | A read-only `changes` command is part of 1.0: the tasks finished since a tag, as a draft for the changelog and the release notes. | Niko Alho |
+| 2026-10-15 | The predecessor's name, agent-ledger 0.x, may appear in this repository's history and in `migrate`, which reads 0.x files by their names. | Niko Alho |
+| 2026-10-15 | The specification is approved with these decisions; phase 2 turns it into a plan, which the owner reviews before the build starts. | Niko Alho |

@@ -1,10 +1,10 @@
 # ResaLedger 1.0 specification
 
-Status: proposal · 2026-10-15 · written for the owner's review; nothing here is built yet
+Status: approved · 2026-10-15 · by Niko Alho, with the decisions in section 21
 
-This is the design of ResaLedger 1.0, the successor of agent-ledger 0.x. Every decision carries its reason. Open questions are marked as open, and the decisions only the owner can make are collected in [section 21](#21-decisions-for-the-owner). The plan and its tasks are written from this document once it is approved.
+This is the design of ResaLedger 1.0, the successor of agent-ledger 0.x. Every decision carries its reason. Open questions are marked as open, and the owner's decisions are collected in [section 21](#21-the-owners-decisions). The plan and its tasks are written from this document once it is approved.
 
-Contents: [1 Problem](#1-the-problem) · [2 Positioning](#2-positioning) · [3 Principles](#3-principles) · [4 Model](#4-the-model-on-one-page) · [5 Format](#5-format-reference) · [6 Lanes](#6-lanes) · [7 Presets](#7-branch-presets) · [8 CLI](#8-command-line) · [9 What runs where](#9-what-runs-where) · [10 CI](#10-ci) · [11 Agents](#11-agent-integrations) · [12 Trust](#12-trust-model) · [13 Install](#13-installation-and-distribution) · [14 Migration](#14-migration-from-0x) · [15 Stability](#15-format-stability-and-updates) · [16 Testing](#16-testing) · [17 Not in 1.0](#17-not-in-10) · [18 Launch](#18-launch) · [19 Risks](#19-risks) · [20 Open questions](#20-open-questions) · [21 Owner decisions](#21-decisions-for-the-owner) · [Sources](#appendix-landscape-sources)
+Contents: [1 Problem](#1-the-problem) · [2 Positioning](#2-positioning) · [3 Principles](#3-principles) · [4 Model](#4-the-model-on-one-page) · [5 Format](#5-format-reference) · [6 Lanes](#6-lanes) · [7 Presets](#7-branch-presets) · [8 CLI](#8-command-line) · [9 What runs where](#9-what-runs-where) · [10 CI](#10-ci) · [11 Agents](#11-agent-integrations) · [12 Trust](#12-trust-model) · [13 Install](#13-installation-and-distribution) · [14 Migration](#14-migration-from-0x) · [15 Stability](#15-format-stability-and-updates) · [16 Testing](#16-testing) · [17 Not in 1.0](#17-not-in-10) · [18 Launch](#18-launch) · [19 Risks](#19-risks) · [20 Open questions](#20-open-questions) · [21 Owner decisions](#21-the-owners-decisions) · [Sources](#appendix-landscape-sources)
 
 ## 1. The problem
 
@@ -409,12 +409,15 @@ The guard in the repository runs as `node ledger/scripts/records.mjs <command>`;
 | `handoff` | The end-of-session check. |
 | `check [--range <from>..<to>]` | Validate the records, and the commits in a range. |
 | `ci [--base <ref> --head <ref>]` | The CI check ([section 10](#10-ci)). |
+| `changes [--since <ref>] [--json]` | The tasks finished since a tag, as a draft for the changelog and the release notes. Read-only. |
 | `gates`, `config`, `version` | The gates, the effective configuration, the version. |
 | `pre-commit`, `commit-msg <file>`, `pre-push`, `hook <agent> <event>` | Called by git and by agent hooks. |
 
 The package adds `init`, `update` and `migrate` ([sections 13–15](#13-installation-and-distribution)) and passes every other command to the repository's own guard, so the committed version always decides.
 
 `handoff` checks that the records are valid, the workspace README is written, the hooks are active and the tree is clean; that a stamp exists for the current code when verify gates exist; that every `doing` task in this lane has a Handoff changed in or after the last commit that names the task; that the lane's unpushed commits pass the trailer check, which catches a commit made with `--no-verify`; and, with `requirePushed`, that the lane is pushed. It no longer asks for a status file, a log entry and a ledger edit after every code commit. One record checkpoint per task replaces three per commit.
+
+`changes` lists the tasks that became `done` between a reference (by default the newest tag) and now, with their evidence. When the commits that name a task follow Conventional Commits, it groups the tasks as Keep a Changelog does: Added for `feat`, Fixed for `fix`, Changed for the rest. It never writes a file. A changelog is edited text, and the command gives its editor a complete, linked draft.
 
 ## 9. What runs where
 
@@ -564,6 +567,7 @@ It is to be tested on synthetic workspaces that cover every quirk of the real on
 - **Agent hook tests** use recorded input for each of the five agents and each event, from their documentation. Unknown input is allowed.
 - **Migration tests** run on synthetic 0.x workspaces that cover every quirk seen in real ones, and on copies of real workspaces in a temporary directory; those tests are skipped where the copies are absent and never committed.
 - **Performance:** `work --all` with 500 pushed branches, within a time budget.
+- **`changes`** on a history with tags, Conventional and free-form commits, and a task that was finished, reopened and finished again.
 - **Windows:** CRLF checkouts, paths and hooks under Git for Windows.
 - **Matrix:** Node 20, 22 and 24 on Linux, macOS and Windows.
 - **Hygiene:** a test scans every tracked text file for home-directory paths and for the names in a private deny-list read from a file that is never tracked. The history is scanned the same way before anything is pushed.
@@ -618,12 +622,14 @@ These are open, and the build goes ahead without waiting for them:
 4. How does `work --all` behave beyond 1,000 branches? The performance test covers 500.
 5. Will teams accept a weakening change only through a decision file, or do they want a label or an approval instead? Start with the decision file, which keeps the record in the repository.
 
-## 21. Decisions for the owner
+## 21. The owner's decisions
 
 1. **The name.** Decided on 15 October 2026: ResaLedger. The npm package and the command are `resaledger`, the repository is `Resaco/resaledger` and the configuration file is `.resaledger.json`; the workspace folder stays `ledger/`. The visual identity follows the Resa product family.
 2. **The licence.** Decided on 15 October 2026: MIT, copyright Resaco Oy.
 3. **The commit identity.** Decided on 15 October 2026: `Niko Alho` with the work account's GitHub no-reply address, set in the repository's own git configuration, and no co-author line naming an AI.
-4. **Guard-only mode is cut** ([section 17](#17-not-in-10)). Repositories that use it stay on 0.x.
+4. **Guard-only mode is cut** ([section 17](#17-not-in-10)). Decided on 15 October 2026. Repositories that use it stay on 0.x.
+5. **`changes` is in 1.0** ([section 8](#8-command-line)). Decided on 15 October 2026.
+6. **The predecessor's name may show.** This repository's history starts as an agent-ledger 0.3 workspace, and `migrate` reads 0.x files by their names. Accepted on 15 October 2026.
 
 
 ## Appendix: Landscape sources

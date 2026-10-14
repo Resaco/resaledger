@@ -26,11 +26,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: —
 
 ### S4 The owner's decisions on the specification
-- Status: blocked
+- Status: done
 - Depends on: S3
-- Plan: [spec.md](../plan/spec.md#21-decisions-for-the-owner)
-- Evidence: —
-- Notes: Decided on 15 October: the licence, the commit identity, and a separate review of the plan (see DECISIONS.md). The name, ResaLedger, was decided the same day. Still waiting for the owner: approval of the specification and the cut of guard-only mode. Phase 2 starts after this.
+- Plan: [spec.md](../plan/spec.md#21-the-owners-decisions)
+- Evidence: The decisions of 15 October are in [DECISIONS.md](../DECISIONS.md) and in [section 21](../plan/spec.md#21-the-owners-decisions) of the specification: the name, the licence, the commit identity, the cut of guard-only mode, the `changes` command, the predecessor's name in the history, and a separate review of the plan. The owner answered every open question and asked for no change to the specification.
+- Notes: —
 
 ## G: Brand and graphics
 
@@ -46,5 +46,330 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Status: todo
 - Depends on: G1
 - Plan: [G-brand.md](../plan/G-brand.md#g2-final-logo-cover-and-explainer-graphics)
+- Evidence: —
+- Notes: —
+
+## F: Foundation
+
+### F1 Package, source layout, bundler and test harness
+- Status: todo
+- Depends on: —
+- Plan: [F-foundation.md](../plan/F-foundation.md#f1-package-source-layout-bundler-and-test-harness)
+- Evidence: —
+- Notes: —
+
+### F2 CI for this repository, and the hygiene checks
+- Status: todo
+- Depends on: F1
+- Plan: [F-foundation.md](../plan/F-foundation.md#f2-ci-for-this-repository-and-the-hygiene-checks)
+- Evidence: —
+- Notes: —
+
+## R: The record format
+
+### R1 Configuration
+- Status: todo
+- Depends on: F1
+- Plan: [R-records.md](../plan/R-records.md#r1-configuration)
+- Evidence: —
+- Notes: —
+
+### R2 Markdown primitives
+- Status: todo
+- Depends on: F1
+- Plan: [R-records.md](../plan/R-records.md#r2-markdown-primitives)
+- Evidence: —
+- Notes: —
+
+### R3 Task files
+- Status: todo
+- Depends on: R1, R2
+- Plan: [R-records.md](../plan/R-records.md#r3-task-files)
+- Evidence: —
+- Notes: —
+
+### R4 Decisions, log entries, plans and the workspace README
+- Status: todo
+- Depends on: R2
+- Plan: [R-records.md](../plan/R-records.md#r4-decisions-log-entries-plans-and-the-workspace-readme)
+- Evidence: —
+- Notes: —
+
+### R5 `check`, what counts as code, and the fingerprint
+- Status: todo
+- Depends on: R3, R4
+- Plan: [R-records.md](../plan/R-records.md#r5-check-what-counts-as-code-and-the-fingerprint)
+- Evidence: —
+- Notes: —
+
+## V: Gates, stamps, the range check and handoff
+
+### V1 Gates and stamps
+- Status: todo
+- Depends on: R5
+- Plan: [V-verify.md](../plan/V-verify.md#v1-gates-and-stamps)
+- Evidence: —
+- Notes: —
+
+### V2 The commit range check
+- Status: todo
+- Depends on: R5
+- Plan: [V-verify.md](../plan/V-verify.md#v2-the-commit-range-check)
+- Evidence: —
+- Notes: —
+
+### V3 `handoff`
+- Status: todo
+- Depends on: V1, V2, H3
+- Plan: [V-verify.md](../plan/V-verify.md#v3-handoff)
+- Evidence: —
+- Notes: —
+
+## H: Git hooks
+
+### H1 pre-commit
+- Status: todo
+- Depends on: R5
+- Plan: [H-hooks.md](../plan/H-hooks.md#h1-pre-commit)
+- Evidence: —
+- Notes: —
+
+### H2 commit-msg and pre-push
+- Status: todo
+- Depends on: V2
+- Plan: [H-hooks.md](../plan/H-hooks.md#h2-commit-msg-and-pre-push)
+- Evidence: —
+- Notes: —
+
+### H3 Hook scripts and activation
+- Status: todo
+- Depends on: F1
+- Plan: [H-hooks.md](../plan/H-hooks.md#h3-hook-scripts-and-activation)
+- Evidence: —
+- Notes: —
+
+## W: The daily commands
+
+### W1 `work` on this machine
+- Status: todo
+- Depends on: R5, H3
+- Plan: [W-work.md](../plan/W-work.md#w1-work-on-this-machine)
+- Evidence: —
+- Notes: —
+
+### W2 `work --all` across pushed branches
+- Status: todo
+- Depends on: W1
+- Plan: [W-work.md](../plan/W-work.md#w2-work---all-across-pushed-branches)
+- Evidence: —
+- Notes: —
+
+### W3 `task` and `new`
+- Status: todo
+- Depends on: W1
+- Plan: [W-work.md](../plan/W-work.md#w3-task-and-new)
+- Evidence: —
+- Notes: —
+
+### W4 `claim`
+- Status: todo
+- Depends on: W2, W3
+- Plan: [W-work.md](../plan/W-work.md#w4-claim)
+- Evidence: —
+- Notes: —
+
+### W5 `changes`
+- Status: todo
+- Depends on: V2
+- Plan: [W-work.md](../plan/W-work.md#w5-changes)
+- Evidence: —
+- Notes: —
+
+## C: The CI check
+
+### C1 The CI check
+- Status: todo
+- Depends on: V1, V2, H1
+- Plan: [C-ci.md](../plan/C-ci.md#c1-the-ci-check)
+- Evidence: —
+- Notes: —
+
+### C2 Changes to enforcement
+- Status: todo
+- Depends on: C1
+- Plan: [C-ci.md](../plan/C-ci.md#c2-changes-to-enforcement)
+- Evidence: —
+- Notes: —
+
+### C3 Output, workflow and templates
+- Status: todo
+- Depends on: C1
+- Plan: [C-ci.md](../plan/C-ci.md#c3-output-workflow-and-templates)
+- Evidence: —
+- Notes: —
+
+## A: Agent integrations
+
+### A1 The agent hook core, Claude Code and Codex
+- Status: todo
+- Depends on: W1, H1
+- Plan: [A-agents.md](../plan/A-agents.md#a1-the-agent-hook-core-claude-code-and-codex)
+- Evidence: —
+- Notes: —
+
+### A2 Cursor, Gemini CLI and GitHub Copilot
+- Status: todo
+- Depends on: A1
+- Plan: [A-agents.md](../plan/A-agents.md#a2-cursor-gemini-cli-and-github-copilot)
+- Evidence: —
+- Notes: —
+
+### A3 The `AGENTS.md` block, the skill and the plugin
+- Status: todo
+- Depends on: I1
+- Plan: [A-agents.md](../plan/A-agents.md#a3-the-agentsmd-block-the-skill-and-the-plugin)
+- Evidence: —
+- Notes: —
+
+## I: The installer
+
+### I1 `init`
+- Status: todo
+- Depends on: R1, R4, H3
+- Plan: [I-installer.md](../plan/I-installer.md#i1-init)
+- Evidence: —
+- Notes: —
+
+### I2 Detecting the gates
+- Status: todo
+- Depends on: F1
+- Plan: [I-installer.md](../plan/I-installer.md#i2-detecting-the-gates)
+- Evidence: —
+- Notes: —
+
+### I3 `update` and the package's command line
+- Status: todo
+- Depends on: I1
+- Plan: [I-installer.md](../plan/I-installer.md#i3-update-and-the-packages-command-line)
+- Evidence: —
+- Notes: —
+
+## M: Migration
+
+### M1 Reading 0.x workspaces
+- Status: todo
+- Depends on: F1
+- Plan: [M-migration.md](../plan/M-migration.md#m1-reading-0x-workspaces)
+- Evidence: —
+- Notes: —
+
+### M2 Converting, safely
+- Status: todo
+- Depends on: M1, R5
+- Plan: [M-migration.md](../plan/M-migration.md#m2-converting-safely)
+- Evidence: —
+- Notes: —
+
+### M3 Verification on real workspaces
+- Status: todo
+- Depends on: M2
+- Plan: [M-migration.md](../plan/M-migration.md#m3-verification-on-real-workspaces)
+- Evidence: —
+- Notes: —
+
+### M4 This repository moves to 1.0
+- Status: todo
+- Depends on: M3, T5, I3, H2, V3
+- Plan: [M-migration.md](../plan/M-migration.md#m4-this-repository-moves-to-10)
+- Evidence: —
+- Notes: —
+
+## T: Acceptance and independent review
+
+### T1 The parallel-lanes acceptance test
+- Status: todo
+- Depends on: W4, V3, H2, C1
+- Plan: [T-acceptance.md](../plan/T-acceptance.md#t1-the-parallel-lanes-acceptance-test)
+- Evidence: —
+- Notes: —
+
+### T2 Performance and Windows
+- Status: todo
+- Depends on: W2, H3
+- Plan: [T-acceptance.md](../plan/T-acceptance.md#t2-performance-and-windows)
+- Evidence: —
+- Notes: —
+
+### T3 Independent review of the guard
+- Status: todo
+- Depends on: V3, H2
+- Plan: [T-acceptance.md](../plan/T-acceptance.md#t3-independent-review-of-the-guard)
+- Evidence: —
+- Notes: —
+
+### T4 Independent review of the CI check
+- Status: todo
+- Depends on: C2, C3
+- Plan: [T-acceptance.md](../plan/T-acceptance.md#t4-independent-review-of-the-ci-check)
+- Evidence: —
+- Notes: —
+
+### T5 Independent review of `migrate`
+- Status: todo
+- Depends on: M3
+- Plan: [T-acceptance.md](../plan/T-acceptance.md#t5-independent-review-of-migrate)
+- Evidence: —
+- Notes: —
+
+## D: Documentation and repository files
+
+### D1 The format reference
+- Status: todo
+- Depends on: R5
+- Plan: [D-docs.md](../plan/D-docs.md#d1-the-format-reference)
+- Evidence: —
+- Notes: —
+
+### D2 Guides
+- Status: todo
+- Depends on: W4, C3, A3, I3
+- Plan: [D-docs.md](../plan/D-docs.md#d2-guides)
+- Evidence: —
+- Notes: —
+
+### D3 Repository files and releases
+- Status: todo
+- Depends on: W5
+- Plan: [D-docs.md](../plan/D-docs.md#d3-repository-files-and-releases)
+- Evidence: —
+- Notes: —
+
+### D4 The README
+- Status: todo
+- Depends on: D2, G2, L1
+- Plan: [D-docs.md](../plan/D-docs.md#d4-the-readme)
+- Evidence: —
+- Notes: —
+
+## L: The demo, the launch drafts and the release candidate
+
+### L1 The terminal demo
+- Status: todo
+- Depends on: I1, W4, T1
+- Plan: [L-launch.md](../plan/L-launch.md#l1-the-terminal-demo)
+- Evidence: —
+- Notes: —
+
+### L2 Release notes and launch drafts
+- Status: todo
+- Depends on: D4
+- Plan: [L-launch.md](../plan/L-launch.md#l2-release-notes-and-launch-drafts)
+- Evidence: —
+- Notes: —
+
+### L3 The release candidate
+- Status: todo
+- Depends on: D4, L2, T1, T2, T3, T4, M4, D1, D3, A2
+- Plan: [L-launch.md](../plan/L-launch.md#l3-the-release-candidate)
 - Evidence: —
 - Notes: —
