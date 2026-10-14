@@ -1,6 +1,6 @@
 # C — The CI check
 
-Status: proposal · 2026-10-15 · part of the plan the owner reviews
+Status: approved · 2026-10-15 · by Niko Alho
 
 The same rules as the hooks, where they cannot be bypassed, judged by the rules of the branch a pull request merges into ([spec section 10](spec.md#10-ci)).
 

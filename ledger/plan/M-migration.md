@@ -1,6 +1,6 @@
 # M — Migration
 
-Status: proposal · 2026-10-15 · part of the plan the owner reviews
+Status: approved · 2026-10-15 · by Niko Alho
 
 `resaledger migrate` moves a 0.x workspace to 1.0 without losing a line, and this repository is the first to move ([spec section 14](spec.md#14-migration-from-0x)).
 

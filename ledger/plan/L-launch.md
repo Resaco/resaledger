@@ -1,6 +1,6 @@
 # L — The demo, the launch drafts and the release candidate
 
-Status: proposal · 2026-10-15 · part of the plan the owner reviews
+Status: approved · 2026-10-15 · by Niko Alho
 
 Everything the owner needs to publish, prepared and checked. Nothing is pushed, published or posted by an agent.
 

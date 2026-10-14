@@ -1,6 +1,6 @@
 # W — The daily commands
 
-Status: proposal · 2026-10-15 · part of the plan the owner reviews
+Status: approved · 2026-10-15 · by Niko Alho
 
 The commands people and agents type every session: see the state, read a task, create records, claim, and list what changed.
 

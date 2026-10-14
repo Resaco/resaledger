@@ -1,6 +1,6 @@
 # Plan
 
-Status: proposal · 2026-10-15 · the build plan for ResaLedger 1.0, waiting for the owner's review
+Status: approved · 2026-10-15 · by Niko Alho
 
 ## Phases
 
@@ -50,7 +50,4 @@ Status: proposal · 2026-10-15 · the build plan for ResaLedger 1.0, waiting for
 
 ## Waiting for the owner
 
-- A review of this plan before the build starts.
-- Permission to install Node 20 and 22 with nvm, so that the tests run on the whole Node range on this machine. Linux and Windows run in CI after the owner pushes.
-- Permission to install VHS (with Homebrew) for recording the terminal demo (L1).
 - The choice of a brand concept ([G1](../work/ledger.md#g1-brand-concepts)).

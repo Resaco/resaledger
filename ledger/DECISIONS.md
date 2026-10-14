@@ -23,3 +23,4 @@ Decisions the owner made, and significant technical decisions made inside an app
 | 2026-10-15 | A read-only `changes` command is part of 1.0: the tasks finished since a tag, as a draft for the changelog and the release notes. | Niko Alho |
 | 2026-10-15 | The predecessor's name, agent-ledger 0.x, may appear in this repository's history and in `migrate`, which reads 0.x files by their names. | Niko Alho |
 | 2026-10-15 | The specification is approved with these decisions; phase 2 turns it into a plan, which the owner reviews before the build starts. | Niko Alho |
+| 2026-10-15 | The build plan is approved as written. Node 20 and 22 and VHS may be installed on the build machine, so that the tests run across the Node range and the demo can be recorded. | Niko Alho |

@@ -1,6 +1,6 @@
 # I — The installer
 
-Status: proposal · 2026-10-15 · part of the plan the owner reviews
+Status: approved · 2026-10-15 · by Niko Alho
 
 `npx resaledger init` and go, and a safe way to renew what was installed ([spec section 13](spec.md#13-installation-and-distribution)).
 

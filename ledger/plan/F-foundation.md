@@ -1,6 +1,6 @@
 # F — Foundation
 
-Status: proposal · 2026-10-15 · part of the plan the owner reviews
+Status: approved · 2026-10-15 · by Niko Alho
 
 What every later task stands on: the package, the source layout, the bundler that makes the guard one file, the test harness, CI for this repository and the hygiene checks.
 

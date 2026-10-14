@@ -4,11 +4,11 @@ Updated: 2026-10-15 · by the lead agent
 
 ## Phase
 
-The specification is approved. The build plan is written and waits for the owner's review; no product code exists yet. Brand concepts are being made alongside.
+Building. The specification and the plan are approved; the build starts with the foundation (F1). Brand concepts are being made alongside.
 
 ## Active work
 
-[G1](work/ledger.md#g1-brand-concepts): three brand concepts, being made in Affinity.
+[F1](work/ledger.md#f1-package-source-layout-bundler-and-test-harness): the package, the bundler and the test harness, with a worker. [G1](work/ledger.md#g1-brand-concepts): three brand concepts, being made in Affinity.
 
 ## Last verified
 
@@ -16,10 +16,8 @@ The specification is approved. The build plan is written and waits for the owner
 
 ## Next step
 
-The owner reviews [the plan](plan/README.md): 43 tasks in 12 phases, each with a plan section and acceptance checks. After the review, the build starts with [F1](work/ledger.md#f1-package-source-layout-bundler-and-test-harness).
+Review F1 when the worker reports, then start F2, R1 and R2 in parallel.
 
 ## Waiting for the owner
 
-- Review [the plan](plan/README.md).
-- Permission to install Node 20 and 22 with nvm, and VHS with Homebrew ([plan](plan/README.md#waiting-for-the-owner)).
 - Pick one of the brand concepts ([G1](work/ledger.md#g1-brand-concepts)) when they are ready.

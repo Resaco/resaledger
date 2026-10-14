@@ -52,11 +52,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 ## F: Foundation
 
 ### F1 Package, source layout, bundler and test harness
-- Status: todo
+- Status: doing
 - Depends on: —
 - Plan: [F-foundation.md](../plan/F-foundation.md#f1-package-source-layout-bundler-and-test-harness)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `f1-foundation` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### F2 CI for this repository, and the hygiene checks
 - Status: todo

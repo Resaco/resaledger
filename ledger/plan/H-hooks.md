@@ -1,6 +1,6 @@
 # H — Git hooks
 
-Status: proposal · 2026-10-15 · part of the plan the owner reviews
+Status: approved · 2026-10-15 · by Niko Alho
 
 The hooks refuse unrecorded work at the moment it is committed or pushed, on every platform.
 

@@ -1,6 +1,6 @@
 # T — Acceptance and independent review
 
-Status: proposal · 2026-10-15 · part of the plan the owner reviews
+Status: approved · 2026-10-15 · by Niko Alho
 
 The test that proves the design, the tests that prove it holds at scale and on Windows, and a second model's review where a bug would break other people's repositories.
 

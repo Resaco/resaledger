@@ -1,6 +1,6 @@
 # D — Documentation and the repository's own files
 
-Status: proposal · 2026-10-15 · part of the plan the owner reviews
+Status: approved · 2026-10-15 · by Niko Alho
 
 The documentation describes what was built, so it comes after the features and is checked against them.
 

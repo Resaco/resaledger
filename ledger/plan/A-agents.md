@@ -1,6 +1,6 @@
 # A — Agent integrations
 
-Status: proposal · 2026-10-15 · part of the plan the owner reviews
+Status: approved · 2026-10-15 · by Niko Alho
 
 Every agent learns the protocol from `AGENTS.md`, and the agents that have hooks are stopped before they break a rule ([spec section 11](spec.md#11-agent-integrations)).
 

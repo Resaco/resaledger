@@ -1,6 +1,6 @@
 # V — Gates, stamps, the commit range check and handoff
 
-Status: proposal · 2026-10-15 · part of the plan the owner reviews
+Status: approved · 2026-10-15 · by Niko Alho
 
 The guarantees: the gates run on the committed code, the pass is bound to that code, and every commit is recorded.
 

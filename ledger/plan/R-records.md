@@ -1,6 +1,6 @@
 # R — The record format
 
-Status: proposal · 2026-10-15 · part of the plan the owner reviews
+Status: approved · 2026-10-15 · by Niko Alho
 
 The format is the public contract ([spec section 5](spec.md#5-format-reference)). Every command reads it, so it is built first, as plain functions with unit tests, before any command uses it.
 
