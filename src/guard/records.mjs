@@ -2,6 +2,7 @@
 // validators over parsed records. No file access; a validator returns problems.
 import { posix } from 'node:path'
 import { headings, isEmptyValue, parseFields, relativeLinks, resolveLinkPath, splitLines } from './markdown.mjs'
+import { likelyTypo } from './util.mjs'
 
 export const SETUP_MARKER = 'TODO(resaledger)'
 
@@ -11,6 +12,8 @@ const LOG_HEADING = /^(\d{4}-\d{2}-\d{2}) · (\S.*)$/
 const PLAN_STATUS_LINE = /^Status:(.*)$/
 const PLAN_STATUSES = ['proposal', 'approved', 'in progress', 'implemented']
 const README_SECTIONS = ['Goal', 'Environments', 'Manual checks']
+const DECISION_FIELDS = ['Date', 'Decided by', 'Status']
+const LOG_FIELDS = ['Lane', 'Tasks']
 
 /** Whether a YYYY-MM-DD string names a day that exists in the calendar. */
 function isCalendarDate(value) {
@@ -38,9 +41,21 @@ function titleAndFields(file, text) {
   return { title: title.text, titleLine: title.line, fields, problems }
 }
 
-/** The first field with a name, compared case-insensitively, or undefined. */
+/** The first field with exactly this name, or undefined. */
 function recordField(record, name) {
-  return record.fields.find((field) => field.name.toLowerCase() === name.toLowerCase())
+  return record.fields.find((field) => field.name === name)
+}
+
+/** A problem for each field whose name is a near miss of a known one, such as "Decided By" or "Dat". */
+function recordFieldNameProblems(record, known) {
+  const problems = []
+  for (const field of record.fields) {
+    if (known.includes(field.name)) continue
+    const suggestion = likelyTypo(field.name, known)
+    if (suggestion)
+      problems.push({ file: record.file, line: field.line, message: `the field "${field.name}" is not known; write it as "${suggestion}"` })
+  }
+  return problems
 }
 
 /** Problems with a dated file name: <folder>/<date>-<slug>.md, whose date equals the record's. */
@@ -101,6 +116,7 @@ export function validateDecision(decision, context) {
     }
   }
 
+  problems.push(...recordFieldNameProblems(decision, DECISION_FIELDS))
   problems.push(...datedFileProblems(file, 'decisions', dateValue, '2026-10-14-bullet-fields.md'))
   return problems
 }
@@ -133,6 +149,8 @@ export function validateLogEntry(entry, context) {
   } else if (!isCalendarDate(entry.date)) {
     problems.push({ file, line: entry.titleLine, message: `the date ${entry.date} does not exist in the calendar; write the real day of the entry` })
   }
+
+  problems.push(...recordFieldNameProblems(entry, LOG_FIELDS))
 
   const tasks = recordField(entry, 'Tasks')
   if (tasks) {

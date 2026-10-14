@@ -292,3 +292,16 @@ describe('the workspace README', () => {
     assert.equal(validateReadme(parseReadme(README_FILE, '')).length, 3)
   })
 })
+
+test('decision and log field names are exact, and a near miss names the right spelling', () => {
+  const decision = parseDecision(
+    'ledger/decisions/2026-10-14-exact-fields.md',
+    '# Exact fields\n\n- Date: 2026-10-14\n- Decided By: Niko\n'
+  )
+  const problems = validateDecision(decision, { exists: () => true })
+  assert.ok(problems.some((problem) => /"Decided By" is not known; write it as "Decided by"/.test(problem.message)), JSON.stringify(problems))
+  assert.ok(problems.some((problem) => /Decided by/.test(problem.message)))
+  const entry = parseLogEntry('ledger/log/2026-10-14-a-day.md', '# 2026-10-14 · A day\n\n- tasks: S1\n')
+  const logProblems = validateLogEntry(entry, { exists: () => true, taskIds: new Set(['S1']) })
+  assert.ok(logProblems.some((problem) => /"tasks" is not known; write it as "Tasks"/.test(problem.message)), JSON.stringify(logProblems))
+})
