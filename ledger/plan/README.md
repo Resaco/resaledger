@@ -48,6 +48,8 @@ Status: approved · 2026-10-15 · by Niko Alho
 - `templates/`: the git hooks, the workspace README, the `AGENTS.md` block, the CI workflow, the agent hook configurations and the skill.
 - `test/`: unit tests for pure functions; end-to-end tests that build real repositories and commit through the installed hooks.
 
+The guard's modules and the contracts between them are in [modules.md](modules.md).
+
 ## Waiting for the owner
 
 - The choice of a brand concept ([G1](../work/ledger.md#g1-brand-concepts)).
