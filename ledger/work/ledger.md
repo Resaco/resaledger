@@ -75,18 +75,18 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 ## R: The record format
 
 ### R1 Configuration
-- Status: todo
+- Status: doing
 - Depends on: F1
 - Plan: [R-records.md](../plan/R-records.md#r1-configuration)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `r1-config` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### R2 Markdown primitives
-- Status: todo
+- Status: doing
 - Depends on: F1
 - Plan: [R-records.md](../plan/R-records.md#r2-markdown-primitives)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `r2-markdown` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### R3 Task files
 - Status: todo

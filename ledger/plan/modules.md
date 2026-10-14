@@ -23,9 +23,9 @@ The guard is written as modules in `src/guard/` and bundled into one file ([F1](
 
 | Module | Task | Owns |
 | --- | --- | --- |
-| `util.mjs` | F1 | `git(...args)`, `fail(message)`, POSIX path helpers, shared constants |
+| `util.mjs` | F1, R1 | `git(...args)`, `fail(message)`, POSIX path helpers, shared constants; `repositoryRoot()`; `editDistance(a, b)` and `likelyTypo(name, known)` (R1) |
 | `config.mjs` | R1 | `CONFIG_FILE = '.resaledger.json'`; `parseConfig(text) → { config, problems }` (defaults from the preset filled in); `loadConfig(reader)`; `DEFAULTS`, `PRESETS` |
-| `markdown.mjs` | R2 | `splitLines(text)` (CRLF-safe); `headings(text) → [{ level, text, anchor, line }]`; `findSection(text, anchor) → { heading, lines, line } \| null`; `relativeLinks(text) → [{ target, path, anchor, line }]`; `resolveLinkPath(fromFile, path)`; `parseFields(lines, start) → { fields, end }` where each field is `{ name, value, items, line }`; `likelyTypo(name, known)` |
+| `markdown.mjs` | R2 | `splitLines(text)` (CRLF-safe); `headings(text) → [{ level, text, anchor, line }]`; `findSection(text, anchor) → { heading, lines, line } \| null`; `relativeLinks(text) → [{ target, path, anchor, line }]`; `resolveLinkPath(fromFile, path)`; `parseFields(lines, start) → { fields, end }` where each field is `{ name, value, items, line }`; `isEmptyValue(value)` |
 | `tasks.mjs` | R3 | `TASK_ID`; `parseTask(path, text) → task`; `validateTask(task, context) → problems`; `validateTaskSet(tasks, context) → problems` (unique ids, dependencies, WIP per lane); `taskFileName(id, title)`; `slugify(title)` |
 | `records.mjs` | R4 | `parseDecision`, `validateDecision`, `parseLogEntry`, `validateLogEntry`, `planStatus(text)`, `parseReadme`, `validateReadme` |
 | `workspace.mjs` | R5 | `treeReader(source)` with `source` `{ kind: 'worktree' }`, `{ kind: 'index' }` or `{ kind: 'commit', rev }`, returning `{ list(prefix), read(path), exists(path) }`; `loadWorkspace(reader, config) → workspace`; `checkWorkspace(workspace, config) → problems`; `isCode(path, config)`; `fingerprint(source, config)` |
