@@ -24,7 +24,7 @@ The guard is written as modules in `src/guard/` and bundled into one file ([F1](
 | Module | Task | Owns |
 | --- | --- | --- |
 | `util.mjs` | F1, R1 | `git(...args)`, `fail(message)`, POSIX path helpers, shared constants; `repositoryRoot()`; `editDistance(a, b)` and `likelyTypo(name, known)` (R1) |
-| `config.mjs` | R1 | `CONFIG_FILE = '.resaledger.json'`; `parseConfig(text) → { config, problems }` (defaults from the preset filled in); `loadConfig(reader)`; `DEFAULTS`, `PRESETS` |
+| `config.mjs` | R1 | `CONFIG_FILE = '.resaledger.json'`, `CONFIG_VERSION = 2`; `parseConfig(text) → { config, problems }` (`config` is null when there is any problem; defaults from the preset filled in); `loadConfig(read)` (a `read(path)` function or a reader); `effectiveConfigJson(config)` (a JSON string); `DEFAULTS`, `PRESETS` |
 | `markdown.mjs` | R2 | `splitLines(text)` (CRLF-safe); `headings(text) → [{ level, text, anchor, line }]`; `findSection(text, anchor) → { heading, lines, line } \| null`; `relativeLinks(text) → [{ target, path, anchor, line }]`; `resolveLinkPath(fromFile, path)`; `parseFields(lines, start) → { fields, end }` where each field is `{ name, value, items, line }`; `isEmptyValue(value)` |
 | `tasks.mjs` | R3 | `TASK_ID`; `parseTask(path, text) → task`; `validateTask(task, context) → problems`; `validateTaskSet(tasks, context) → problems` (unique ids, dependencies, WIP per lane); `taskFileName(id, title)`; `slugify(title)` |
 | `records.mjs` | R4 | `parseDecision`, `validateDecision`, `parseLogEntry`, `validateLogEntry`, `planStatus(text)`, `parseReadme`, `validateReadme` |
@@ -58,4 +58,16 @@ The guard is written as modules in `src/guard/` and bundled into one file ([F1](
 }
 ```
 
-`checkWorkspace` adds every validation problem. The context it passes to validators has `exists(path)`, the plan statuses, the full task list and the configuration.
+`checkWorkspace` adds every validation problem. The context it passes to validators is:
+
+```js
+{
+  exists(path),       // true when the repository-relative path exists in the source being checked
+  read(path),         // the text of a file in that source, or null
+  planStatus(path),   // { value, date, by, line } from the plan file's status line, or null
+  taskIds,            // Set of every task id in the workspace
+  config              // the effective configuration
+}
+```
+
+Shape checks and session checks are separate. `validateTask` checks the shape of one task file: what any commit may contain. Whether a `doing` task has a current Handoff is a question for the end of a session, so `handoffProblems` (V3) asks it, not `validateTask`; otherwise a claim could never be committed before its first handoff note.

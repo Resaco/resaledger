@@ -75,11 +75,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 ## R: The record format
 
 ### R1 Configuration
-- Status: doing
+- Status: done
 - Depends on: F1
 - Plan: [R-records.md](../plan/R-records.md#r1-configuration)
-- Evidence: —
-- Notes: A worker builds it on branch `r1-config` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs` on `main` after merging R1 and R2: 64 of 64 on Node 24.18.0, 22.23.3 and 20.20.2; the configuration's 17 tests, one of them end to end through the bundle, are in [config.test.mjs](../../test/config.test.mjs); `node dist/records.mjs config` prints the effective configuration. Not verified: Linux and Windows (CI).
+- Notes: `config` is null when the file has any problem. A missing or unknown version is reported alone, so a newer format's keys make no noise. A deny rule needs a pattern; its reason is optional.
 
 ### R2 Markdown primitives
 - Status: done
@@ -89,11 +89,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: Merged in the commit after 9258eb4 and d4eadd8. Anchors follow github-slugger's numbering of duplicates. `parseFields` skips blank lines before the list, so callers can pass the line after a heading.
 
 ### R3 Task files
-- Status: todo
+- Status: doing
 - Depends on: R1, R2
 - Plan: [R-records.md](../plan/R-records.md#r3-task-files)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `r3-tasks` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### R4 Decisions, log entries, plans and the workspace README
 - Status: doing
