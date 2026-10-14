@@ -5,7 +5,11 @@
   "aiAttribution": "forbid",
   "codePaths": [],
   "gates": {
-    "commit": [],
-    "verify": []
+    "commit": [
+      "node scripts/bundle.mjs --check"
+    ],
+    "verify": [
+      "npm test"
+    ]
   }
 }
