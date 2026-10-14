@@ -18,3 +18,4 @@ Decisions the owner made, and significant technical decisions made inside an app
 | 2026-10-15 | Commits are authored as Niko Alho with the GitHub no-reply address, set in this repository's own git configuration, and carry no co-author line naming an AI. | Niko Alho |
 | 2026-10-15 | Nothing derived from private projects goes into this repository, not even anonymised numbers. The specification's evidence appendix was removed for this reason. | Niko Alho |
 | 2026-10-15 | The plan is reviewed separately from the specification, before the build starts. | Niko Alho |
+| 2026-10-15 | The product is named ResaLedger: the npm package and command `resaledger`, the repository `Resaco/resaledger`, the configuration file `.resaledger.json`. The workspace folder stays `ledger/`. Its visual identity follows the Resa product family, in a dark graffiti style with a refined grain, designed in Affinity. | Niko Alho |

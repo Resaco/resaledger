@@ -1,8 +1,8 @@
-# agent-ledger 1.0 specification
+# ResaLedger 1.0 specification
 
 Status: proposal · 2026-10-15 · written for the owner's review; nothing here is built yet
 
-This is the design of agent-ledger 1.0. Every decision carries its reason. Open questions are marked as open, and the decisions only the owner can make are collected in [section 21](#21-decisions-for-the-owner). The plan and its tasks are written from this document once it is approved.
+This is the design of ResaLedger 1.0, the successor of agent-ledger 0.x. Every decision carries its reason. Open questions are marked as open, and the decisions only the owner can make are collected in [section 21](#21-decisions-for-the-owner). The plan and its tasks are written from this document once it is approved.
 
 Contents: [1 Problem](#1-the-problem) · [2 Positioning](#2-positioning) · [3 Principles](#3-principles) · [4 Model](#4-the-model-on-one-page) · [5 Format](#5-format-reference) · [6 Lanes](#6-lanes) · [7 Presets](#7-branch-presets) · [8 CLI](#8-command-line) · [9 What runs where](#9-what-runs-where) · [10 CI](#10-ci) · [11 Agents](#11-agent-integrations) · [12 Trust](#12-trust-model) · [13 Install](#13-installation-and-distribution) · [14 Migration](#14-migration-from-0x) · [15 Stability](#15-format-stability-and-updates) · [16 Testing](#16-testing) · [17 Not in 1.0](#17-not-in-10) · [18 Launch](#18-launch) · [19 Risks](#19-risks) · [20 Open questions](#20-open-questions) · [21 Owner decisions](#21-decisions-for-the-owner) · [Sources](#appendix-landscape-sources)
 
@@ -29,7 +29,7 @@ agent-ledger 0.3 solved the first two for one developer. The task ledger, status
 
 ## 2. Positioning
 
-**One sentence.** agent-ledger is a task ledger inside your repository that coding agents can't skip, can't fake and can't collide on.
+**One sentence.** ResaLedger is a task ledger inside your repository that coding agents can't skip, can't fake and can't collide on.
 
 - **Can't skip.** Git hooks refuse a code commit that names no task, and the same check runs as a required status in CI, where hooks cannot be bypassed.
 - **Can't fake.** A finished task needs evidence someone else can open. The tool runs the quality gates itself and binds the pass to a hash of the exact code they saw; CI runs them again.
@@ -41,11 +41,11 @@ agent-ledger 0.3 solved the first two for one developer. The task ledger, status
 - *Done-gates for agents* enforce inside one agent session and keep no shared record. Canny, DoneGate and a fast-growing set of small projects stop an agent from finishing without a passing check, through that agent's own hooks. The record stays on one machine, and an agent without hooks is not covered.
 - *spec-gates*, a spec-kit extension, has the same architecture as ours (one policy run by agent hooks, git hooks and CI) but no task per commit and no binding of a result to the code. *spec-kitty* refuses "done" without an evidence record, but the verification is self-reported text that nothing reruns.
 
-agent-ledger is the system of record for agent work, and it enforces itself at the boundary every agent passes through: git and CI. It works the same for an agent with rich hooks, an agent with none, and a person.
+ResaLedger is the system of record for agent work, and it enforces itself at the boundary every agent passes through: git and CI. It works the same for an agent with rich hooks, an agent with none, and a person.
 
 **Comparison.** Facts as of 14 October 2026; sources in the [appendix](#appendix-landscape-sources).
 
-| | agent-ledger 1.0 | beads | Backlog.md | Task Master | spec-kit | spec-kitty |
+| | ResaLedger 1.0 | beads | Backlog.md | Task Master | spec-kit | spec-kitty |
 | --- | --- | --- | --- | --- | --- | --- |
 | Where records live | Markdown files in the repository, reviewed in the pull request | A Dolt database synced through git refs | One Markdown file per task in the repository | One `tasks.json` | Spec, plan and task files per feature | Markdown plus a JSONL event log |
 | Parallel branches | No record conflicts: one file per record, one owner per task | No conflicts, because records are outside the branches | File per task, but ids collide | One file conflicts | Feature numbers collide | Custom merge drivers, configured per clone |
@@ -68,7 +68,7 @@ agent-ledger is the system of record for agent work, and it enforces itself at t
 - spec-kitty has a richer state machine with a separate reviewer on "done", and it groups work by file ownership so that code, not only records, avoids conflicts.
 - Canny watches every tool call inside a session: secrets about to be written, tests about to be deleted.
 
-**How it fits with them.** `AGENTS.md` says how to work in a repository; agent-ledger holds what is being done, who holds it and the proof. spec-kit writes specs and plans; a ledger task can link to a spec section and enforce the work that follows. 1.0 builds no integration, and nothing in the format prevents one.
+**How it fits with them.** `AGENTS.md` says how to work in a repository; ResaLedger holds what is being done, who holds it and the proof. spec-kit writes specs and plans; a ledger task can link to a spec section and enforce the work that follows. 1.0 builds no integration, and nothing in the format prevents one.
 
 ## 3. Principles
 
@@ -97,7 +97,7 @@ agent-ledger is the system of record for agent work, and it enforces itself at t
 ### 5.1 Layout
 
 ```
-.agent-ledger.json                       configuration
+.resaledger.json                         configuration
 ledger/                                  the workspace ("dir"; default "ledger")
   README.md                              the project's slow facts: goal, environments, manual checks
   tasks/S4-store-documents.md            one file per task
@@ -109,7 +109,7 @@ ledger/                                  the workspace ("dir"; default "ledger")
   scripts/records.mjs                    the guard: one file, no dependencies
 .githooks/                               pre-commit, commit-msg, pre-push
 AGENTS.md                                a managed block with the protocol
-.github/workflows/agent-ledger.yml       the CI check (team preset; offered in solo)
+.github/workflows/resaledger.yml         the CI check (team preset; offered in solo)
 .claude/settings.json and others         agent hooks, for the agents that are present
 ```
 
@@ -290,7 +290,7 @@ This resolves the tension between solo and team. A solo developer without CI get
 
 ### 5.8 The workspace README
 
-The project's own text, which `update` never touches. Sections: `## Goal` (what is being built, for whom, what counts as finished), `## Environments` (one line each, or "Local only"), `## Manual checks` (checks that need eyes or judgement: what is compared and what passes; "None" is a valid answer) and, optionally, `## Risks`. `init` leaves `TODO(agent-ledger)` markers, and `handoff` fails while any remain. `work` prints the first sentence of the goal.
+The project's own text, which `update` never touches. Sections: `## Goal` (what is being built, for whom, what counts as finished), `## Environments` (one line each, or "Local only"), `## Manual checks` (checks that need eyes or judgement: what is compared and what passes; "None" is a valid answer) and, optionally, `## Risks`. `init` leaves `TODO(resaledger)` markers, and `handoff` fails while any remain. `work` prints the first sentence of the goal.
 
 ### 5.9 Commit messages
 
@@ -309,7 +309,7 @@ Task: S4
 
 ### 5.10 What counts as code
 
-Every tracked file outside the workspace that is not Markdown, plus the workspace's `scripts/`, the git hooks, `.agent-ledger.json` and the `codePaths`. Everything else in the workspace is a record, and Markdown elsewhere is documentation. A commit that changes only records or Markdown needs no task, and neither changes the fingerprint.
+Every tracked file outside the workspace that is not Markdown, plus the workspace's `scripts/`, the git hooks, `.resaledger.json` and the `codePaths`. Everything else in the workspace is a record, and Markdown elsewhere is documentation. A commit that changes only records or Markdown needs no task, and neither changes the fingerprint.
 
 ## 6. Lanes
 
@@ -369,7 +369,7 @@ When the branch merges, its tasks are `done`, or still `doing` if the lane deliv
 
 ### 6.9 A coordinator, if you want one
 
-A person or agent who plans (writes plans and task files in planning pull requests), watches `work --all --fetch`, reviews pull requests with the CI comment that lists what each one moves, and merges. A coordinator needs no special files or permissions in agent-ledger. A team that wants one role to own merges and deploys sets that up in its host, with branch protection and CODEOWNERS.
+A person or agent who plans (writes plans and task files in planning pull requests), watches `work --all --fetch`, reviews pull requests with the CI comment that lists what each one moves, and merges. A coordinator needs no special files or permissions in ResaLedger. A team that wants one role to own merges and deploys sets that up in its host, with branch protection and CODEOWNERS.
 
 ### 6.10 Why lanes have no status files
 
@@ -395,7 +395,7 @@ A team that promotes an integration branch to production as a whole sets `base` 
 
 ## 8. Command line
 
-The guard in the repository runs as `node ledger/scripts/records.mjs <command>`; `npx agent-ledger <command>` runs the same file.
+The guard in the repository runs as `node ledger/scripts/records.mjs <command>`; `npx resaledger <command>` runs the same file.
 
 | Command | What it does |
 | --- | --- |
@@ -435,15 +435,15 @@ One implementation serves every column. A hook calls the same functions as `ci`.
 
 ## 10. CI
 
-- One workflow, `.github/workflows/agent-ledger.yml`, runs `ci` on pull requests and on pushes to the base branch. `ci` reads the event to find the base and the head. Other CI systems call `ci --base <ref> --head <ref>`.
-- **The rules come from the base.** The workflow takes the guard and the configuration from the base commit and judges the head with them, so a pull request cannot weaken the check that judges it. The first pull request that adds agent-ledger is judged by its own rules, and the comment says so.
+- One workflow, `.github/workflows/resaledger.yml`, runs `ci` on pull requests and on pushes to the base branch. `ci` reads the event to find the base and the head. Other CI systems call `ci --base <ref> --head <ref>`.
+- **The rules come from the base.** The workflow takes the guard and the configuration from the base commit and judges the head with them, so a pull request cannot weaken the check that judges it. The first pull request that adds ResaLedger is judged by its own rules, and the comment says so.
 - **On a pull request**, `ci` checks the records in the head; every commit from the merge base to the head, each against its own tree; task ownership and deleted tasks against the base; ids against the base and the other open branches; evidence on every task that becomes `done`; the gates, run on the head with the base's commands (with `ci.runGates: false`, the head must carry a stamp for its own code instead); and changes to enforcement.
 - **Changes to enforcement** are any diff to the configuration, the guard, the hooks or the workflow, and they are listed. A weakening change fails the check unless the pull request adds a decision file that names it, so reviewers see who decided: a gate removed or changed, a protected branch removed, `wip` raised, `aiAttribution` loosened, a deny rule removed. Updating the guard to a released version is listed and does not fail.
 - **On a push to the base**, `ci` checks the records and the new commits, except merge commits and commits that GitHub made when merging a pull request, which were checked in the pull request. Squash merges therefore work: enforcement checks the pull request and its commits, not the base branch's history after a squash. A team that wants `Task:` lines on the base can set GitHub's squash message to the pull request description; the pull request template has a `Task:` line.
 - **Output.** A job summary always. With write permission, which pull requests from the same repository have, one comment on the pull request, updated in place:
 
   ```
-  agent-ledger · this pull request
+  ResaLedger · this pull request
   S4  Store projects and documents   doing → done
       Evidence: `npm test -- server/storage`: 14 of 14 · storage.md
   S4.1 Fix the flaky upload test     new, todo
@@ -452,7 +452,7 @@ One implementation serves every column. A hook calls the same functions as `ci`.
   Enforcement: unchanged
   ```
 
-- The team guide shows how to make `agent-ledger` a required status check and how to protect the enforcement files with CODEOWNERS.
+- The team guide shows how to make `resaledger` a required status check and how to protect the enforcement files with CODEOWNERS.
 
 ## 11. Agent integrations
 
@@ -470,7 +470,7 @@ Three layers, from what every agent has to what only some have.
 | Codex | `.codex/hooks.json` | `SessionStart` | `PreToolUse` (Bash, apply_patch) | `Stop` |
 | Cursor | `.cursor/hooks.json` | `sessionStart`; in cloud agents the first `beforeShellExecution` | `beforeShellExecution`, `preToolUse` | `stop` with `loop_limit: 1` |
 | Gemini CLI | `.gemini/settings.json` | `SessionStart` | `BeforeTool` (shell, write, replace) | `AfterAgent` |
-| GitHub Copilot, cloud agent and CLI | `.github/hooks/agent-ledger.json` | `sessionStart` | `preToolUse` | `agentStop` |
+| GitHub Copilot, cloud agent and CLI | `.github/hooks/resaledger.json` | `sessionStart` | `preToolUse` | `agentStop` |
 
 - **Session start** turns on the git hooks in the clone and gives the agent the output of `work`.
 - **Before a tool** refuses `--no-verify`, a change to `core.hooksPath`, a forced push, a push to a protected branch, the project's `agent.deny` commands, and file edits on a protected branch. Cursor has no hook before a file edit, so there the shell check catches the redirections it can see.
@@ -499,7 +499,7 @@ Rules taken from how the five agents behave today. Hooks stay fast, because the 
 
 ## 13. Installation and distribution
 
-`npx agent-ledger init` in a repository:
+`npx resaledger init` in a repository:
 
 1. Requires a git repository. It refuses only when a file it must change, such as `AGENTS.md`, has uncommitted changes, so nothing it writes mixes with work in progress.
 2. **Finds the gates.** `package.json` scripts (lint, typecheck, test, build, with the package manager taken from the lockfile), `Makefile` targets, `pyproject.toml` (ruff, mypy, pytest, under `uv run` when there is a `uv.lock`), `Cargo.toml` (fmt, clippy, test) and `go.mod` (vet, test). Fast checks go to `commit` and slow ones to `verify`. It runs each one and keeps only those that pass; a failing check is reported, never added in a weaker form. `--no-run` skips the runs.
@@ -509,13 +509,13 @@ Rules taken from how the five agents behave today. Hooks stay fast, because the 
 
 Distribution:
 
-- The npm package `agent-ledger`, with no dependencies, for Node 20 or newer; Bun works too. Node 20 reached end of life in April 2026; it stays supported because it costs nothing and many environments lag.
+- The npm package `resaledger`, with no dependencies, for Node 20 or newer; Bun works too. Node 20 reached end of life in April 2026; it stays supported because it costs nothing and many environments lag.
 - The plugin marketplace in the repository (section 11).
 - Nothing else in 1.0.
 
 ## 14. Migration from 0.x
 
-`npx agent-ledger migrate` converts a 0.1, 0.2 or 0.3 workspace in place.
+`npx resaledger migrate` converts an agent-ledger 0.1, 0.2 or 0.3 workspace in place.
 
 | 0.x | 1.0 |
 | --- | --- |
@@ -531,7 +531,7 @@ Distribution:
 | `progress/` | Stays where it is, so links keep working. |
 | `plan/` | Unchanged. |
 | The `.gitattributes` union rules | Removed. |
-| `.agent-ledger.json` version 1 | Version 2. Gates, codePaths, aiAttribution, commitStyle and deny rules are kept; the preset is solo. |
+| `.agent-ledger.json` version 1 | `.resaledger.json` version 2. Gates, codePaths, aiAttribution, commitStyle and deny rules are kept; the preset is solo. |
 | Guard, hooks, pointer blocks, Claude Code hook entries | Replaced by 1.0's. |
 | `mode: guard` | Refused, with an explanation: guard-only mode is not in 1.0 ([section 17](#17-not-in-10)). |
 
@@ -590,7 +590,7 @@ Cut from 1.0 does not mean never. The last column says which cuts are worth buil
 ## 18. Launch
 
 1. Tag `1.0.0-rc.1` locally when every acceptance check passes.
-2. The owner renames the private 0.x repository, creates the public one, pushes, publishes to npm with provenance and announces the marketplace. Agents prepare these steps and never run them.
+2. The owner creates the public repository `Resaco/resaledger`, pushes, publishes to npm with provenance and announces the marketplace. Agents prepare these steps and never run them.
 3. The README's first screen states the pain and the fix in plain words, then comes a 30-second quickstart, a terminal demo recorded for real, the comparison table and an FAQ: why not issues, Task Master, beads or a done-gate.
 4. Launch drafts in the owner's voice: Show HN, two subreddits and a thread on X, each built on one concrete failure from real use.
 5. A few good first issues are ready at launch: an agent adapter, a gate detector, a documentation gap.
@@ -606,7 +606,7 @@ Cut from 1.0 does not mean never. The last column says which cuts are worth buil
 | Windows breaks hooks, paths or line endings | The full matrix runs from the first build task. |
 | `migrate` damages a repository it has never seen | It validates in memory, refuses on any loss, never commits, and is reviewed by a second model. |
 | A determined person bypasses everything | Stated plainly in the trust model; host settings are the only answer, and the team guide sets them up. |
-| The name is confused with other "ledger" projects | See [section 21](#21-decisions-for-the-owner). |
+| The name gets lost among other "ledger" projects | The word is common, but `resaledger` is free on npm and unused on GitHub, and the identity follows the Resa product family. |
 
 ## 20. Open questions
 
@@ -620,7 +620,7 @@ These are open, and the build goes ahead without waiting for them:
 
 ## 21. Decisions for the owner
 
-1. **The name.** Recommendation: keep `agent-ledger`. It says what it is, it is free on npm, and the current users and setup already use it. The risk is noise: the GitHub space around "agent ledger" is crowded with finance, cost and audit ledgers for agents; an AI-agent observability product uses the same compound name (and holds `agentledger` on npm); and a Claude Code context project describes itself with "ledgers and handoffs". The strongest alternative is `lanekeeper`: it names the central idea of 1.0 (agents kept to their lane) and is free on npm, but several new zero-star repositories use it already. A public repository with the same name in the same organisation means renaming the private one first.
+1. **The name.** Decided on 15 October 2026: ResaLedger. The npm package and the command are `resaledger`, the repository is `Resaco/resaledger` and the configuration file is `.resaledger.json`; the workspace folder stays `ledger/`. The visual identity follows the Resa product family.
 2. **The licence.** Decided on 15 October 2026: MIT, copyright Resaco Oy.
 3. **The commit identity.** Decided on 15 October 2026: `Niko Alho` with the work account's GitHub no-reply address, set in the repository's own git configuration, and no co-author line naming an AI.
 4. **Guard-only mode is cut** ([section 17](#17-not-in-10)). Repositories that use it stay on 0.x.

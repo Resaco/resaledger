@@ -13,7 +13,7 @@ Read in this order:
 
 ## What is being built
 
-agent-ledger 1.0: an open-source task ledger that lives in a git repository and enforces itself, for one developer with one agent or for many people and agents working in parallel branches. It replaces the 0.x format, in which every record lived in a few shared files that conflict as soon as work runs in parallel. The design is in [plan/spec.md](plan/spec.md). This build is finished when `1.0.0-rc.1` is tagged locally with every acceptance check in the plan passing, and the owner has the commands to publish it.
+ResaLedger 1.0, the successor of agent-ledger 0.x: an open-source task ledger that lives in a git repository and enforces itself, for one developer with one agent or for many people and agents working in parallel branches. It replaces the 0.x format, in which every record lived in a few shared files that conflict as soon as work runs in parallel. The design is in [plan/spec.md](plan/spec.md). This build is finished when `1.0.0-rc.1` is tagged locally with every acceptance check in the plan passing, and the owner has the commands to publish it.
 
 ## Where the code is
 

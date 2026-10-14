@@ -30,4 +30,21 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Depends on: S3
 - Plan: [spec.md](../plan/spec.md#21-decisions-for-the-owner)
 - Evidence: —
-- Notes: Decided on 15 October: the licence, the commit identity, and a separate review of the plan (see DECISIONS.md). Still waiting for the owner: approval of the specification, the name, and the cut of guard-only mode. Phase 2 starts after this.
+- Notes: Decided on 15 October: the licence, the commit identity, and a separate review of the plan (see DECISIONS.md). The name, ResaLedger, was decided the same day. Still waiting for the owner: approval of the specification and the cut of guard-only mode. Phase 2 starts after this.
+
+## G: Brand and graphics
+
+### G1 Brand concepts
+- Status: doing
+- Lane: main
+- Depends on: —
+- Plan: [G-brand.md](../plan/G-brand.md#g1-brand-concepts)
+- Evidence: —
+- Notes: A designer agent is making three concept directions in Affinity. Next: the owner picks one; the working files stay outside this repository.
+
+### G2 Final logo, cover and explainer graphics
+- Status: todo
+- Depends on: G1
+- Plan: [G-brand.md](../plan/G-brand.md#g2-final-logo-cover-and-explainer-graphics)
+- Evidence: —
+- Notes: —

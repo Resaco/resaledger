@@ -8,7 +8,7 @@ S, research and the specification. The specification is written and waits for th
 
 ## Active work
 
-None in progress. [S4](work/ledger.md#s4-the-owners-decisions-on-the-specification) waits for the owner.
+[G1](work/ledger.md#g1-brand-concepts): brand concepts, being made. [S4](work/ledger.md#s4-the-owners-decisions-on-the-specification) waits for the owner.
 
 ## Last verified
 
@@ -21,4 +21,5 @@ The owner reviews [the specification](plan/spec.md) and makes the decisions in [
 ## Waiting for the owner
 
 - Approve [the specification](plan/spec.md), or say what to change.
-- Decide the name and the cut of guard-only mode ([section 21](plan/spec.md#21-decisions-for-the-owner)). The licence, the commit identity and a separate plan review were decided on 15 October.
+- Decide the cut of guard-only mode ([section 21](plan/spec.md#21-decisions-for-the-owner)). The name (ResaLedger), the licence, the commit identity and a separate plan review were decided on 15 October.
+- Pick one of the brand concepts ([G1](work/ledger.md#g1-brand-concepts)) when they are ready.
