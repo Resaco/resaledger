@@ -2,7 +2,7 @@
 
 Status: approved · 2026-10-15 · by Niko Alho
 
-The identity and the graphics the repository shows: the logo, the cover image and the pictures that explain how ResaLedger works.
+The identity and the graphics the repository shows: the logo, the cover image, and the animated explanations of how ResaLedger works.
 
 ### G1 Brand concepts
 
@@ -20,8 +20,27 @@ Acceptance:
 
 Risks: graffiti can tip into noise. Each direction keeps one strong object.
 
-### G2 Final logo, cover and explainer graphics
+### G2 Final logo and cover
 
-Goal: the chosen direction finished and exported into the repository: logo files, the README cover, the social preview and the explainer pictures, in light and dark variants where the README needs them.
+Goal: the chosen direction, finished and exported into the repository: the logo files, the README cover and the social preview, in light and dark variants where the README needs them.
 
 Acceptance: to be written when G1 is decided.
+
+### G3 Animated explanations of how it works
+
+Goal: the README's "how it works" sections as short motion graphics, in the style of modern product sites: work flowing along the lanes, a commit refused at the gate, a stamp landing on the code it verified.
+
+Design:
+- three loops of 6–12 seconds, one per promise: can't skip, can't fake, can't collide;
+- animated SVG with CSS keyframes and no scripts. GitHub shows it inline in a README, it stays sharp at any size, and it is small. A GIF would be heavy and blurry, and a video file in the repository does not play inline;
+- a dark and a light file per loop, chosen with `<picture>`, and a still frame under `prefers-reduced-motion`;
+- made by a dependency-free generator script from the chosen brand direction: its shapes, palette and outlined lettering, with the grain as a still texture so that it never flickers;
+- the README keeps the same explanation as text next to each animation, for readers who cannot see it;
+- a video cut of the same motion for the launch posts is optional ([L2](L-launch.md#l2-release-notes-and-launch-drafts)).
+
+Acceptance:
+- each loop plays in the rendered README on GitHub, checked in Chrome, Firefox and Safari;
+- each file is well-formed SVG under 300 KB, with no script;
+- with reduced motion, a still frame explains the same thing;
+- the hygiene test passes;
+- the owner approves the motion.

@@ -42,10 +42,17 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Evidence: —
 - Notes: A designer agent is making three concept directions in Affinity. Next: the owner picks one; the working files stay outside this repository.
 
-### G2 Final logo, cover and explainer graphics
+### G2 Final logo and cover
 - Status: todo
 - Depends on: G1
-- Plan: [G-brand.md](../plan/G-brand.md#g2-final-logo-cover-and-explainer-graphics)
+- Plan: [G-brand.md](../plan/G-brand.md#g2-final-logo-and-cover)
+- Evidence: —
+- Notes: —
+
+### G3 Animated explanations of how it works
+- Status: todo
+- Depends on: G2
+- Plan: [G-brand.md](../plan/G-brand.md#g3-animated-explanations-of-how-it-works)
 - Evidence: —
 - Notes: —
 
@@ -346,7 +353,7 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 
 ### D4 The README
 - Status: todo
-- Depends on: D2, G2, L1
+- Depends on: D2, G2, G3, L1
 - Plan: [D-docs.md](../plan/D-docs.md#d4-the-readme)
 - Evidence: —
 - Notes: —
