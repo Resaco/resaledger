@@ -17,3 +17,7 @@ The owner decided the licence (MIT, copyright Resaco Oy), the commit identity (t
 ## 2026-10-15 · The plan
 
 The owner cut guard-only mode, put a `changes` command into 1.0, accepted that the predecessor's name shows in the history, and approved the specification. The specification became [a plan](../plan/README.md) of 43 tasks in 12 phases, each with a plan section and acceptance checks, and the ledger lists them with their dependencies. The guard will be developed as modules bundled into one file, so that up to three workers can build it in parallel; workers change code and tests only, and the records stay with the lead until this repository moves to the 1.0 format (M4).
+
+## 2026-10-15 · The foundation
+
+The build started. The owner approved the plan, chose the ruled-lanes direction for the mark and asked for animated explanations of how it works (G3). F1 landed: the package with no dependencies, the bundler that turns the guard's modules into one file, the cross-platform test runner and the git helpers; 18 tests pass on Node 20, 22 and 24. The repository's gates now run the bundle check on every code commit and the tests in `verify`.

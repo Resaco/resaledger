@@ -10,6 +10,13 @@ The guard is written as modules in `src/guard/` and bundled into one file ([F1](
 - **No file access in validators.** A parser takes text. A validator takes parsed records and a context with an `exists(path)` function. The reader (below) does the reading, so the same validator runs on the working tree, the index or any commit.
 - **Paths** inside the guard are POSIX paths relative to the repository root, on every platform.
 - **Names** are unique across all modules, because the bundle is one scope. Prefer specific names (`parseTask`, not `parse`).
+- **The bundler's rules** are in the header of `scripts/bundle.mjs`, and it refuses anything else:
+  - named imports only, from `node:` or from a sibling module;
+  - `export function`, `export async function`, `export const` and `export class` only;
+  - top-level declarations in column 0;
+  - top-level names unique across all modules, including the names imported from `node:`;
+  - `main.mjs` last.
+- **`VERSION`** is defined by the bundler. Use it only inside functions, so that a unit test can import a module on its own.
 - **Output** is plain text. A refusal starts with `✖`, a passing check with `✔`, as in 0.x. No colour codes when stdout is not a terminal.
 
 ## Modules

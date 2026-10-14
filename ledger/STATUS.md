@@ -8,15 +8,15 @@ Building. The specification and the plan are approved; the build starts with the
 
 ## Active work
 
-[F1](work/ledger.md#f1-package-source-layout-bundler-and-test-harness): the package, the bundler and the test harness, with a worker. [G1](work/ledger.md#g1-brand-concepts): three brand concepts, being made in Affinity.
+[R1](work/ledger.md#r1-configuration) and [R2](work/ledger.md#r2-markdown-primitives), with workers. [G1](work/ledger.md#g1-brand-concepts): three brand concepts, being made in Affinity.
 
 ## Last verified
 
-- `node ledger/scripts/records.mjs check` passes on these records (2026-10-15). There is no code and there are no gate commands yet.
+- `verify` passed on the current code (2026-10-15): the bundle check, and `npm test` with 18 of 18 tests. The tests also pass on Node 22 and 20.
 
 ## Next step
 
-Review F1 when the worker reports, then start F2, R1 and R2 in parallel.
+Review R1 and R2 when their workers report; start F2 when a slot frees (the 0.x guard allows three tasks in progress).
 
 ## Waiting for the owner
 
