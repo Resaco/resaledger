@@ -35,19 +35,19 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 ## G: Brand and graphics
 
 ### G1 Brand concepts
-- Status: blocked
+- Status: done
 - Lane: main
 - Depends on: —
 - Plan: [G-brand.md](../plan/G-brand.md#g1-brand-concepts)
-- Evidence: —
-- Notes: Waiting for the owner: three variants of the ruled-lanes mark (C1 parallel, C2 converging, C3 merging) and a six-frame storyboard of the animated explanation are ready for review, with the designer recommending C1. The owner picks the variant, decides whether the spray treatment belongs on the mark or only on covers, and approves the typeface. The working files stay outside this repository.
+- Evidence: The owner chose C1 (parallel ruled lanes) on 15 October from a comparison sheet of three variants and a six-frame storyboard. The designer measured the text contrast with no failure and rendered each mark at 64, 32 and 16 px. The sheet and the working files are private brand files outside this repository, so this evidence cannot be opened from here; the approved exports arrive in G2.
+- Notes: No spray texture anywhere, by the owner's decision; the grain stays.
 
 ### G2 Final logo and cover
-- Status: todo
+- Status: doing
 - Depends on: G1
 - Plan: [G-brand.md](../plan/G-brand.md#g2-final-logo-and-cover)
 - Evidence: —
-- Notes: —
+- Notes: The designer finishes C1 in the private brand files. Next: the owner approves the finished set, then the exports come into `docs/assets/brand/`.
 
 ### G3 Animated explanations of how it works
 - Status: todo
@@ -96,11 +96,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: A worker builds it on branch `r3-tasks` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### R4 Decisions, log entries, plans and the workspace README
-- Status: doing
+- Status: done
 - Depends on: R2
 - Plan: [R-records.md](../plan/R-records.md#r4-decisions-log-entries-plans-and-the-workspace-readme)
-- Evidence: —
-- Notes: A worker builds it on branch `r4-records` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs` on `main` after merging R4: 95 of 95 on Node 24.18.0, 22.23.3 and 20.20.2; the 31 new tests, with CRLF input for every record type, are in [records.test.mjs](../../test/records.test.mjs). Not verified: Linux and Windows (CI).
+- Notes: A README with a marker fails and passes once the text is written. Field names are compared case-insensitively; a repeated field is a problem.
 
 ### R5 `check`, what counts as code, and the fingerprint
 - Status: todo

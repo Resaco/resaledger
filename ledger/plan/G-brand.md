@@ -22,9 +22,29 @@ Risks: graffiti can tip into noise. Each direction keeps one strong object.
 
 ### G2 Final logo and cover
 
-Goal: the chosen direction, finished and exported into the repository: the logo files, the README cover and the social preview, in light and dark variants where the README needs them.
+Goal: the chosen direction (C1, parallel ruled lanes), finished and exported into the repository: the logo files, the README cover and the social preview, in light and dark variants where the README needs them.
 
-Acceptance: to be written when G1 is decided.
+Design:
+- **The mark** is three equal lanes, truly parallel through the 45° turn. The master uses clean vector curves; the bowls of `d` and `g` are redrawn as real curves rather than sampled outlines. The 16, 32 and 64 px versions are fitted to the pixel grid.
+- **The lockups** are horizontal, on dark and on light, each with and without "by Resaco".
+- **The cover** is 1280×640: a dark wall with the mark in bone white, plus a light variant. The same image serves as GitHub's social preview.
+- **Surface treatment:** grain only, as a still texture, and a clean stencil edge. There is no spray, overspray or drip anywhere (the owner's decision).
+- **Palette:**
+  - asphalt `#111110`
+  - wall `#1A1A19`
+  - bone concrete `#D9D8D3`
+  - concrete `#95938D`
+- **Typeface:** Host Grotesk, licensed under the SIL OFL.
+- **Files.** The working files stay private. The repository gets only exports:
+  - SVG for the marks and lockups: paths only, with no embedded fonts, metadata or layer names;
+  - PNG for the covers and the small marks.
+
+Acceptance:
+- the owner approves the finished set;
+- every exported SVG contains only the drawing, as a script check confirms, and every file passes the hygiene test;
+- the small marks are crisp at 16, 32 and 64 px, checked by eye at 100%;
+- text contrast is at least 4.5:1 on both covers;
+- the files land in `docs/assets/brand/` with a short README that says what each file is for.
 
 ### G3 Animated explanations of how it works
 

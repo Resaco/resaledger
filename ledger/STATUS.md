@@ -8,16 +8,16 @@ Building. The specification and the plan are approved; the build starts with the
 
 ## Active work
 
-[R3](work/ledger.md#r3-task-files), [R4](work/ledger.md#r4-decisions-log-entries-plans-and-the-workspace-readme) and [F2](work/ledger.md#f2-ci-for-this-repository-and-the-hygiene-checks), with workers. [G1](work/ledger.md#g1-brand-concepts): the concepts wait for the owner's choice.
+[R3](work/ledger.md#r3-task-files) and [F2](work/ledger.md#f2-ci-for-this-repository-and-the-hygiene-checks), with workers. [G2](work/ledger.md#g2-final-logo-and-cover): the C1 identity being finished by the designer.
 
 ## Last verified
 
-- `verify` passed on the current code (2026-10-15): the bundle check, and `npm test` with 64 of 64 tests. The tests also pass on Node 22 and 20.
+- `verify` passed on the current code (2026-10-15): the bundle check, and `npm test` with 95 of 95 tests. The tests also pass on Node 22 and 20.
 
 ## Next step
 
-Review R3 and R4 when their workers report, then start R5; start F2 when a slot frees (the 0.x guard allows three tasks in progress).
+Review R3 and F2 when their workers report, then start R5; start F2 when a slot frees (the 0.x guard allows three tasks in progress).
 
 ## Waiting for the owner
 
-- Pick one of the brand concepts ([G1](work/ledger.md#g1-brand-concepts)): C1, C2 or C3, the spray treatment, and the typeface.
+- Approve the finished brand set ([G2](work/ledger.md#g2-final-logo-and-cover)) when it is ready.

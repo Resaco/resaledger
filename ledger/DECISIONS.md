@@ -25,3 +25,5 @@ Decisions the owner made, and significant technical decisions made inside an app
 | 2026-10-15 | The specification is approved with these decisions; phase 2 turns it into a plan, which the owner reviews before the build starts. | Niko Alho |
 | 2026-10-15 | The build plan is approved as written. Node 20 and 22 and VHS may be installed on the build machine, so that the tests run across the Node range and the demo can be recorded. | Niko Alho |
 | 2026-10-15 | The mark follows the ruled-lanes direction (C). The README's "how it works" sections are animated motion graphics in the style of modern product sites, built as animated SVG. | Niko Alho |
+| 2026-10-15 | The ResaLedger mark is C1, three parallel ruled lanes, with grain only and no spray texture anywhere. The palette is monochrome (asphalt, wall, bone concrete, concrete). | Niko Alho |
+| 2026-10-15 | The brand typeface is Host Grotesk (SIL OFL), and the cover is made on the dark wall first, with a light variant. These stand until the owner says otherwise. | Lead agent, as defaults |
