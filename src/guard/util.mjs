@@ -11,3 +11,36 @@ export function fail(message) {
   console.error(`resaledger: ${message}`)
   process.exit(1)
 }
+
+/** The top level of the repository the current folder is in, as a POSIX path. */
+export function repositoryRoot() {
+  return git('rev-parse', '--show-toplevel').replace(/\\/g, '/')
+}
+
+/** The Levenshtein distance between two strings: insertions, deletions and substitutions. */
+export function editDistance(a, b) {
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index)
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i]
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost)
+    }
+    previous = current
+  }
+  return previous[b.length]
+}
+
+/** The known name closest to name within distance 2, ignoring case, or null. Ties go to the first. */
+export function likelyTypo(name, known) {
+  let best = null
+  let bestDistance = 3
+  for (const candidate of known) {
+    const distance = editDistance(name.toLowerCase(), candidate.toLowerCase())
+    if (distance < bestDistance) {
+      best = candidate
+      bestDistance = distance
+    }
+  }
+  return best
+}
