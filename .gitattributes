@@ -1,3 +1,4 @@
+* text=auto eol=lf
 # agent-ledger: records that only grow at the end merge without conflicts
 ledger/work/log.md merge=union
 ledger/DECISIONS.md merge=union
