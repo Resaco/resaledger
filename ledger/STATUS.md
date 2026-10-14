@@ -8,7 +8,7 @@ Building. The specification and the plan are approved; the build starts with the
 
 ## Active work
 
-[R1](work/ledger.md#r1-configuration) and [R2](work/ledger.md#r2-markdown-primitives), with workers. [G1](work/ledger.md#g1-brand-concepts): three brand concepts, being made in Affinity.
+[R1](work/ledger.md#r1-configuration) and [R4](work/ledger.md#r4-decisions-log-entries-plans-and-the-workspace-readme), with workers. [G1](work/ledger.md#g1-brand-concepts): three brand concepts, being made in Affinity.
 
 ## Last verified
 
@@ -16,7 +16,7 @@ Building. The specification and the plan are approved; the build starts with the
 
 ## Next step
 
-Review R1 and R2 when their workers report; start F2 when a slot frees (the 0.x guard allows three tasks in progress).
+Review R1 and R4 when their workers report, then start R3; start F2 when a slot frees (the 0.x guard allows three tasks in progress).
 
 ## Waiting for the owner
 

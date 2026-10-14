@@ -82,11 +82,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: A worker builds it on branch `r1-config` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### R2 Markdown primitives
-- Status: doing
+- Status: done
 - Depends on: F1
 - Plan: [R-records.md](../plan/R-records.md#r2-markdown-primitives)
-- Evidence: —
-- Notes: A worker builds it on branch `r2-markdown` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs`: 47 of 47 on Node 24.18.0, 22.23.3 and 20.20.2, run by the lead on the worker's branch and on `main` after the merge; the 29 new tests are in [markdown.test.mjs](../../test/markdown.test.mjs). Not verified: GitHub's anchors for headings that use emphasis or HTML, which are slugged from the rendered text; records do not use them.
+- Notes: Merged in the commit after 9258eb4 and d4eadd8. Anchors follow github-slugger's numbering of duplicates. `parseFields` skips blank lines before the list, so callers can pass the line after a heading.
 
 ### R3 Task files
 - Status: todo
@@ -96,11 +96,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: —
 
 ### R4 Decisions, log entries, plans and the workspace README
-- Status: todo
+- Status: doing
 - Depends on: R2
 - Plan: [R-records.md](../plan/R-records.md#r4-decisions-log-entries-plans-and-the-workspace-readme)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `r4-records` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### R5 `check`, what counts as code, and the fingerprint
 - Status: todo
