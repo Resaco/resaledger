@@ -66,11 +66,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: Merged in 003227c. The bundler's conventions are summarised in [modules.md](../plan/modules.md#conventions). The repository's gates now run the bundle check on every code commit and `npm test` in `verify`.
 
 ### F2 CI for this repository, and the hygiene checks
-- Status: doing
+- Status: done
 - Depends on: F1
 - Plan: [F-foundation.md](../plan/F-foundation.md#f2-ci-for-this-repository-and-the-hygiene-checks)
-- Evidence: —
-- Notes: A worker builds it on branch `f2-ci-hygiene` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: [test.yml](../../.github/workflows/test.yml) parses as YAML (checked with Ruby's parser); the [hygiene tests](../../test/hygiene.test.mjs) plant each kind of leak in temporary repositories and catch it, and pass on this repository; `node scripts/scan-history.mjs` on the real history: clean, after the commit identity's public handle was taken off the private deny-list. Not verified: the workflow on GitHub's runners (it runs once the repository is pushed).
+- Notes: The scan rules live in [hygiene.mjs](../../scripts/hygiene.mjs), shared by the test and the history scan.
 
 ## R: The record format
 
@@ -89,11 +89,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: Merged in the commit after 9258eb4 and d4eadd8. Anchors follow github-slugger's numbering of duplicates. `parseFields` skips blank lines before the list, so callers can pass the line after a heading.
 
 ### R3 Task files
-- Status: doing
+- Status: done
 - Depends on: R1, R2
 - Plan: [R-records.md](../plan/R-records.md#r3-task-files)
-- Evidence: —
-- Notes: A worker builds it on branch `r3-tasks` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs` on `main` after merging R3 and F2 and the lead's follow-up fixes: 162 of 162 on Node 24.18.0 (159 of 159 before the fixes on 22.23.3 and 20.20.2 too); the 53 task tests are in [tasks.test.mjs](../../test/tasks.test.mjs). Not verified: Linux and Windows (CI).
+- Notes: The lead added two things on review: an anchor in any link into a Markdown file must be a heading there, and slugs transliterate letters such as ß and ø. Field names are exact, and a near miss names the right spelling; decisions and log entries now follow the same rule.
 
 ### R4 Decisions, log entries, plans and the workspace README
 - Status: done
@@ -103,11 +103,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: A README with a marker fails and passes once the text is written. Field names are compared case-insensitively; a repeated field is a problem.
 
 ### R5 `check`, what counts as code, and the fingerprint
-- Status: todo
+- Status: doing
 - Depends on: R3, R4
 - Plan: [R-records.md](../plan/R-records.md#r5-check-what-counts-as-code-and-the-fingerprint)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `r5-workspace` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ## V: Gates, stamps, the range check and handoff
 
@@ -149,11 +149,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: —
 
 ### H3 Hook scripts and activation
-- Status: todo
+- Status: doing
 - Depends on: F1
 - Plan: [H-hooks.md](../plan/H-hooks.md#h3-hook-scripts-and-activation)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `h3-hook-scripts` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ## W: The daily commands
 

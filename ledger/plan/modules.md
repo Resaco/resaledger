@@ -16,7 +16,7 @@ The guard is written as modules in `src/guard/` and bundled into one file ([F1](
   - top-level declarations in column 0;
   - top-level names unique across all modules, including the names imported from `node:`;
   - `main.mjs` last.
-- **Field names** are compared case-insensitively in every record type (`Decided By` is `Decided by`), and the message names the canonical spelling.
+- **Field names** are exact in every record type. A near miss, including a difference in case (`Decided By`, `status`), is reported with the canonical spelling.
 - **`VERSION`** is defined by the bundler. Use it only inside functions, so that a unit test can import a module on its own.
 - **Output** is plain text. A refusal starts with `✖`, a passing check with `✔`, as in 0.x. No colour codes when stdout is not a terminal.
 
@@ -27,9 +27,9 @@ The guard is written as modules in `src/guard/` and bundled into one file ([F1](
 | `util.mjs` | F1, R1 | `git(...args)`, `fail(message)`, POSIX path helpers, shared constants; `repositoryRoot()`; `editDistance(a, b)` and `likelyTypo(name, known)` (R1) |
 | `config.mjs` | R1 | `CONFIG_FILE = '.resaledger.json'`, `CONFIG_VERSION = 2`; `parseConfig(text) → { config, problems }` (`config` is null when there is any problem; defaults from the preset filled in); `loadConfig(read)` (a `read(path)` function or a reader); `effectiveConfigJson(config)` (a JSON string); `DEFAULTS`, `PRESETS` |
 | `markdown.mjs` | R2 | `splitLines(text)` (CRLF-safe); `headings(text) → [{ level, text, anchor, line }]`; `findSection(text, anchor) → { heading, lines, line } \| null`; `relativeLinks(text) → [{ target, path, anchor, line }]`; `resolveLinkPath(fromFile, path)`; `parseFields(lines, start) → { fields, end }` where each field is `{ name, value, items, line }`; `isEmptyValue(value)` |
-| `tasks.mjs` | R3 | `TASK_ID`; `parseTask(path, text) → task`; `validateTask(task, context) → problems`; `validateTaskSet(tasks, context) → problems` (unique ids, dependencies, WIP per lane); `taskFileName(id, title)`; `slugify(title)` |
+| `tasks.mjs` | R3 | `TASK_ID`; `parseTask(path, text) → task`; `validateTask(task, context) → problems`; `validateTaskSet(tasks, context) → problems` (unique ids, dependencies, WIP per lane); `taskFileName(dir, id, title)`; `slugify(title)`; `TASK_FIELDS` |
 | `records.mjs` | R4 | `SETUP_MARKER`; `parseDecision`, `validateDecision`, `parseLogEntry`, `validateLogEntry`, `planStatus(text) → { value, date, by, line } \| null`, `validatePlanStatus(path, status)`, `parseReadme(path, text)` (its `sections` is a Map), `validateReadme` |
-| `workspace.mjs` | R5 | `treeReader(source)` with `source` `{ kind: 'worktree' }`, `{ kind: 'index' }` or `{ kind: 'commit', rev }`, returning `{ list(prefix), read(path), exists(path) }`; `loadWorkspace(reader, config) → workspace`; `checkWorkspace(workspace, config) → problems`; `isCode(path, config)`; `fingerprint(source, config)` |
+| `workspace.mjs` | R5 | `treeReader(source)` with `source` `{ kind: 'worktree' }`, `{ kind: 'index' }` or `{ kind: 'commit', rev }`, returning `{ list(prefix), read(path), exists(path) }`; `loadWorkspace(reader, config) → workspace` (parse problems in `workspace.problems`); `checkWorkspace(workspace, reader, config) → problems`; `isCode(path, config)`; `fingerprint(source, config)` |
 | `gates.mjs` | V1 | `runGates(commands) → { passed, failure }`; `stampPath(fingerprint)`; `verifyCommand(options)`; `gatesCommand()` |
 | `range.mjs` | V2 | `taskTrailers(message) → ids`; `checkRange(from, to, context) → problems` |
 | `handoff.mjs` | V3 | `handoffProblems(context) → problems`; `handoffCommand()` |
