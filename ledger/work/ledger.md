@@ -43,12 +43,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: No spray texture anywhere, by the owner's decision; the grain stays.
 
 ### G2 Final logo and cover
-- Status: blocked
-- Waiting for: owner
+- Status: done
 - Depends on: G1
 - Plan: [G-brand.md](../plan/G-brand.md#g2-final-logo-and-cover)
-- Evidence: —
-- Notes: Waiting for the owner: the finished C1 set is ready for approval in the private brand files, with two deliberate deviations to accept: at 16 px the inner corners are square so the three lanes stay crisp, and the light cover's small text uses the wall colour for contrast. After approval, the exports come into `docs/assets/brand/`.
+- Evidence: `node --test test/brand.test.mjs`: 3 of 3 on [the exported files](../../docs/assets/brand/README.md): every SVG holds only paths, every file is described, and the covers and small marks have their sizes. The designer measured the covers' text contrast at 5.78:1 at worst on dark and 11.28:1 on light, and the owner approved the set on 15 October, its two deviations included.
+- Notes: The working files stay in the private brand files. The interim README shows the cover until D4 writes the real one.
 
 ### G3 Animated explanations of how it works
 - Status: todo
