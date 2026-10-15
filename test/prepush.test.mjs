@@ -2,9 +2,9 @@
 // git to a bare repository, so that the pushed refs and object ids are git's own.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, readFileSync } from 'node:fs'
+import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { test } from 'node:test'
+import { describe, test } from 'node:test'
 import { HOOK_NAMES, renderHook } from '../src/cli/hooks.mjs'
 import { ENV, PACKAGE, repository, run, temporary } from './helpers.mjs'
 
@@ -286,4 +286,94 @@ test('a push with no configuration anywhere is refused', () => {
   r.git('add', '-f', '.gitignore')
   must(r.git('commit', '-q', '--no-verify', '-m', 'start'))
   refused(r.push('bare'), /bare: the pushed commit has no \.resaledger\.json, and neither has HEAD, so there are no rules to judge it by/)
+})
+
+// Git LFS: a stand-in git-lfs first on PATH records each pre-push call (its arguments and its
+// input) and exits with a chosen code; "git lfs" runs it from PATH as it would the real one.
+describe('Git LFS', { skip: process.platform === 'win32' && 'the stand-in git-lfs and the git wrapper are sh scripts' }, () => {
+  const ZERO = '0'.repeat(40)
+
+  /** A folder with a stand-in git-lfs that logs to log and exits with code from pre-push. */
+  function standIn(code = 0) {
+    const bin = temporary('resaledger-lfs-')
+    const log = join(bin, 'calls.log')
+    const script = `#!/bin/sh
+if [ "$1" = version ]; then echo "git-lfs/0.0.0 (stand-in)"; exit 0; fi
+{ printf 'args:'; for arg in "$@"; do printf ' %s' "$arg"; done; printf '\\n'; cat; } >> '${log}'
+echo "stand-in git-lfs ran" >&2
+exit ${code}
+`
+    writeFileSync(join(bin, 'git-lfs'), script, { mode: 0o755 })
+    return { bin, log, calls: () => (existsSync(log) ? readFileSync(log, 'utf8').split('args: ').slice(1) : []) }
+  }
+
+  /** git push with the given PATH, through the hooks. */
+  function pushWith(r, path, ...args) {
+    const result = spawnSync('git', ['push', '-q', 'origin', ...args], { cwd: r.root, env: { ...ENV, PATH: path }, encoding: 'utf8' })
+    return { status: result.status, out: `${result.stdout}${result.stderr}` }
+  }
+
+  /** A workspace with a lane whose last commit adds a .gitattributes at file. */
+  function lfsLane(attributes = '*.psd filter=lfs diff=lfs merge=lfs -text\n', file = '.gitattributes') {
+    const r = workspace()
+    lane(r)
+    r.write(file, attributes)
+    must(r.commit('chore: track images', 'Task: S1'))
+    return r
+  }
+
+  test('a push in a repository with filter=lfs runs git lfs pre-push once, with the remote, the URL and the refs', () => {
+    const r = lfsLane()
+    const lfs = standIn()
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane'))
+    const calls = lfs.calls()
+    assert.equal(calls.length, 1, calls.join('---'))
+    const head = r.git('rev-parse', 'lane').out.trim()
+    assert.equal(calls[0], `pre-push origin ${join(r.base, 'remote.git')}\nrefs/heads/lane ${head} refs/heads/lane ${ZERO}\n`)
+  })
+
+  test('a .gitattributes in a folder counts too', () => {
+    const r = lfsLane('*.bin filter=lfs diff=lfs merge=lfs -text\n', 'assets/.gitattributes')
+    const lfs = standIn()
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane'))
+    assert.equal(lfs.calls().length, 1)
+  })
+
+  test('a push the guard refuses runs nothing of Git LFS', () => {
+    const r = lfsLane()
+    const sneak = unrecorded(r)
+    const lfs = standIn()
+    refused(pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane'), new RegExp(`lane: ${sneak}: "feat: sneak" changes code but names no task`))
+    assert.deepEqual(lfs.calls(), [])
+  })
+
+  test('a repository without filter=lfs does not run it', () => {
+    const r = lfsLane('*.sh text eol=lf\n# not filter=lfs\n')
+    const lfs = standIn()
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane'))
+    assert.deepEqual(lfs.calls(), [])
+  })
+
+  test('a failing git lfs pre-push fails the push, and its output reaches the user', () => {
+    const r = lfsLane()
+    const lfs = standIn(2)
+    const result = pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane')
+    assert.notEqual(result.status, 0, result.out)
+    assert.match(result.out, /stand-in git-lfs ran/)
+    assert.equal(lfs.calls().length, 1)
+    assert.equal(r.git('ls-remote', 'origin', 'refs/heads/lane').out.trim(), '')
+  })
+
+  test('without git-lfs on the PATH, a push in a repository with filter=lfs is refused with the advice', () => {
+    const r = lfsLane()
+    // A PATH with git and node only: git through a wrapper, since git-lfs often sits next to it.
+    const bin = temporary('resaledger-nolfs-')
+    const real = spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim()
+    writeFileSync(join(bin, 'git'), `#!/bin/sh\nexec '${real}' "$@"\n`, { mode: 0o755 })
+    writeFileSync(join(bin, 'node'), `#!/bin/sh\nexec '${process.execPath}' "$@"\n`, { mode: 0o755 })
+    const result = pushWith(r, bin, 'lane')
+    refused(result, /this repository uses Git LFS \(a \.gitattributes file names filter=lfs\), but git-lfs was not found on your PATH/)
+    assert.match(result.out, /git lfs pre-push/)
+    assert.equal(r.git('ls-remote', 'origin', 'refs/heads/lane').out.trim(), '')
+  })
 })

@@ -1,5 +1,6 @@
 // The git hooks on the guard side: what each hook checks, whether the hooks are active
 // in this clone, and turning them on.
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { adoptionStart } from './adoption.mjs'
@@ -615,7 +616,8 @@ export function prePush(input, args = []) {
   const tracked = remote ? githooksCommit(`refs/remotes/${remote}/${local?.base ?? DEFAULTS.base}`) : null
   const rules = githooksCommittedConfig(root, tracked)?.config ?? local
   const problems = []
-  for (const [localRef, localOid, remoteRef, remoteOid] of githooksPushLines(input, process.env)) {
+  const lines = githooksPushLines(input, process.env)
+  for (const [localRef, localOid, remoteRef, remoteOid] of lines) {
     if (!remoteRef.startsWith('refs/heads/')) continue
     const branch = remoteRef.slice('refs/heads/'.length)
     const refuse = (message) => problems.push(`${branch}: ${message}`)
@@ -646,8 +648,38 @@ export function prePush(input, args = []) {
       refuse(`${file}${line ? `:${line}` : ''}: ${message}`)
     }
   }
+  if (problems.length === 0 && githooksUsesLfs(root)) githooksLfsPrePush(root, input, lines, [remote, args[1] || process.env.PRE_COMMIT_REMOTE_URL || ''])
   if (problems.length === 0) return
   console.error('✖ This push is refused')
   for (const problem of problems) console.error(`  ${problem}`)
   process.exit(1)
+}
+
+/**
+ * Whether the repository uses Git LFS: a tracked .gitattributes file, at the root or in a
+ * folder, names filter=lfs outside a comment. One git grep over the index's blobs.
+ */
+function githooksUsesLfs(root) {
+  const found = spawnSync('git', ['grep', '--cached', '-q', '-e', '^[^#]*filter=lfs', '--', ':(glob)**/.gitattributes'], { cwd: root, stdio: 'ignore', windowsHide: true })
+  return found.status === 0
+}
+
+/**
+ * Runs Git LFS's pre-push, as the hook Git LFS would have written does, with the same
+ * arguments and refs, and exits with its code; its output reaches the user unchanged. Without
+ * git-lfs the push is refused with Git LFS's advice, adapted: this hook is ResaLedger's.
+ */
+function githooksLfsPrePush(root, input, lines, args) {
+  const version = spawnSync('git', ['lfs', 'version'], { cwd: root, stdio: 'ignore', windowsHide: true })
+  if (version.error || version.status !== 0) {
+    console.error('✖ This push is refused')
+    console.error(
+      "  this repository uses Git LFS (a .gitattributes file names filter=lfs), but git-lfs was not found on your PATH, so the push would send LFS pointers without their objects. Install Git LFS and push again: ResaLedger's pre-push hook runs \"git lfs pre-push\" itself. If the repository no longer uses Git LFS, remove filter=lfs from its .gitattributes files"
+    )
+    process.exit(1)
+  }
+  const refs = String(input).trim() ? String(input) : lines.map((line) => `${line.join(' ')}\n`).join('')
+  const result = spawnSync('git', ['lfs', 'pre-push', ...args], { cwd: root, input: refs, stdio: ['pipe', 'inherit', 'inherit'], windowsHide: true })
+  if (result.error) fail(`git lfs pre-push could not run: ${result.error.message}`)
+  process.exit(result.status ?? 1)
 }

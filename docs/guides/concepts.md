@@ -87,6 +87,8 @@ Four layers enforce the ledger, from the one every agent reads to the one nobody
 3. **Git hooks** run for every person and every agent. They refuse a commit with no task, invalid records, a change to another lane's task, a commit on a protected branch and, before a push, unrecorded commits.
 4. **CI** checks every pull request with the rules of the base branch, so a pull request cannot weaken the check that judges it. It reruns the gates and lists every change to the enforcement files. [CI](ci.md) has the details.
 
+In a repository that uses Git LFS, where a tracked `.gitattributes` file names `filter=lfs`, the pre-push hook takes the place of the one Git LFS would write. Once its own checks pass, it runs `git lfs pre-push` with the same remote, URL and refs, so the LFS objects are uploaded, and the push fails when Git LFS fails. A refused push uploads nothing. When `git-lfs` is not installed, the push is refused with Git LFS's advice. A repository without `filter=lfs` runs nothing of Git LFS.
+
 Each layer has a gap that the next one covers:
 
 | Layer | Stops | Does not stop |
