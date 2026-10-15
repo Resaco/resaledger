@@ -132,13 +132,16 @@ export function parseConfig(text) {
     return { config: null, problems }
   }
 
+  // A key this guard does not know is kept, because a later 1.x release may have added it
+  // (spec 15); one within two letters of a known key is a typo, which would silently drop a rule.
+  const unknown = {}
   const unknownKeys = (object, known, parent) => {
     for (const key of Object.keys(object)) {
       if (known.includes(key)) continue
       const path = [...parent, key]
       const guess = likelyTypo(key, known)
-      const hint = guess ? `; did you mean "${configKeyName([...parent, guess])}"?` : `; known keys here: ${known.join(', ')}`
-      report(path, `unknown key "${configKeyName(path)}"${hint}`)
+      if (guess) report(path, `unknown key "${configKeyName(path)}"; did you mean "${configKeyName([...parent, guess])}"?`)
+      else unknown[configKeyName(path)] = object[key]
     }
   }
   // An unknown version stops here: its other keys may mean something this guard does not know.
@@ -317,9 +320,19 @@ export function parseConfig(text) {
     gates,
     ci,
     phases,
-    agent: { deny }
+    agent: { deny },
+    unknown
   }
   return { config, problems }
+}
+
+/** The notices for the keys a configuration keeps without knowing them, as { file, line, message }. */
+export function unknownKeyNotices(config) {
+  return Object.keys(config.unknown ?? {}).map((key) => ({
+    file: CONFIG_FILE,
+    line: 0,
+    message: `"${key}" is not a key this guard knows; it is kept, since a newer ResaLedger may use it. Run npx resaledger update if the project uses a newer version`
+  }))
 }
 
 /**
@@ -340,7 +353,7 @@ export function loadConfig(read) {
 
 /** The effective configuration as JSON text, without the compiled regular expressions. */
 export function effectiveConfigJson(config) {
-  const { branchRegex, agent, ...rest } = config
+  const { branchRegex, agent, unknown, ...rest } = config
   const plain = { ...rest, agent: { deny: agent.deny.map(({ pattern, reason }) => ({ pattern, reason })) } }
   return JSON.stringify(plain, null, 2)
 }

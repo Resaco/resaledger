@@ -13,20 +13,28 @@ function adoptionGit(root, args) {
   return { ok: result.status === 0, out: result.stdout.trim() }
 }
 
-/** The full id of the newest commit reachable from `to` that added .resaledger.json, or null. */
-export function adoptionCommit(root, to) {
-  const { ok, out } = adoptionGit(root, ['log', '--diff-filter=A', '--format=%H', to, '--', CONFIG_FILE])
+/**
+ * The full id of the oldest commit that added .resaledger.json among `range` (git log
+ * arguments, such as [to] or [`${from}..${to}`]), or null. The oldest, so that a later commit
+ * that deletes the file and adds it again cannot move the start past itself.
+ */
+function adoptionOldest(root, range) {
+  const { ok, out } = adoptionGit(root, ['log', '--reverse', '--diff-filter=A', '--format=%H', ...range, '--', CONFIG_FILE])
   return ok && out !== '' ? out.split('\n')[0] : null
+}
+
+/** The full id of the oldest commit reachable from `to` that added .resaledger.json, or null. */
+export function adoptionCommit(root, to) {
+  return adoptionOldest(root, [to])
 }
 
 /**
  * Where a range check that ends at `to` starts, given the start a caller chose (null for every
- * ancestor): that start, unless it is null or older than the commit that added .resaledger.json,
- * in which case that commit. A range from it checks only the commits made since adoption.
+ * ancestor). A start whose tree has .resaledger.json is kept: the project had adopted
+ * ResaLedger there, so every later commit is judged. Otherwise the start moves to the oldest
+ * commit after it that added the file, and the range checks only the commits made since.
  */
 export function adoptionStart(root, from, to) {
-  const adopted = adoptionCommit(root, to)
-  if (adopted === null) return from
-  if (from === null || adoptionGit(root, ['merge-base', '--is-ancestor', from, adopted]).ok) return adopted
-  return from
+  if (from !== null && adoptionGit(root, ['cat-file', '-e', `${from}:${CONFIG_FILE}`]).ok) return from
+  return adoptionOldest(root, from === null ? [to] : [`${from}..${to}`]) ?? from
 }

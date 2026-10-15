@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { CONFIG_FILE, loadConfig } from './config.mjs'
+import { CONFIG_FILE, loadConfig, unknownKeyNotices } from './config.mjs'
 import { parseDecision, parseLogEntry, parseReadme, planStatus, validateDecision, validateLogEntry, validatePlanStatus, validateReadme } from './records.mjs'
 import { parseTask, validateTask, validateTaskSet } from './tasks.mjs'
 import { fail, repositoryRoot } from './util.mjs'
@@ -176,6 +176,14 @@ export function loadWorkspace(reader, config) {
   const tasks = parsed('tasks', parseTask)
   const decisions = parsed('decisions', parseDecision)
   const logs = parsed('log', parseLogEntry)
+  // A record in a subfolder is never read, so it would be lost without a word.
+  for (const folder of ['tasks', 'decisions', 'log']) {
+    const root = `${dir}/${folder}/`
+    for (const path of reader.list(`${dir}/${folder}`)) {
+      if (!WORKSPACE_MARKDOWN.test(path) || !path.slice(root.length).includes('/')) continue
+      problems.push({ file: path, line: 0, message: `a record belongs directly in ${root}, where it is read; move it to ${root}${path.slice(path.lastIndexOf('/') + 1)}` })
+    }
+  }
   const plans = new Map()
   for (const path of reader.list(`${dir}/plan`)) {
     if (WORKSPACE_MARKDOWN.test(path)) plans.set(path, planStatus(reader.read(path) ?? ''))
@@ -320,6 +328,7 @@ export function checkCommand(args, rangeCheck = null) {
     process.exit(1)
   }
   console.log(`✔ records valid: ${workspace.tasks.length} tasks, ${workspace.decisions.length} decisions, ${workspace.logs.length} log entries`)
+  for (const { file, message } of unknownKeyNotices(config)) console.log(`! ${file}: ${message}`)
   if (range === null) return
   const lane = workspaceCurrentBranch(root)
   let rangeProblems

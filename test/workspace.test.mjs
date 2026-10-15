@@ -117,7 +117,7 @@ describe('loadWorkspace and checkWorkspace', () => {
     }
   })
 
-  test('only Markdown files directly in tasks/, decisions/ and log/ are records; plans at any depth', () => {
+  test('only Markdown files directly in tasks/, decisions/ and log/ are records, and one deeper is reported; plans at any depth', () => {
     const r = repositoryWith({
       ...VALID,
       'ledger/tasks/archive/S9-old.md': '# not a task\n',
@@ -125,7 +125,10 @@ describe('loadWorkspace and checkWorkspace', () => {
       'ledger/plan/sub/deep.md': 'Status: implemented\n\n## A\n\nText.\n'
     })
     const { workspace, problems } = checked(r)
-    assert.deepEqual(problems, [])
+    assert.deepEqual(
+      problems.map(({ file, message }) => `${file}: ${message}`),
+      ['ledger/tasks/archive/S9-old.md: a record belongs directly in ledger/tasks/, where it is read; move it to ledger/tasks/S9-old.md']
+    )
     assert.equal(workspace.tasks.length, 3)
     assert.equal(workspace.plans.get('ledger/plan/sub/deep.md').value, 'implemented')
   })

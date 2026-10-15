@@ -167,7 +167,7 @@ Every other key has a default. Keys marked † take their default from the prese
 | `phases` | `[]` | An optional order of id prefixes, for "Ready next". |
 | `agent.deny` | `[]` | Extra commands that agent hooks refuse, as `{ "pattern": "…", "reason": "…" }`. |
 
-`records.mjs config` prints the effective configuration with every default filled in.
+`records.mjs config` prints the effective configuration with every default filled in. A key within two letters of a known one is refused as a typo; any other unknown key is kept with a notice, since a later 1.x release may add keys ([section 15](#15-format-stability-and-updates)), and `ci` lists a change to it.
 
 ### 5.3 Task files
 

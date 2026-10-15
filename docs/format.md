@@ -41,7 +41,7 @@ AGENTS.md                                a managed block with the protocol
 ```
 
 - Folders are created with their first file. A new workspace holds `README.md` and `scripts/records.mjs`.
-- The guard reads the Markdown files directly in `tasks/`, `decisions/` and `log/`. A file in a subfolder of these is not read.
+- The guard reads the Markdown files directly in `tasks/`, `decisions/` and `log/`. A Markdown file in a subfolder of these is reported as a problem, since it would never be read.
 - Every Markdown file under `plan/`, at any depth, is a plan.
 
 ## 2. Configuration
@@ -102,7 +102,7 @@ Every key except `version` has a default. Keys marked † take their default fro
 
 Further rules:
 
-- An unknown key is refused, at the top level, in `gates`, `ci` and `agent`, and in a deny rule. When it is within two letters of a known key, the message names that key.
+- A key within two letters of a known key, at the top level, in `gates`, `ci` and `agent`, or in a deny rule, is refused as a typo, and the message names the known key. Any other unknown key is kept, with a notice from `check`, because a later 1.x release may have added it; `ci` lists a change to it without judging it.
 - `gates`, `ci` and `agent` must be objects. A key left out takes its default.
 - A preset only sets the defaults of `protected`, `requirePushed` and `claimPush`. A key written in the file wins over the preset.
 

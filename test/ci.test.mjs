@@ -365,6 +365,18 @@ describe('ci on a pull request', () => {
     failed(ci(r, 'push', { before, after: rev(r), ref: 'refs/heads/main' }), /"feat: sneak" changes code but names no task/)
   })
 
+  test('a branch that deletes the configuration and adds it again cannot hide a commit between', () => {
+    const r = setup()
+    const before = rev(r)
+    r.git('checkout', '-q', '-b', 'lane-a')
+    r.git('rm', '-q', '.resaledger.json')
+    commit(r, {}, 'chore: drop the configuration', 'Task: maintenance')
+    commit(r, { 'src/sneak.js': '1\n' }, 'feat: sneak')
+    commit(r, { '.resaledger.json': '{ "version": 2 }\n' }, 'chore: add it back', 'Task: maintenance')
+    failed(ci(r, 'pull_request', pullRequest(r, 'lane-a')), /"feat: sneak" changes code but names no task/)
+    failed(ci(r, 'push', { before, after: rev(r), ref: 'refs/heads/main' }), /"feat: sneak" changes code but names no task/)
+  })
+
   test('the --base, --head and --lane flags check a pull request without an event', () => {
     const r = setup({ tasks: [['S1', 'Bake bread'], ['S2', 'Buy flour']] })
     finishedLane(r)
@@ -457,6 +469,20 @@ describe('ci and changes to enforcement', () => {
     const result = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
     failed(result, /✖ enforcement: 1 weakening change no decision names; 3 changes, 3 weakening/)
     assert.match(result.out, /✖ ci\.runGates turned off/)
+  })
+
+  test('a key the judging guard does not know passes as a listed change, and a misspelt one fails', () => {
+    const r = change({ '.resaledger.json': json({}) }, { '.resaledger.json': json({ reviewers: ['alice'] }) })
+    const result = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
+    passed(result)
+    assert.match(result.out, /\n {2}reviewers: added \["alice"\], a key this guard does not know\n/)
+    const typo = change({ '.resaledger.json': json({}) }, { '.resaledger.json': json({ protcted: [] }) })
+    failed(ci(typo, 'pull_request', pullRequest(typo, 'lane-a')), /unknown key "protcted"; did you mean "protected"\?/)
+  })
+
+  test('a record in a subfolder of tasks/ is reported, not ignored', () => {
+    const r = change({}, { 'ledger/tasks/old/S9-bake.md': taskFile('S9', 'Bake rye') })
+    failed(ci(r, 'pull_request', pullRequest(r, 'lane-a')), /ledger\/tasks\/old\/S9-bake\.md: a record belongs directly in ledger\/tasks\/, where it is read/)
   })
 
   test('a pull request that only tightens passes and lists every change', () => {

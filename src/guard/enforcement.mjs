@@ -87,7 +87,22 @@ function configChanges(before, after) {
   ]
   const denyChanges = enforcementList('agent.deny', deny(before), deny(after))
   if (denyChanges.length === 0 && reasons(before) !== reasons(after)) denyChanges.push(enforcementChange('agent.deny', false, 'agent.deny: a reason changed'))
-  return [...changes, ...denyChanges]
+  return [...changes, ...denyChanges, ...unknownKeyChanges(before.unknown ?? {}, after.unknown ?? {})]
+}
+
+/**
+ * Keys the guard that judges does not know, such as one a later release added: listed, never
+ * judged, because their meaning is unknown here; a reviewer sees them.
+ */
+function unknownKeyChanges(before, after) {
+  const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort()
+  return keys.flatMap((key) => {
+    const was = JSON.stringify(before[key])
+    const now = JSON.stringify(after[key])
+    if (was === now) return []
+    const what = was === undefined ? `${key}: added ${now}, a key this guard does not know` : now === undefined ? `${key}: removed, a key this guard does not know` : `${key}: changed from ${was} to ${now}, a key this guard does not know`
+    return [enforcementChange(key, false, what)]
+  })
 }
 
 /** The newest released version whose text of a managed file is this one, or null. */

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { CONFIG_FILE, DEFAULTS, PRESETS, effectiveConfigJson, loadConfig, parseConfig } from '../src/guard/config.mjs'
+import { CONFIG_FILE, DEFAULTS, PRESETS, effectiveConfigJson, loadConfig, parseConfig, unknownKeyNotices } from '../src/guard/config.mjs'
 import { editDistance, likelyTypo } from '../src/guard/util.mjs'
 import { PACKAGE, repository, run, temporary } from './helpers.mjs'
 
@@ -228,8 +228,18 @@ test('an unknown key at any level suggests the closest known key', () => {
   assert.match(invalid({ version: 2, gates: { comit: [] } }).message, /unknown key "gates\.comit"; did you mean "gates\.commit"\?/)
   assert.match(invalid({ version: 2, ci: { rungate: true } }).message, /did you mean "ci\.runGates"\?/)
   assert.match(invalid({ version: 2, agent: { deny: [{ pattern: 'x', reson: 'y' }] } }).message, /unknown key "agent\.deny\[0\]\.reson"; did you mean "agent\.deny\[0\]\.reason"\?/)
-  const far = invalid({ version: 2, somethingElse: 1 })
-  assert.match(far.message, /unknown key "somethingElse"; known keys here: version, dir/)
+})
+
+test('a key this guard does not know is kept, with a notice, when it is no typo of a known one', () => {
+  const { config, problems } = parseConfig(JSON.stringify({ version: 2, reviewers: ['alice'], gates: { commit: [], nightly: ['npm run e2e'] } }))
+  assert.deepEqual(problems, [])
+  assert.deepEqual(config.unknown, { reviewers: ['alice'], 'gates.nightly': ['npm run e2e'] })
+  assert.deepEqual(
+    unknownKeyNotices(config).map((notice) => notice.message.slice(0, 40)),
+    ['"reviewers" is not a key this guard know', '"gates.nightly" is not a key this guard ']
+  )
+  // The effective configuration shows only what this guard applies.
+  assert.doesNotMatch(effectiveConfigJson(config), /reviewers|nightly|unknown/)
 })
 
 test('every problem is reported, not only the first', () => {
