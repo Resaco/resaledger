@@ -187,7 +187,12 @@ export function validateTask(task, context) {
   // Evidence.
   const evidenceText = task.evidence ? [task.evidence.value, ...task.evidence.items].filter((part) => !isEmptyValue(part)).join('\n') : ''
   if (task.status === 'done' && evidenceText === '') {
-    report(task.evidence ? task.evidence.line : statusLine, 'a done task needs evidence. Add "- Evidence:" with a command in backticks, a link or a URL, such as "`npm test`: 14 of 14"')
+    if (task.evidence) {
+      const placeholder = task.evidence.value.trim()
+      const how = placeholder === '' ? 'write after "- Evidence:"' : `replace "${placeholder}" after "- Evidence:" with`
+      report(task.evidence.line, `a done task needs evidence: ${how} a command in backticks, a link or a URL, such as "\`npm test\`: 14 of 14"`)
+    }
+    else report(statusLine, 'a done task needs evidence. Add "- Evidence:" with a command in backticks, a link or a URL, such as "`npm test`: 14 of 14"')
   } else if (evidenceText !== '' && !taskEvidenceIsConcrete(evidenceText)) {
     report(task.evidence.line, 'evidence needs a command in backticks, a link or a URL, not only words. Write, for example, "`npm test`: 14 of 14" or a link to a file under evidence/')
   }

@@ -332,7 +332,7 @@ export function claimCommand(args) {
   else if (push) how.push('committed')
   console.log(`✔ ${id} claimed ${how.join(', ')}`)
   if (unpushed !== null) console.log(`! ${unpushed}`)
-  else if (!push) console.log(`The claim is visible to the local worktrees now, and to others once the branch is pushed.`)
+  else if (!push) console.log(`The claim is visible to the local worktrees now${remote === null ? '' : ', and to others once the branch is pushed'}.`)
   const cd = mode === 'worktree' ? `cd ${options.worktree}, then ` : ''
   console.log(`Next: ${cd}${guard} task ${id} for the plan, then start work; run ${guard} handoff before you stop.`)
 }

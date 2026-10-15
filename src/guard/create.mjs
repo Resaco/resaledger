@@ -278,7 +278,8 @@ export function newCommand(args) {
   } else id = nextTaskId(options.prefix ?? 'T', known)
 
   const path = taskFileName(config.dir, id, title)
-  const fields = ['- Status: todo']
+  // Evidence is written empty, so that finishing the task shows where its evidence goes.
+  const fields = ['- Status: todo', `- Evidence: ${CREATE_PLACEHOLDER}`]
   if (options.issue !== null) fields.push(`- Issue: #${options.issue}`)
   createWrite(root, path, `# ${id} ${title}\n\n${fields.join('\n')}\n`)
   console.log(`✔ created ${path}`)
