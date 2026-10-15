@@ -5018,278 +5018,6 @@ function detectAgents(root) {
   return found
 }
 
-// --- managed.mjs ---
-// The files ResaLedger manages, as hashes: the guard, the git hooks and the AGENTS.md block.
-// `resaledger update` uses these to tell a released file from one changed by hand, and so does
-// the CI check (spec 10) when it judges a change to the guard or a hook.
-
-/** The parts of a semantic version: { core: [major, minor, patch], pre: [...] }. */
-function managedVersionParts(version) {
-  const plain = String(version).split('+')[0]
-  const dash = plain.indexOf('-')
-  const core = (dash === -1 ? plain : plain.slice(0, dash)).split('.').map((part) => Number(part) || 0)
-  return { core, pre: dash === -1 ? [] : plain.slice(dash + 1).split('.') }
-}
-
-/** Compares two semantic versions: negative when a is older, 0 when equal, positive when newer. */
-function compareVersions(a, b) {
-  const x = managedVersionParts(a)
-  const y = managedVersionParts(b)
-  for (let index = 0; index < 3; index++) {
-    const diff = (x.core[index] ?? 0) - (y.core[index] ?? 0)
-    if (diff !== 0) return diff
-  }
-  if (x.pre.length === 0 || y.pre.length === 0) return y.pre.length - x.pre.length
-  for (let index = 0; index < Math.max(x.pre.length, y.pre.length); index++) {
-    const p = x.pre[index]
-    const q = y.pre[index]
-    if (p === undefined) return -1
-    if (q === undefined) return 1
-    const numeric = /^\d+$/.test(p) && /^\d+$/.test(q)
-    if (numeric && Number(p) !== Number(q)) return Number(p) - Number(q)
-    if (!numeric && p !== q) {
-      if (/^\d+$/.test(p)) return -1
-      if (/^\d+$/.test(q)) return 1
-      return p < q ? -1 : 1
-    }
-  }
-  return 0
-}
-
-/**
- * A managed file's text as it is hashed: LF line ends, no trailing whitespace, and, when dir
- * is given, the workspace folder put back as {{dir}}, so that one hash serves every dir.
- */
-function normalizeManaged(text, dir = null) {
-  const plain = text.replace(/\r\n?/g, '\n').trimEnd()
-  if (!dir) return plain
-  const literal = dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return plain.replace(new RegExp(`(?<![\\w./-])${literal}/`, 'g'), '{{dir}}/')
-}
-
-/** The SHA-256 of a normalized text, in hex. */
-function contentHash(text) {
-  return createHash('sha256').update(text).digest('hex')
-}
-
-/**
- * The released hashes this guard knows, { key: { version: hash } }: the table the bundler
- * embeds as RELEASED (earlier releases, and this version's hooks), plus this guard's own hash,
- * which it cannot embed in itself. Unbundled, the table is empty.
- */
-function releasedTable() {
-  // RELEASED and VERSION exist only in the bundle, where scripts/bundle.mjs defines them.
-  if (typeof RELEASED === 'undefined') return {}
-  const table = Object.fromEntries(Object.entries(RELEASED).map(([key, versions]) => [key, { ...versions }]))
-  try {
-    const own = readFileSync(fileURLToPath(import.meta.url), 'utf8')
-    table.guard = { ...(table.guard ?? {}), [VERSION]: contentHash(normalizeManaged(own)) }
-  } catch {
-    // A guard that cannot read itself knows only the earlier releases.
-  }
-  return table
-}
-
-// --- enforcement.mjs ---
-// Changes to enforcement (spec 10): what a pull request changes in the configuration, the guard,
-// the git hooks and the workflow; which of those changes weaken the rules; and the decisions the
-// pull request adds that let a weakening change through. The table of ids is in spec 10.
-
-const ENFORCEMENT_HOOKS = '.githooks/'
-const ENFORCEMENT_WORKFLOW = '.github/workflows/resaledger.yml'
-// The decision field that names the weakening changes a decision allows (spec 10).
-const ENFORCEMENT_FIELD = 'Weakens'
-
-/** One change: { id, kind: 'listed' | 'weakening', file, what }. */
-function enforcementChange(id, weakening, what, file = CONFIG_FILE) {
-  return { id, kind: weakening ? 'weakening' : 'listed', file, what }
-}
-
-/** A list of values for a message: "a", "b". */
-function enforcementQuoted(values) {
-  return values.map((value) => JSON.stringify(value)).join(', ')
-}
-
-/** A single value that changed, or nothing. */
-function enforcementValue(id, before, after, weakening, what) {
-  return before === after ? [] : [enforcementChange(id, weakening, what)]
-}
-
-/** A switch: turning it off weakens, turning it on tightens. */
-function enforcementSwitch(id, before, after) {
-  return enforcementValue(id, before, after, before && !after, `${id} turned ${after ? 'on' : 'off'}`)
-}
-
-/** A list where a removed item weakens and an added one tightens; a new order is listed. */
-function enforcementList(id, before, after) {
-  const removed = before.filter((item) => !after.includes(item))
-  const added = after.filter((item) => !before.includes(item))
-  if (removed.length === 0 && added.length === 0) {
-    return before.join('\0') === after.join('\0') ? [] : [enforcementChange(id, false, `${id} reordered`)]
-  }
-  const parts = []
-  if (removed.length > 0) parts.push(`removed ${enforcementQuoted(removed)}`)
-  if (added.length > 0) parts.push(`added ${enforcementQuoted(added)}`)
-  return [enforcementChange(id, removed.length > 0, `${id}: ${parts.join('; ')}`)]
-}
-
-/** The changes between two effective configurations, key by key (spec 5.2). */
-function configChanges(before, after) {
-  const pattern = (value) => (value === '' ? 'none' : JSON.stringify(value))
-  const deny = (config) => config.agent.deny.map(({ pattern: rule }) => rule)
-  const reasons = (config) => JSON.stringify(config.agent.deny.map(({ pattern: rule, reason }) => [rule, reason]))
-  const changes = [
-    ...enforcementValue('dir', before.dir, after.dir, true, `dir moved from "${before.dir}" to "${after.dir}"`),
-    ...enforcementValue('preset', before.preset, after.preset, false, `preset changed from "${before.preset}" to "${after.preset}"`),
-    ...enforcementValue('base', before.base, after.base, true, `base changed from "${before.base}" to "${after.base}"`),
-    ...enforcementList('protected', before.protected, after.protected),
-    ...enforcementSwitch('requirePushed', before.requirePushed, after.requirePushed),
-    ...enforcementSwitch('claimPush', before.claimPush, after.claimPush),
-    ...enforcementValue(
-      'branchPattern',
-      before.branchPattern,
-      after.branchPattern,
-      before.branchPattern !== '',
-      `branchPattern changed from ${pattern(before.branchPattern)} to ${pattern(after.branchPattern)}`
-    ),
-    ...enforcementValue('branchPrefix', before.branchPrefix, after.branchPrefix, false, `branchPrefix changed from ${pattern(before.branchPrefix)} to ${pattern(after.branchPrefix)}`),
-    ...enforcementValue('wip', before.wip, after.wip, after.wip > before.wip, `wip ${after.wip > before.wip ? 'raised' : 'lowered'} from ${before.wip} to ${after.wip}`),
-    ...enforcementValue(
-      'commitStyle',
-      before.commitStyle,
-      after.commitStyle,
-      before.commitStyle === 'conventional',
-      `commitStyle changed from "${before.commitStyle}" to "${after.commitStyle}"`
-    ),
-    ...enforcementValue(
-      'aiAttribution',
-      before.aiAttribution,
-      after.aiAttribution,
-      before.aiAttribution === 'forbid',
-      `aiAttribution changed from "${before.aiAttribution}" to "${after.aiAttribution}"`
-    ),
-    ...enforcementList('codePaths', before.codePaths, after.codePaths),
-    ...enforcementList('gates.commit', before.gates.commit, after.gates.commit),
-    ...enforcementList('gates.verify', before.gates.verify, after.gates.verify),
-    ...enforcementSwitch('ci.runGates', before.ci.runGates, after.ci.runGates),
-    ...enforcementValue('phases', before.phases.join(', '), after.phases.join(', '), false, `phases changed from [${before.phases.join(', ')}] to [${after.phases.join(', ')}]`)
-  ]
-  const denyChanges = enforcementList('agent.deny', deny(before), deny(after))
-  if (denyChanges.length === 0 && reasons(before) !== reasons(after)) denyChanges.push(enforcementChange('agent.deny', false, 'agent.deny: a reason changed'))
-  return [...changes, ...denyChanges]
-}
-
-/** The newest released version whose text of a managed file is this one, or null. */
-function releasedVersionOf(text, key, dir, released) {
-  if (text === null) return null
-  const hash = contentHash(normalizeManaged(text, dir))
-  const versions = Object.entries(released[key] ?? {})
-    .filter(([, known]) => known === hash)
-    .map(([version]) => version)
-    .sort(compareVersions)
-  return versions.at(-1) ?? null
-}
-
-/**
- * The change to one managed file: listed when the head's text is a released version of it
- * (key in the released table), else weakening. A removed file always weakens, and so does a
- * move back to an older release, which may bring back what a later one fixed.
- */
-function managedChange(change, released) {
-  const { id, key, path, before, after, dir } = change
-  if (before === after) return []
-  if (after === null) return [enforcementChange(id, true, `${path} removed`, path)]
-  const version = releasedVersionOf(after, key, dir, released)
-  const how = before === null ? 'added' : 'changed'
-  if (version === null) return [enforcementChange(id, true, `${path} ${how}, and the new text is no released version of ResaLedger's`, path)]
-  const previous = releasedVersionOf(before, key, dir, released)
-  if (previous !== null && compareVersions(version, previous) < 0) {
-    return [enforcementChange(id, true, `${path} moved back from ResaLedger ${previous} to ${version}, an older release`, path)]
-  }
-  return [enforcementChange(id, false, `${path} ${how}: ResaLedger ${version}, a released version`, path)]
-}
-
-/** The changes to the guard, the git hooks and the workflow between two trees. */
-function fileChanges(beforeReader, afterReader, beforeDir, afterDir, released) {
-  const files = [
-    {
-      id: 'guard',
-      key: 'guard',
-      path: `${afterDir}/scripts/records.mjs`,
-      before: beforeReader.read(`${beforeDir}/scripts/records.mjs`),
-      after: afterReader.read(`${afterDir}/scripts/records.mjs`),
-      dir: null
-    }
-  ]
-  const hooks = [...new Set([...beforeReader.list(ENFORCEMENT_HOOKS), ...afterReader.list(ENFORCEMENT_HOOKS)])].sort()
-  for (const path of hooks) {
-    const name = path.slice(ENFORCEMENT_HOOKS.length)
-    files.push({ id: `hooks/${name}`, key: `hooks/${name}`, path, before: beforeReader.read(path), after: afterReader.read(path), dir: afterDir })
-  }
-  files.push({ id: 'workflow', key: 'workflow', path: ENFORCEMENT_WORKFLOW, before: beforeReader.read(ENFORCEMENT_WORKFLOW), after: afterReader.read(ENFORCEMENT_WORKFLOW), dir: afterDir })
-  return files.flatMap((file) => managedChange(file, released))
-}
-
-/**
- * The decisions a pull request adds (in the head, not at the merge base), with the ids each
- * names on its "- Weakens:" line: [{ file, by, ids }].
- */
-function addedDecisions(mergeBaseReader, headReader, dir) {
-  const decisions = []
-  for (const file of headReader.list(`${dir}/decisions`)) {
-    if (!/\.md$/i.test(file) || mergeBaseReader.read(file) !== null) continue
-    const decision = parseDecision(file, headReader.read(file) ?? '')
-    const field = (name) => decision.fields.find((item) => item.name === name)
-    const weakens = field(ENFORCEMENT_FIELD)
-    if (!weakens) continue
-    const ids = [weakens.value, ...weakens.items].join(' ').replace(/`/g, '').split(/[\s,]+/).filter((id) => id !== '')
-    decisions.push({ file, by: field('Decided by')?.value || null, ids: new Set(ids) })
-  }
-  return decisions
-}
-
-/**
- * The enforcement check of a pull request: the changes from `from` (the merge base, or the base
- * when the merge base has no configuration) to the head, each weakening one matched with a
- * decision the pull request adds. `adds` is true when the base has no configuration: then there
- * is nothing to compare against. Returns { check, changes } with changes as
- * [{ id, kind, file, what, decidedBy: { file, by } | null }].
- */
-function enforcementCheck(root, { from, mergeBase, head, adds, released = releasedTable() }) {
-  const check = { name: 'enforcement', ok: true, problems: [], counts: { changes: 0, weakening: 0 }, note: null }
-  if (adds) return { check: { ...check, skipped: true, note: 'the base has no configuration, so there is nothing to compare against' }, changes: [] }
-
-  const beforeReader = treeReader({ kind: 'commit', rev: from, root })
-  const headReader = treeReader({ kind: 'commit', rev: head, root })
-  const mergeBaseReader = mergeBase === from ? beforeReader : treeReader({ kind: 'commit', rev: mergeBase, root })
-  const before = loadConfig(beforeReader).config
-  const after = loadConfig(headReader)
-  const found = []
-  if (after.config) found.push(...configChanges(before, after.config))
-  else if (headReader.read(CONFIG_FILE) === null) found.push(enforcementChange('config', true, `${CONFIG_FILE} removed`))
-  else found.push(enforcementChange('config', true, `${CONFIG_FILE} is not a valid configuration in the head`))
-  const dir = after.config?.dir ?? before.dir
-  found.push(...fileChanges(beforeReader, headReader, before.dir, dir, released))
-
-  const decisions = addedDecisions(mergeBaseReader, headReader, dir)
-  const changes = found.map((change) => {
-    const decision = change.kind === 'weakening' ? decisions.find(({ ids }) => ids.has(change.id)) : undefined
-    return { ...change, decidedBy: decision ? { file: decision.file, by: decision.by } : null }
-  })
-  for (const change of changes) {
-    if (change.kind !== 'weakening' || change.decidedBy) continue
-    check.problems.push({
-      id: change.id,
-      file: change.file,
-      line: 0,
-      message: `${change.what}: this weakens enforcement, and no decision this pull request adds names it. Add one in ${dir}/decisions/ with the line "- Weakens: ${change.id}"`
-    })
-  }
-  check.ok = check.problems.length === 0
-  check.counts = { changes: changes.length, weakening: changes.filter(({ kind }) => kind === 'weakening').length }
-  return { check, changes }
-}
-
 // --- work.mjs ---
 // work (spec 6.4 and 8): the state on one screen, for this lane and the other local
 // worktrees, and with --all the pushed branches not merged into the base. It is the first
@@ -5664,6 +5392,464 @@ function workCommand(args) {
   }
   for (const note of notes) console.log(note)
   process.stdout.write(workText(state))
+}
+
+// --- changes.mjs ---
+// changes (spec 8): the tasks that became done since a tag, with their evidence, grouped as
+// Keep a Changelog does, as a draft for the changelog and the release notes. It only reads git
+// and never writes a file.
+
+const CHANGES_TYPE = /^([A-Za-z]+)(?:\([^()]*\))?!?: \S/
+const CHANGES_FILE_ID = /^([A-Z]{1,4}\d+(?:\.\d+)*)(?:-[^/]+)?\.md$/
+const CHANGES_LINK = /\]\((<[^>]*>|[^)\s]+)\)/g
+const CHANGES_SCHEME = /^[a-z][a-z0-9+.-]*:/i
+const CHANGES_HASH_LINE = /^@([0-9a-f]{40}|[0-9a-f]{64})$/
+// Keep a Changelog order; Deprecated, Removed and Security have no Conventional Commit type.
+const CHANGES_GROUPS = ['Added', 'Changed', 'Fixed']
+
+/** Runs git in the repository: { status, stdout } with stdout as trimmed text. */
+function changesGit(root, args) {
+  const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 1024 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] })
+  if (result.error) throw result.error
+  return { status: result.status, stdout: (result.stdout ?? '').trim() }
+}
+
+/** The options: { since, json }; anything else is a refusal. */
+function changesOptions(args) {
+  const options = { since: null, json: false }
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]
+    if (arg === '--json') options.json = true
+    else if (arg === '--since') {
+      if (!args[index + 1]) fail('--since needs a tag, branch or commit, such as --since v1.0.0')
+      options.since = args[index + 1]
+      index += 1
+    } else fail(`unknown option "${arg}" for changes; use changes [--since <ref>] [--json]`)
+  }
+  return options
+}
+
+/** The start of the range: { ref, commit }, from --since or the newest tag; both null with no tag. */
+function changesStart(root, since) {
+  if (since !== null) {
+    const resolved = since.startsWith('-') ? { status: 1 } : changesGit(root, ['rev-parse', '--verify', '--quiet', `${since}^{commit}`])
+    if (resolved.status !== 0) fail(`"${since}" is not a tag, branch or commit in this repository; give one that exists, such as a tag from "git tag"`)
+    return { ref: since, commit: resolved.stdout }
+  }
+  const tag = changesGit(root, ['describe', '--tags', '--abbrev=0', 'HEAD'])
+  if (tag.status !== 0) return { ref: null, commit: null }
+  return { ref: tag.stdout, commit: changesGit(root, ['rev-parse', '--verify', '--quiet', `${tag.stdout}^{commit}`]).stdout }
+}
+
+/** The tasks in a commit, as a Map from id to the parsed task. */
+function changesTasks(root, rev, dir) {
+  const reader = treeReader({ kind: 'commit', rev, root })
+  const tasks = new Map()
+  for (const path of reader.list(`${dir}/tasks`)) {
+    if (!path.endsWith('.md')) continue
+    const task = parseTask(path, reader.read(path) ?? '')
+    if (task.id && !tasks.has(task.id)) tasks.set(task.id, task)
+  }
+  return tasks
+}
+
+/**
+ * The ids among candidates (done at both ends) whose task file was not done in some commit of
+ * the range: reopened and finished again. One git log lists the commits that touch the task
+ * files, and one batch reads only the files of the candidates.
+ */
+function changesReopened(root, dir, from, candidates) {
+  if (candidates.size === 0) return new Set()
+  const log = changesGit(root, ['-c', 'core.quotePath=false', 'log', '--format=@%H', '--name-only', `${from}..HEAD`, '--', `${dir}/tasks/`])
+  if (log.status !== 0) fail('cannot read the history of the task files from git')
+  const specs = []
+  let hash = null
+  for (const line of log.stdout.split('\n')) {
+    const commit = CHANGES_HASH_LINE.exec(line)
+    if (commit) hash = commit[1]
+    else if (hash && line.startsWith(`${dir}/tasks/`)) {
+      const id = CHANGES_FILE_ID.exec(line.slice(dir.length + 7))?.[1]
+      if (candidates.has(id)) specs.push(`${hash}:${line}`)
+    }
+  }
+  const reopened = new Set()
+  for (const [spec, object] of rangeObjects(root, specs)) {
+    const path = spec.slice(spec.indexOf(':') + 1)
+    const task = parseTask(path, object.data.toString('utf8'))
+    if (candidates.has(task.id) && task.status !== 'done') reopened.add(task.id)
+  }
+  return reopened
+}
+
+/**
+ * The Conventional Commit types of the commits in the range that name each task, as a Map from
+ * id to types (null for a free-form subject). The commit claim makes is left out: it says
+ * nothing about the change.
+ */
+function changesTypes(commits, ids) {
+  const types = new Map([...ids].map((id) => [id, []]))
+  for (const commit of commits) {
+    const type = CHANGES_TYPE.exec(commit.subject)?.[1].toLowerCase() ?? null
+    for (const id of taskTrailers(commit.message).ids) {
+      if (!types.has(id) || commit.subject === `chore: claim ${id}`) continue
+      types.get(id).push(type)
+    }
+  }
+  return types
+}
+
+/** The group of a task from its commit types: Added for any feat, Fixed when all are fix, else Changed. */
+function changesGroup(types) {
+  if (types.includes('feat')) return 'Added'
+  if (types.length > 0 && types.every((type) => type === 'fix')) return 'Fixed'
+  return 'Changed'
+}
+
+/** A task's evidence as one line, its relative links rewritten from the task file to the repository root. */
+function changesEvidence(task) {
+  if (!task.evidence) return ''
+  const parts = [task.evidence.value, ...task.evidence.items].map((part) => part.trim()).filter((part) => part !== '')
+  return parts.join('; ').replace(CHANGES_LINK, (whole, raw) => {
+    const target = raw.startsWith('<') ? raw.slice(1, -1) : raw
+    if (target === '' || target.startsWith('#') || target.startsWith('//') || CHANGES_SCHEME.test(target)) return whole
+    const hash = target.indexOf('#')
+    const path = resolveLinkPath(task.file, hash === -1 ? target : target.slice(0, hash))
+    if (path === null) return whole
+    const rewritten = `${path}${hash === -1 ? '' : target.slice(hash)}`
+    return raw.startsWith('<') ? `](<${rewritten}>)` : `](${rewritten})`
+  })
+}
+
+/** The draft as data: { since, from, to, grouped, tasks: [{ id, title, file, group, evidence }], dropped }. */
+function changesData(root, since) {
+  const head = changesGit(root, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'])
+  if (head.status !== 0) fail('this repository has no commits yet')
+  const loaded = loadConfig(treeReader({ kind: 'commit', rev: head.stdout, root }))
+  if (!loaded.config) fail(loaded.problems.map((problem) => problem.message).join('; '))
+  const { dir } = loaded.config
+  const start = changesStart(root, since)
+
+  const now = changesTasks(root, head.stdout, dir)
+  const before = start.commit ? changesTasks(root, start.commit, dir) : new Map()
+  const doneBefore = new Set([...now.keys()].filter((id) => now.get(id).status === 'done' && before.get(id)?.status === 'done'))
+  const reopened = start.commit ? changesReopened(root, dir, start.commit, doneBefore) : new Set()
+  const finished = [...now.values()].filter((task) => task.status === 'done' && (!doneBefore.has(task.id) || reopened.has(task.id)))
+  const dropped = [...now.values()].filter((task) => task.status === 'dropped' && before.get(task.id)?.status !== 'dropped')
+
+  const commits = readCommits(root, start.commit ? [`${start.commit}..${head.stdout}`] : [head.stdout])
+  const types = changesTypes(commits, finished.map((task) => task.id))
+  const grouped = [...types.values()].some((list) => list.some((type) => type !== null))
+  const tasks = finished
+    .sort((a, b) => compareTaskIds(a.id, b.id))
+    .map((task) => ({ id: task.id, title: task.title, file: task.file, group: grouped ? changesGroup(types.get(task.id)) : null, evidence: changesEvidence(task) }))
+  return { since: start.ref, from: start.commit, to: head.stdout, grouped, tasks, dropped: dropped.map((task) => task.id).sort(compareTaskIds) }
+}
+
+/** One Markdown list line: the id and title, then the evidence. */
+function changesLine(task) {
+  return `- ${task.id} ${task.title}${task.evidence ? ` — ${task.evidence}` : ''}`
+}
+
+/** The draft as Markdown, ready to paste into a CHANGELOG. */
+function changesMarkdown(data) {
+  const lines = [data.since ? `## Changes since ${data.since}` : '## Changes since the first commit', '']
+  if (!data.since) lines.push('No tag is reachable from HEAD, so this covers the whole history.', '')
+  if (data.tasks.length === 0) lines.push(`No task became done since ${data.since ?? 'the first commit'}.`, '')
+  else if (!data.grouped) lines.push(...data.tasks.map(changesLine), '')
+  else {
+    for (const group of CHANGES_GROUPS) {
+      const members = data.tasks.filter((task) => task.group === group)
+      if (members.length > 0) lines.push(`### ${group}`, '', ...members.map(changesLine), '')
+    }
+  }
+  if (data.dropped.length > 0) lines.push(`Not listed: ${data.dropped.join(', ')}, dropped in this range.`, '')
+  return `${lines.join('\n').trimEnd()}\n`
+}
+
+/** changes [--since <ref>] [--json]: prints the draft; read-only. */
+function changesCommand(args) {
+  const options = changesOptions(args)
+  let root
+  try {
+    root = repositoryRoot()
+  } catch {
+    fail('not inside a git repository')
+  }
+  const data = changesData(root, options.since)
+  if (options.json) console.log(JSON.stringify(data, null, 2))
+  else process.stdout.write(changesMarkdown(data))
+}
+
+// --- managed.mjs ---
+// The files ResaLedger manages, as hashes: the guard, the git hooks and the AGENTS.md block.
+// `resaledger update` uses these to tell a released file from one changed by hand, and so does
+// the CI check (spec 10) when it judges a change to the guard or a hook.
+
+/** The parts of a semantic version: { core: [major, minor, patch], pre: [...] }. */
+function managedVersionParts(version) {
+  const plain = String(version).split('+')[0]
+  const dash = plain.indexOf('-')
+  const core = (dash === -1 ? plain : plain.slice(0, dash)).split('.').map((part) => Number(part) || 0)
+  return { core, pre: dash === -1 ? [] : plain.slice(dash + 1).split('.') }
+}
+
+/** Compares two semantic versions: negative when a is older, 0 when equal, positive when newer. */
+function compareVersions(a, b) {
+  const x = managedVersionParts(a)
+  const y = managedVersionParts(b)
+  for (let index = 0; index < 3; index++) {
+    const diff = (x.core[index] ?? 0) - (y.core[index] ?? 0)
+    if (diff !== 0) return diff
+  }
+  if (x.pre.length === 0 || y.pre.length === 0) return y.pre.length - x.pre.length
+  for (let index = 0; index < Math.max(x.pre.length, y.pre.length); index++) {
+    const p = x.pre[index]
+    const q = y.pre[index]
+    if (p === undefined) return -1
+    if (q === undefined) return 1
+    const numeric = /^\d+$/.test(p) && /^\d+$/.test(q)
+    if (numeric && Number(p) !== Number(q)) return Number(p) - Number(q)
+    if (!numeric && p !== q) {
+      if (/^\d+$/.test(p)) return -1
+      if (/^\d+$/.test(q)) return 1
+      return p < q ? -1 : 1
+    }
+  }
+  return 0
+}
+
+/**
+ * A managed file's text as it is hashed: LF line ends, no trailing whitespace, and, when dir
+ * is given, the workspace folder put back as {{dir}}, so that one hash serves every dir.
+ */
+function normalizeManaged(text, dir = null) {
+  const plain = text.replace(/\r\n?/g, '\n').trimEnd()
+  if (!dir) return plain
+  const literal = dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return plain.replace(new RegExp(`(?<![\\w./-])${literal}/`, 'g'), '{{dir}}/')
+}
+
+/** The SHA-256 of a normalized text, in hex. */
+function contentHash(text) {
+  return createHash('sha256').update(text).digest('hex')
+}
+
+/**
+ * The released hashes this guard knows, { key: { version: hash } }: the table the bundler
+ * embeds as RELEASED (earlier releases, and this version's hooks), plus this guard's own hash,
+ * which it cannot embed in itself. Unbundled, the table is empty.
+ */
+function releasedTable() {
+  // RELEASED and VERSION exist only in the bundle, where scripts/bundle.mjs defines them.
+  if (typeof RELEASED === 'undefined') return {}
+  const table = Object.fromEntries(Object.entries(RELEASED).map(([key, versions]) => [key, { ...versions }]))
+  try {
+    const own = readFileSync(fileURLToPath(import.meta.url), 'utf8')
+    table.guard = { ...(table.guard ?? {}), [VERSION]: contentHash(normalizeManaged(own)) }
+  } catch {
+    // A guard that cannot read itself knows only the earlier releases.
+  }
+  return table
+}
+
+// --- enforcement.mjs ---
+// Changes to enforcement (spec 10): what a pull request changes in the configuration, the guard,
+// the git hooks and the workflow; which of those changes weaken the rules; and the decisions the
+// pull request adds that let a weakening change through. The table of ids is in spec 10.
+
+const ENFORCEMENT_HOOKS = '.githooks/'
+const ENFORCEMENT_WORKFLOW = '.github/workflows/resaledger.yml'
+// The decision field that names the weakening changes a decision allows (spec 10).
+const ENFORCEMENT_FIELD = 'Weakens'
+
+/** One change: { id, kind: 'listed' | 'weakening', file, what }. */
+function enforcementChange(id, weakening, what, file = CONFIG_FILE) {
+  return { id, kind: weakening ? 'weakening' : 'listed', file, what }
+}
+
+/** A list of values for a message: "a", "b". */
+function enforcementQuoted(values) {
+  return values.map((value) => JSON.stringify(value)).join(', ')
+}
+
+/** A single value that changed, or nothing. */
+function enforcementValue(id, before, after, weakening, what) {
+  return before === after ? [] : [enforcementChange(id, weakening, what)]
+}
+
+/** A switch: turning it off weakens, turning it on tightens. */
+function enforcementSwitch(id, before, after) {
+  return enforcementValue(id, before, after, before && !after, `${id} turned ${after ? 'on' : 'off'}`)
+}
+
+/** A list where a removed item weakens and an added one tightens; a new order is listed. */
+function enforcementList(id, before, after) {
+  const removed = before.filter((item) => !after.includes(item))
+  const added = after.filter((item) => !before.includes(item))
+  if (removed.length === 0 && added.length === 0) {
+    return before.join('\0') === after.join('\0') ? [] : [enforcementChange(id, false, `${id} reordered`)]
+  }
+  const parts = []
+  if (removed.length > 0) parts.push(`removed ${enforcementQuoted(removed)}`)
+  if (added.length > 0) parts.push(`added ${enforcementQuoted(added)}`)
+  return [enforcementChange(id, removed.length > 0, `${id}: ${parts.join('; ')}`)]
+}
+
+/** The changes between two effective configurations, key by key (spec 5.2). */
+function configChanges(before, after) {
+  const pattern = (value) => (value === '' ? 'none' : JSON.stringify(value))
+  const deny = (config) => config.agent.deny.map(({ pattern: rule }) => rule)
+  const reasons = (config) => JSON.stringify(config.agent.deny.map(({ pattern: rule, reason }) => [rule, reason]))
+  const changes = [
+    ...enforcementValue('dir', before.dir, after.dir, true, `dir moved from "${before.dir}" to "${after.dir}"`),
+    ...enforcementValue('preset', before.preset, after.preset, false, `preset changed from "${before.preset}" to "${after.preset}"`),
+    ...enforcementValue('base', before.base, after.base, true, `base changed from "${before.base}" to "${after.base}"`),
+    ...enforcementList('protected', before.protected, after.protected),
+    ...enforcementSwitch('requirePushed', before.requirePushed, after.requirePushed),
+    ...enforcementSwitch('claimPush', before.claimPush, after.claimPush),
+    ...enforcementValue(
+      'branchPattern',
+      before.branchPattern,
+      after.branchPattern,
+      before.branchPattern !== '',
+      `branchPattern changed from ${pattern(before.branchPattern)} to ${pattern(after.branchPattern)}`
+    ),
+    ...enforcementValue('branchPrefix', before.branchPrefix, after.branchPrefix, false, `branchPrefix changed from ${pattern(before.branchPrefix)} to ${pattern(after.branchPrefix)}`),
+    ...enforcementValue('wip', before.wip, after.wip, after.wip > before.wip, `wip ${after.wip > before.wip ? 'raised' : 'lowered'} from ${before.wip} to ${after.wip}`),
+    ...enforcementValue(
+      'commitStyle',
+      before.commitStyle,
+      after.commitStyle,
+      before.commitStyle === 'conventional',
+      `commitStyle changed from "${before.commitStyle}" to "${after.commitStyle}"`
+    ),
+    ...enforcementValue(
+      'aiAttribution',
+      before.aiAttribution,
+      after.aiAttribution,
+      before.aiAttribution === 'forbid',
+      `aiAttribution changed from "${before.aiAttribution}" to "${after.aiAttribution}"`
+    ),
+    ...enforcementList('codePaths', before.codePaths, after.codePaths),
+    ...enforcementList('gates.commit', before.gates.commit, after.gates.commit),
+    ...enforcementList('gates.verify', before.gates.verify, after.gates.verify),
+    ...enforcementSwitch('ci.runGates', before.ci.runGates, after.ci.runGates),
+    ...enforcementValue('phases', before.phases.join(', '), after.phases.join(', '), false, `phases changed from [${before.phases.join(', ')}] to [${after.phases.join(', ')}]`)
+  ]
+  const denyChanges = enforcementList('agent.deny', deny(before), deny(after))
+  if (denyChanges.length === 0 && reasons(before) !== reasons(after)) denyChanges.push(enforcementChange('agent.deny', false, 'agent.deny: a reason changed'))
+  return [...changes, ...denyChanges]
+}
+
+/** The newest released version whose text of a managed file is this one, or null. */
+function releasedVersionOf(text, key, dir, released) {
+  if (text === null) return null
+  const hash = contentHash(normalizeManaged(text, dir))
+  const versions = Object.entries(released[key] ?? {})
+    .filter(([, known]) => known === hash)
+    .map(([version]) => version)
+    .sort(compareVersions)
+  return versions.at(-1) ?? null
+}
+
+/**
+ * The change to one managed file: listed when the head's text is a released version of it
+ * (key in the released table), else weakening. A removed file always weakens, and so does a
+ * move back to an older release, which may bring back what a later one fixed.
+ */
+function managedChange(change, released) {
+  const { id, key, path, before, after, dir } = change
+  if (before === after) return []
+  if (after === null) return [enforcementChange(id, true, `${path} removed`, path)]
+  const version = releasedVersionOf(after, key, dir, released)
+  const how = before === null ? 'added' : 'changed'
+  if (version === null) return [enforcementChange(id, true, `${path} ${how}, and the new text is no released version of ResaLedger's`, path)]
+  const previous = releasedVersionOf(before, key, dir, released)
+  if (previous !== null && compareVersions(version, previous) < 0) {
+    return [enforcementChange(id, true, `${path} moved back from ResaLedger ${previous} to ${version}, an older release`, path)]
+  }
+  return [enforcementChange(id, false, `${path} ${how}: ResaLedger ${version}, a released version`, path)]
+}
+
+/** The changes to the guard, the git hooks and the workflow between two trees. */
+function fileChanges(beforeReader, afterReader, beforeDir, afterDir, released) {
+  const files = [
+    {
+      id: 'guard',
+      key: 'guard',
+      path: `${afterDir}/scripts/records.mjs`,
+      before: beforeReader.read(`${beforeDir}/scripts/records.mjs`),
+      after: afterReader.read(`${afterDir}/scripts/records.mjs`),
+      dir: null
+    }
+  ]
+  const hooks = [...new Set([...beforeReader.list(ENFORCEMENT_HOOKS), ...afterReader.list(ENFORCEMENT_HOOKS)])].sort()
+  for (const path of hooks) {
+    const name = path.slice(ENFORCEMENT_HOOKS.length)
+    files.push({ id: `hooks/${name}`, key: `hooks/${name}`, path, before: beforeReader.read(path), after: afterReader.read(path), dir: afterDir })
+  }
+  files.push({ id: 'workflow', key: 'workflow', path: ENFORCEMENT_WORKFLOW, before: beforeReader.read(ENFORCEMENT_WORKFLOW), after: afterReader.read(ENFORCEMENT_WORKFLOW), dir: afterDir })
+  return files.flatMap((file) => managedChange(file, released))
+}
+
+/**
+ * The decisions a pull request adds (in the head, not at the merge base), with the ids each
+ * names on its "- Weakens:" line: [{ file, by, ids }].
+ */
+function addedDecisions(mergeBaseReader, headReader, dir) {
+  const decisions = []
+  for (const file of headReader.list(`${dir}/decisions`)) {
+    if (!/\.md$/i.test(file) || mergeBaseReader.read(file) !== null) continue
+    const decision = parseDecision(file, headReader.read(file) ?? '')
+    const field = (name) => decision.fields.find((item) => item.name === name)
+    const weakens = field(ENFORCEMENT_FIELD)
+    if (!weakens) continue
+    const ids = [weakens.value, ...weakens.items].join(' ').replace(/`/g, '').split(/[\s,]+/).filter((id) => id !== '')
+    decisions.push({ file, by: field('Decided by')?.value || null, ids: new Set(ids) })
+  }
+  return decisions
+}
+
+/**
+ * The enforcement check of a pull request: the changes from `from` (the merge base, or the base
+ * when the merge base has no configuration) to the head, each weakening one matched with a
+ * decision the pull request adds. `adds` is true when the base has no configuration: then there
+ * is nothing to compare against. Returns { check, changes } with changes as
+ * [{ id, kind, file, what, decidedBy: { file, by } | null }].
+ */
+function enforcementCheck(root, { from, mergeBase, head, adds, released = releasedTable() }) {
+  const check = { name: 'enforcement', ok: true, problems: [], counts: { changes: 0, weakening: 0 }, note: null }
+  if (adds) return { check: { ...check, skipped: true, note: 'the base has no configuration, so there is nothing to compare against' }, changes: [] }
+
+  const beforeReader = treeReader({ kind: 'commit', rev: from, root })
+  const headReader = treeReader({ kind: 'commit', rev: head, root })
+  const mergeBaseReader = mergeBase === from ? beforeReader : treeReader({ kind: 'commit', rev: mergeBase, root })
+  const before = loadConfig(beforeReader).config
+  const after = loadConfig(headReader)
+  const found = []
+  if (after.config) found.push(...configChanges(before, after.config))
+  else if (headReader.read(CONFIG_FILE) === null) found.push(enforcementChange('config', true, `${CONFIG_FILE} removed`))
+  else found.push(enforcementChange('config', true, `${CONFIG_FILE} is not a valid configuration in the head`))
+  const dir = after.config?.dir ?? before.dir
+  found.push(...fileChanges(beforeReader, headReader, before.dir, dir, released))
+
+  const decisions = addedDecisions(mergeBaseReader, headReader, dir)
+  const changes = found.map((change) => {
+    const decision = change.kind === 'weakening' ? decisions.find(({ ids }) => ids.has(change.id)) : undefined
+    return { ...change, decidedBy: decision ? { file: decision.file, by: decision.by } : null }
+  })
+  for (const change of changes) {
+    if (change.kind !== 'weakening' || change.decidedBy) continue
+    check.problems.push({
+      id: change.id,
+      file: change.file,
+      line: 0,
+      message: `${change.what}: this weakens enforcement, and no decision this pull request adds names it. Add one in ${dir}/decisions/ with the line "- Weakens: ${change.id}"`
+    })
+  }
+  check.ok = check.problems.length === 0
+  check.counts = { changes: changes.length, weakening: changes.filter(({ kind }) => kind === 'weakening').length }
+  return { check, changes }
 }
 
 // --- ci.mjs ---
@@ -6784,6 +6970,11 @@ Commands:
             base, or with --branch, it creates the lane branch first;
             --worktree creates it in a new worktree; with claimPush or
             --push it commits the claim alone and pushes the branch
+  changes [--since <ref>] [--json]
+            the tasks that became done since a tag (the newest by default),
+            with their evidence, grouped as Added, Changed and Fixed from
+            the Conventional Commits that name them: a changelog draft in
+            Markdown; read-only
   check     validate the records in the working tree
             (--index: the staged files; --rev <rev>: a commit;
             --range <from>..<to>: also that every commit names its task)
@@ -6920,6 +7111,7 @@ function main(argv) {
   else if (command === 'task') taskCommand(argv[1])
   else if (command === 'new') newCommand(argv.slice(1))
   else if (command === 'claim') claimCommand(argv.slice(1))
+  else if (command === 'changes') changesCommand(argv.slice(1))
   else if (command === 'ci') ciCommand(argv.slice(1))
   else if (command === 'check') checkCommand(argv.slice(1), checkRange)
   else if (command === 'config') configCommand()

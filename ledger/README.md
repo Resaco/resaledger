@@ -18,6 +18,8 @@ ResaLedger 1.0, the successor of agent-ledger 0.x: an open-source task ledger th
 
 `src/guard/` is the guard, bundled into one file by `scripts/bundle.mjs`; `src/cli/` and `bin/` are the package's command line (`init`, `update`, `migrate`); `templates/` holds what `init` writes; `test/` holds the tests, run with `npm test`; `docs/` holds the documentation and the brand assets.
 
+This workspace runs the build's own guard. A development build is never a released version, so after a change to `src/guard/` is merged, renew it with `node bin/resaledger.mjs update --force` and commit it with that change's task.
+
 ## Environments
 
 Local only. Publishing to npm, creating the public repository and pushing to it are the owner's steps.
