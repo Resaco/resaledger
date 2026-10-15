@@ -116,14 +116,37 @@ export function migrateCommand(args) {
     return
   }
 
-  applyMigration(root, plan)
+  try {
+    applyMigration(root, plan)
+  } catch (error) {
+    // The hooks are turned on only after the files, so the undo has no hooks part here.
+    console.error(`\n✖ writing the migration failed: ${error.message}`)
+    console.error(`Some files were already written. Fix the cause, then undo everything and run migrate again:\n  ${UNDO_COMMAND}`)
+    console.error('core.hooksPath was not changed.')
+    process.exit(1)
+  }
   const dir = JSON.parse(plan.writes.get('.resaledger.json')).dir
   const hooks = turnOnHooks(root)
   const undoHooks = hooks.state === 'activated' ? ' && git config --unset core.hooksPath' : ''
   if (hooks.state !== 'active') console.log(`\n${hooksNote(hooks, dir)}`)
   console.log(`\nwritten. Checking with the new guard: node ${dir}/scripts/records.mjs check`)
-  const check = spawnSync(process.execPath, [join(root, dir, 'scripts', 'records.mjs'), 'check'], { cwd: root, stdio: 'inherit' })
-  if (check.status !== 0 && plan.problems.length === 0) {
+  const check = spawnSync(process.execPath, [join(root, dir, 'scripts', 'records.mjs'), 'check'], { cwd: root, encoding: 'utf8' })
+  if (check.error) throw check.error
+  process.stdout.write(check.stdout)
+  process.stderr.write(check.stderr)
+  // The counts check prints must be the plan's: a file git does not see passes in memory but is never committed.
+  const counted = check.stdout.match(/records valid: (\d+) tasks, (\d+) decisions, (\d+) log entries/)
+  const expected = report.expected
+  const countsDiffer =
+    check.status === 0 &&
+    expected !== undefined &&
+    (!counted || Number(counted[1]) !== expected.tasks || Number(counted[2]) !== expected.decisions || Number(counted[3]) !== expected.logEntries)
+  const failed = (check.status !== 0 && plan.problems.length === 0) || countsDiffer
+  if (countsDiffer) {
+    console.error(
+      `✖ check counts other records than the plan (${expected.tasks} tasks, ${expected.decisions} decisions, ${expected.logEntries} log entries), so some files are not where git sees them; this passed in memory, not on disk, and is a bug in resaledger. Undo with the command below.`
+    )
+  } else if (failed) {
     console.error('✖ the migrated workspace does not pass check although it passed in memory; this is a bug in resaledger. Undo with the command below.')
   }
   if (plan.problems.length > 0) console.log(`\nFollow-up work: the ${plan.problems.length} problems listed above. Fix them before you commit, or commit and fix them next.`)
@@ -133,7 +156,7 @@ Review the change, then commit it:
 Then run "node ${dir}/scripts/records.mjs verify" to write the first stamp.
 To undo everything instead:
   ${UNDO_COMMAND}${undoHooks}`)
-  if (check.status !== 0 && plan.problems.length === 0) process.exit(1)
+  if (failed) process.exit(1)
 }
 
 /** Asks solo or team (unless --team answered it) and the goal, on a terminal. */

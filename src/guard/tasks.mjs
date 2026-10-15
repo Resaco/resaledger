@@ -324,8 +324,16 @@ export function slugify(title) {
   return cut.replace(/-+$/, '')
 }
 
-/** The path of a new task file: <dir>/tasks/<id>-<slug>.md, or <dir>/tasks/<id>.md with no slug. */
+// The device names Windows reserves, in any case and with any extension: no file can have them.
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
+
+/**
+ * The path of a new task file: <dir>/tasks/<id>-<slug>.md, or <dir>/tasks/<id>.md with no slug.
+ * A name Windows reserves before its first dot, such as COM1.md, gets "-task" after the id.
+ */
 export function taskFileName(dir, id, title) {
   const slug = slugify(title ?? '')
-  return `${dir}/tasks/${id}${slug ? `-${slug}` : ''}.md`
+  let name = `${id}${slug ? `-${slug}` : ''}`
+  if (WINDOWS_RESERVED.test(name.split('.')[0])) name = `${id}-task${slug ? `-${slug}` : ''}`
+  return `${dir}/tasks/${name}.md`
 }

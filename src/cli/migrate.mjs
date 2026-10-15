@@ -10,6 +10,7 @@ import { slugify, taskFileName } from '../guard/tasks.mjs'
 import { checkWorkspace, loadWorkspace } from '../guard/workspace.mjs'
 import { HOOK_NAMES, renderHook } from './hooks.mjs'
 import {
+  INVALID_UTF8,
   LEGACY_CONFIG_FILE,
   LEGACY_FILES,
   LEGACY_TASK_FIELDS,
@@ -17,7 +18,8 @@ import {
   legacyProjectRules,
   legacyTableCells,
   lostLegacyLines,
-  readLegacyWorkspace
+  readLegacyWorkspace,
+  readSourceText
 } from './legacy.mjs'
 import { agentsBlock, BUILT_GUARD, claudeFile, detectBase, hasAgentsImport, HOOKS_FOLDER, realRelative, removeManagedBlock } from './setup.mjs'
 
@@ -86,9 +88,15 @@ ${POINTER_END}`
 
 // ── Small helpers ─────────────────────────────────────────────────────────────────────
 
-/** Runs git in the repository; returns { status, stdout, stderr }. */
-function runGit(root, args) {
-  const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 1024 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] })
+/** Runs git in the repository, with input on stdin when given; returns { status, stdout, stderr }. */
+function runGit(root, args, input) {
+  const result = spawnSync('git', args, {
+    cwd: root,
+    encoding: 'utf8',
+    input,
+    maxBuffer: 1024 * 1024 * 1024,
+    stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe']
+  })
   if (result.error) throw result.error
   return { status: result.status, stdout: result.stdout, stderr: result.stderr }
 }
@@ -167,11 +175,15 @@ export function lineDiff(before, after) {
   return out.join('\n')
 }
 
-/** A path no file has, tracked, planned or on disk: the candidate, or it with -2, -3 … before .md. */
+/**
+ * A path no file has, tracked, planned or on disk: the candidate, or it with -2, -3 … before .md.
+ * taken holds lower-case paths, so two names that differ only in case cannot overwrite each other
+ * on a file system that ignores case.
+ */
 function uniquePath(root, taken, candidate) {
   let path = candidate
-  for (let count = 2; taken.has(path) || existsSync(join(root, path)); count += 1) path = candidate.replace(/\.md$/, `-${count}.md`)
-  taken.add(path)
+  for (let count = 2; taken.has(path.toLowerCase()) || existsSync(join(root, path)); count += 1) path = candidate.replace(/\.md$/, `-${count}.md`)
+  taken.add(path.toLowerCase())
   return path
 }
 
@@ -454,7 +466,7 @@ export function planMigration(root, options = {}) {
   }
   const legacy = readLegacyWorkspace(root)
   for (const item of legacy.problems) {
-    if (item.file === LEGACY_CONFIG_FILE) refuse(`${item.file}: ${item.message}`)
+    if (item.file === LEGACY_CONFIG_FILE || item.message === INVALID_UTF8) refuse(`${item.file}${item.line ? `:${item.line}` : ''}: ${item.message}`)
     else if (/^(is missing|the workspace folder is missing)$/.test(item.message)) refuse(`${item.file}: ${item.message}; every 0.x workspace has it, so migrate cannot convert this one`)
     else plan.report.warnings.push(`${item.file}${item.line ? `:${item.line}` : ''}: ${item.message}`)
   }
@@ -481,7 +493,14 @@ export function planMigration(root, options = {}) {
   const sources = legacy.sources
   const files = Object.fromEntries(Object.entries(LEGACY_FILES).map(([name, path]) => [name, `${dir}/${path}`]))
   const planned = new Map() // path → [{ text, frame }]
-  const taken = new Set(tracked)
+  const taken = new Set([...tracked].map((path) => path.toLowerCase()))
+  // Every other file read as text that a write may come from, with the line of its first byte that is not UTF-8.
+  const invalidText = new Map()
+  const readSource = (path) => {
+    const { text, invalidLine } = readSourceText(join(root, path))
+    if (invalidLine !== null) invalidText.set(path, invalidLine)
+    return text
+  }
   const put = (path, segments, executable = false) => {
     planned.set(path, segments)
     if (executable) plan.executable.add(path)
@@ -637,7 +656,7 @@ export function planMigration(root, options = {}) {
   const agentsPath = realRelative(root, 'AGENTS.md')
   if (agentsPath === null) refuse('AGENTS.md is a link to a file outside the repository; migrate does not write there')
   else {
-    const existing = existsSync(join(root, agentsPath)) ? readFileSync(join(root, agentsPath), 'utf8') : ''
+    const existing = existsSync(join(root, agentsPath)) ? readSource(agentsPath) : ''
     const { lines, blocks } = removePointers(existing)
     checkPointers('AGENTS.md', blocks)
     const kept = tidyLines(removeManagedBlock(tidyLines(lines).join('\n')).split('\n')).join('\n')
@@ -651,14 +670,15 @@ export function planMigration(root, options = {}) {
   if (claude?.warning) plan.report.warnings.push(claude.warning)
   else if (claude) {
     const claudePath = claude.path
-    const { lines, blocks } = removePointers(readFileSync(join(root, claudePath), 'utf8'))
+    const claudeText = readSource(claudePath)
+    const { lines, blocks } = removePointers(claudeText)
     checkPointers('CLAUDE.md', blocks)
     if (!hasAgentsImport(lines)) {
       const at = blocks.length > 0 ? blocks[0].at : lines.length
       lines.splice(at, 0, '', '@AGENTS.md', '')
     }
     const text = `${tidyLines(lines).join('\n')}\n`
-    if (blocks.length > 0 || text !== readFileSync(join(root, claudePath), 'utf8')) put(claudePath, [{ text, frame: claudePath }])
+    if (blocks.length > 0 || text !== claudeText) put(claudePath, [{ text, frame: claudePath }])
   }
   if (editedPointers.length > 0) {
     plan.report.warnings.push(`the 0.x pointer block in ${[...new Set(editedPointers.map((item) => item.file))].join(' and ')} was changed by hand; it is removed and kept word for word in the migration's log entry`)
@@ -668,7 +688,7 @@ export function planMigration(root, options = {}) {
   // .claude/settings.json: the hook commands name the agent in 1.0.
   const settingsPath = '.claude/settings.json'
   if (existsSync(join(root, settingsPath))) {
-    const text = readFileSync(join(root, settingsPath), 'utf8')
+    const text = readSource(settingsPath)
     let valid = true
     try {
       JSON.parse(text)
@@ -686,7 +706,7 @@ export function planMigration(root, options = {}) {
   for (const name of HOOK_NAMES) put(`${HOOKS_FOLDER}/${name}`, [{ text: renderHook(name, dir), frame: null }], true)
   put(`${dir}/scripts/records.mjs`, [{ text: readFileSync(guardPath, 'utf8'), frame: null }], true)
   if (existsSync(join(root, '.gitattributes'))) {
-    const text = readFileSync(join(root, '.gitattributes'), 'utf8')
+    const text = readSource('.gitattributes')
     const union = new Set([`${dir}/work/log.md merge=union`, `${dir}/DECISIONS.md merge=union`, UNION_COMMENT])
     const lines = sourceLines(text)
     const kept = lines.filter((line) => !union.has(line.trim()))
@@ -727,7 +747,10 @@ ${logLines.join('\n\n')}
 
   // What goes.
   for (const name of ['ledger', 'log', 'decisions', 'status', 'standards', 'agents']) plan.deletes.push(files[name])
-  if (tracked.has(`${dir}/work/verified.json`) || existsSync(join(root, dir, 'work', 'verified.json'))) plan.deletes.push(`${dir}/work/verified.json`)
+  // Only a tracked stamp is removed: the undo command cannot bring back a file git does not have.
+  const verified = `${dir}/work/verified.json`
+  if (tracked.has(verified)) plan.deletes.push(verified)
+  else if (existsSync(join(root, verified))) plan.report.warnings.push(`${verified} is not tracked, so migrate leaves it; 1.0 does not read it, and you can delete it`)
 
   // 3. The content check, before any link changes: every non-empty old line is in a new file.
   if (options.testDropLine !== undefined) dropLine(planned, options.testDropLine)
@@ -781,7 +804,7 @@ ${logLines.join('\n\n')}
       const full = join(root, path)
       if (!existsSync(full) || lstatSync(full).isSymbolicLink() || !statSync(full).isFile()) continue
     }
-    const segments = planned.get(path) ?? [{ text: readFileSync(join(root, path), 'utf8'), frame: path }]
+    const segments = planned.get(path) ?? [{ text: readSource(path), frame: path }]
     let changed = false
     const texts = segments.map((segment) => {
       if (segment.frame === null) return segment.text
@@ -814,14 +837,82 @@ ${logLines.join('\n\n')}
   plan.report.counts = { tasks: legacy.ledger.tasks.length, logEntries: legacy.log.entries.length, decisions: decisions.rows.length }
   plan.report.warnings.push(...unmergedBranchWarnings(root, dir))
 
-  // 6. Validation with the 1.0 rules, in memory.
+  // 6. Every write and deletion must stay inside what git tracks, so that the commit holds it
+  // and the undo command brings back what was there.
+  for (const [path, line] of invalidText)
+    if (plan.writes.has(path) || plan.deletes.includes(path)) refuse(`${path}:${line}: ${INVALID_UTF8}`)
+  plan.refusals.push(...unsafePaths(root, plan, tracked))
+  if (plan.refusals.length > 0) return plan
+
+  // 7. Validation with the 1.0 rules, in memory.
   const { config, problems: configProblems } = parseConfig(configText)
   plan.problems.push(...configProblems)
   if (config) {
     const reader = plannedReader(root, finalFiles, final)
-    plan.problems.push(...checkWorkspace(loadWorkspace(reader, config), reader, config))
+    const workspace = loadWorkspace(reader, config)
+    plan.problems.push(...checkWorkspace(workspace, reader, config))
+    // What check must count on disk afterwards; a difference means a file did not land where git sees it.
+    plan.report.expected = { tasks: workspace.tasks.length, decisions: workspace.decisions.length, logEntries: workspace.logs.length }
   }
   return plan
+}
+
+/**
+ * The refusals for the paths a plan writes, overwrites or deletes that git would not hold:
+ * a path under a folder that is a symbolic link, an existing file that is a link, not a
+ * regular file or not tracked, and a path that an ignore rule matches (.gitignore, the
+ * repository's info/exclude or the user's global excludes file), tracked or not.
+ */
+function unsafePaths(root, plan, tracked) {
+  const refusals = []
+  const refuse = (message) => refusals.push({ message, detail: '' })
+  const removed = new Set([...plan.deletes, ...plan.renames.map(({ from }) => from)])
+  const paths = [...new Set([...plan.writes.keys(), ...removed])].sort()
+  const entry = (path) => lstatSync(join(root, path), { throwIfNoEntry: false })
+  const linkedFolders = new Map() // folder → the first path under it
+  for (const path of paths) {
+    const parts = path.split('/')
+    let linked = null
+    for (let end = 1; end < parts.length && linked === null; end += 1) {
+      const folder = parts.slice(0, end).join('/')
+      if (entry(folder)?.isSymbolicLink()) linked = folder
+    }
+    if (linked !== null) {
+      if (!linkedFolders.has(linked)) linkedFolders.set(linked, path)
+      continue
+    }
+    const stat = entry(path)
+    if (!stat) continue
+    const verb = removed.has(path) ? 'delete' : 'overwrite'
+    if (stat.isSymbolicLink())
+      refuse(`${path} is a symbolic link, so migrate would ${verb} the file it points to, which git does not track at this path; replace the link with the file itself and commit`)
+    else if (!stat.isFile()) refuse(`${path} is not a regular file, so migrate cannot ${verb} it`)
+    else if (!tracked.has(path)) refuse(`${path} is not tracked by git, so the undo command could not bring it back after migrate would ${verb} it; commit it or move it away`)
+  }
+  for (const [folder, path] of linkedFolders)
+    refuse(`${folder} is a symbolic link, so ${path} and the other files migrate writes there would land wherever it points, outside what git tracks; replace the link with the folder itself and commit`)
+
+  // --no-index judges tracked paths too: a tracked file under an ignored folder takes no new files.
+  const result = runGit(root, ['check-ignore', '--verbose', '--no-index', '--stdin', '-z'], `${paths.join('\0')}\0`)
+  if (result.status !== 0 && result.status !== 1) {
+    refuse(`git check-ignore failed: ${result.stderr.trim()}`)
+    return refusals
+  }
+  const fields = result.stdout.split('\0')
+  const rules = new Map() // "<source>:<line>: <pattern>" → paths
+  for (let index = 0; index + 3 < fields.length; index += 4) {
+    const [source, line, pattern, path] = fields.slice(index, index + 4)
+    if (!pattern || pattern.startsWith('!')) continue
+    const rule = `${source}:${line}: ${pattern}`
+    if (!rules.has(rule)) rules.set(rule, [])
+    rules.get(rule).push(path)
+  }
+  for (const [rule, matched] of rules) {
+    const more = matched.length > 1 ? ` and ${matched.length - 1} more` : ''
+    const removes = matched.some((path) => removed.has(path))
+    refuse(`${rule} ignores ${matched[0]}${more}, so the files migrate ${removes ? 'writes or deletes' : 'writes'} there would never be committed; change the rule`)
+  }
+  return refusals
 }
 
 /** The heading anchor GitHub gives a heading's text. */

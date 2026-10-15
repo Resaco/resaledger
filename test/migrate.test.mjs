@@ -2,10 +2,10 @@
 // a whole migration that passes, every refusal, a hand-edited hook, an injected loss,
 // --dry-run, a 1.0 problem, a second run, and this repository's own 0.x workspace.
 import assert from 'node:assert/strict'
-import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, symlinkSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
-import { convertConfig, lineDiff, planMigration } from '../src/cli/migrate.mjs'
+import { convertConfig, lineDiff, planMigration, UNDO_COMMAND } from '../src/cli/migrate.mjs'
 import { PACKAGE, repository, run, temporary } from './helpers.mjs'
 
 const CLI = join(PACKAGE, 'bin', 'resaledger.mjs')
@@ -654,6 +654,96 @@ describe('refusals, each of which changes nothing', () => {
     const result = migrate(r, '--yes')
     assert.equal(result.status, 1)
     assert.match(result.out, /unknown option "--yes" for migrate/)
+  })
+})
+
+describe('data safety at the edges of git', () => {
+  test('a .gitignore rule that matches a folder migrate writes into is refused, naming the rule', () => {
+    const r = legacyRepository({ files: { '.gitignore': '# build output\nnode_modules/\nlog/\n' } })
+    assertRefused(r, [], /\.gitignore:3: log\/ ignores project\/log\/2026-03-04-session-1-2\.md and 2 more, so the files migrate writes there would never be committed; change the rule/)
+  })
+
+  test("a rule in the user's global excludes file is refused too", () => {
+    const r = legacyRepository()
+    const excludes = join(r.base, 'global-excludes')
+    writeFileSync(excludes, '*.swp\ntasks/\n')
+    r.git('config', '--global', 'core.excludesFile', excludes)
+    try {
+      assertRefused(r, [], /global-excludes:2: tasks\/ ignores project\/tasks\/A1-lay-the-base\.md and 3 more, so the files migrate writes there would never be committed/)
+    } finally {
+      r.git('config', '--global', '--unset', 'core.excludesFile')
+    }
+  })
+
+  test('an ignored stamp that git does not track is left where it is, with a warning', () => {
+    const r = legacyRepository({ files: { '.gitignore': 'verified.json\n' } })
+    assert.equal(r.git('ls-files', `${DIR}/work/verified.json`).out, '')
+    const result = migrate(r)
+    assert.equal(result.status, 0, result.out)
+    assert.match(result.out, /! project\/work\/verified\.json is not tracked, so migrate leaves it/)
+    assert.ok(existsSync(join(r.root, DIR, 'work', 'verified.json')))
+  })
+
+  const unprivileged = process.platform !== 'win32' && process.getuid?.() !== 0
+  test('a failure halfway through writing prints the undo command, which restores everything', { skip: !unprivileged && 'needs a read-only folder: not on Windows or as root' }, () => {
+    const r = legacyRepository()
+    // An empty folder is not part of the tree, so the run is not refused; it cannot take files.
+    mkdirSync(join(r.root, DIR, 'tasks'))
+    chmodSync(join(r.root, DIR, 'tasks'), 0o555)
+    const before = snapshot(r.root)
+    const result = migrate(r)
+    assert.equal(result.status, 1, result.out)
+    assert.match(result.out, /✖ writing the migration failed: .*EACCES/)
+    assert.match(result.out, /Some files were already written/)
+    assert.ok(result.out.includes(`\n  ${UNDO_COMMAND}\n`), result.out)
+    assert.notDeepEqual(snapshot(r.root), before)
+    assert.equal(r.git('config', '--get', 'core.hooksPath').out, '')
+    const undo = r.run('sh', ['-c', UNDO_COMMAND])
+    assert.equal(undo.status, 0, undo.out)
+    assert.deepEqual(snapshot(r.root), before)
+    assert.equal(r.git('status', '--porcelain', '--untracked-files=all').out, '')
+  })
+
+  test('a byte that is not UTF-8 in a file whose links are rewritten is refused, naming the line', () => {
+    const r = legacyRepository()
+    const plan = Buffer.concat([Buffer.from('# Groundwork\n\nStatus: approved \x2d it'), Buffer.from([0x92]), Buffer.from('s fine\n'), Buffer.from(PLAN.split('\n').slice(3).join('\n'))])
+    writeFileSync(join(r.root, DIR, 'plan', 'A-groundwork.md'), plan)
+    r.commit('docs: a plan saved in cp1252')
+    assertRefused(r, [], /project\/plan\/A-groundwork\.md:3: this line has a byte that is not UTF-8, which migrate would replace; re-save the file as UTF-8/)
+  })
+
+  test('a byte that is not UTF-8 in a decision is refused, naming the line', () => {
+    const r = legacyRepository()
+    const decisions = DECISIONS.replace('Keep the session log.', 'Keep the session log\u0000.')
+    const at = decisions.indexOf('\u0000')
+    writeFileSync(join(r.root, DIR, 'DECISIONS.md'), Buffer.concat([Buffer.from(decisions.slice(0, at)), Buffer.from([0xe9]), Buffer.from(decisions.slice(at + 1))]))
+    r.commit('docs: a decision saved in cp1252')
+    assertRefused(r, [], /project\/DECISIONS\.md:8: this line has a byte that is not UTF-8/)
+  })
+
+  test('a workspace folder that is a symbolic link is refused', () => {
+    const r = legacyRepository()
+    r.git('mv', DIR, 'real')
+    symlinkSync('real', join(r.root, DIR))
+    assert.equal(r.commit('chore: the workspace behind a link').status, 0)
+    assertRefused(r, [], /project is a symbolic link, so project\/\S+ and the other files migrate writes there would land wherever it points, outside what git tracks/)
+  })
+
+  test('a git hook that is a symbolic link is refused', () => {
+    const r = legacyRepository({ files: { 'hooks/pre-commit': HOOKS['pre-commit'] } })
+    rmSync(join(r.root, '.githooks', 'pre-commit'))
+    symlinkSync('../hooks/pre-commit', join(r.root, '.githooks', 'pre-commit'))
+    assert.equal(r.commit('chore: the hook behind a link').status, 0)
+    assertRefused(r, [], /\.githooks\/pre-commit is a symbolic link, so migrate would overwrite the file it points to/)
+  })
+
+  test('two task ids that differ only in case get two file names that differ in more than case', () => {
+    const task = (id) => `\n### ${id} Same name\n- Status: todo\n- Depends on: —\n- Plan: —\n- Evidence: —\n- Notes: —\n`
+    const r = legacyRepository({ files: { [`${DIR}/work/ledger.md`]: LEDGER + task('A9') + task('a9') } })
+    const plan = planMigration(r.root)
+    assert.deepEqual(plan.refusals, [])
+    const names = [...plan.writes.keys()].filter((path) => /\/tasks\/a9/i.test(path))
+    assert.deepEqual(names.sort(), [`${DIR}/tasks/A9-same-name.md`, `${DIR}/tasks/a9-same-name-2.md`])
   })
 })
 
