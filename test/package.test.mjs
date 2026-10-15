@@ -1,10 +1,10 @@
 // The package itself: its manifest, its license and the shape of the built guard.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { ENV, PACKAGE, run, temporary } from './helpers.mjs'
+import { ENV, PACKAGE, repository, run, temporary } from './helpers.mjs'
 
 const manifest = JSON.parse(readFileSync(join(PACKAGE, 'package.json'), 'utf8'))
 
@@ -45,14 +45,14 @@ test('the package command prints the version', () => {
  * npm_execpath; otherwise as a command, through a shell on Windows, where Node refuses to start
  * npm.cmd without one.
  */
-/** Runs npm in the package: { status, stdout, out }, out holding stderr too. */
-function npm(args) {
+/** Runs npm in the package, or in cwd: { status, stdout, out }, out holding stderr too. */
+function npm(args, cwd = PACKAGE, env = ENV) {
   const [command, list, shell] = process.env.npm_execpath
     ? [process.execPath, [process.env.npm_execpath, ...args], false]
     : process.platform === 'win32'
       ? ['npm', args, true]
       : ['npm', args, false]
-  const result = spawnSync(command, list, { cwd: PACKAGE, env: ENV, encoding: 'utf8', shell })
+  const result = spawnSync(command, list, { cwd, env, encoding: 'utf8', shell })
   if (result.error) throw result.error
   return { status: result.status, stdout: result.stdout, out: `${result.stdout}${result.stderr}` }
 }
@@ -77,4 +77,34 @@ test('npm pack publishes exactly the files in "files", the built guard, package.
   assert.ok(listed.includes('dist/records.mjs'))
   assert.ok(listed.includes('templates/released.json'))
   for (const path of listed) assert.doesNotMatch(path, /^(?:test|ledger|docs|scripts)\//, `${path} must not be published`)
+})
+
+test('npx in a repository whose package.json npm cannot resolve: refused with EOVERRIDE, and run with a neutral --prefix', () => {
+  // Offline, with the packed package and a fresh cache: the project's own dependency is a local
+  // folder, and its override conflicts with it, so npm refuses the project's tree.
+  const folder = temporary()
+  const packed = npm(['pack', '--json', '--ignore-scripts', '--pack-destination', folder])
+  assert.equal(packed.status, 0, packed.out)
+  const tarball = join(folder, JSON.parse(packed.stdout.slice(packed.stdout.indexOf('[')))[0].filename)
+  const env = { ...ENV, npm_config_cache: join(folder, 'cache'), npm_config_offline: 'true', npm_config_yes: 'true', npm_config_update_notifier: 'false' }
+  const r = repository()
+  r.write('deps/local/package.json', '{ "name": "local", "version": "1.0.0" }\n')
+  r.write('package.json', `${JSON.stringify({ name: '@scope/web', version: '1.0.0', dependencies: { local: 'file:./deps/local' }, overrides: { local: '2.0.0' } })}\n`)
+  assert.equal(r.commit('initial').status, 0)
+
+  const plain = npm(['exec', `--package=${tarball}`, '--', 'resaledger', '--version'], r.root, env)
+  assert.notEqual(plain.status, 0)
+  assert.match(plain.out, /EOVERRIDE/)
+
+  // An empty folder as the prefix: npm reads no project, and the command still runs in the current folder.
+  const neutral = join(folder, 'neutral')
+  mkdirSync(neutral)
+  const sub = join(r.root, 'src')
+  mkdirSync(sub)
+  writeFileSync(join(sub, 'app.js'), '')
+  const init = npm(['exec', '--prefix', neutral, `--package=${tarball}`, '--', 'resaledger', 'init', '--yes', '--no-gates'], sub, env)
+  assert.equal(init.status, 0, init.out)
+  assert.ok(existsSync(join(r.root, 'ledger', 'scripts', 'records.mjs')), init.out)
+  assert.equal(r.read('ledger/README.md').split('\n')[0], '# web')
+  assert.deepEqual(readdirSync(neutral), [])
 })

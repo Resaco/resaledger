@@ -151,6 +151,8 @@ Switching is one line in `.resaledger.json`. [Working in a team](docs/guides/tea
 
 **Where do my checks come from?** `init` reads `package.json`, `Makefile`, `pyproject.toml`, `Cargo.toml` and `go.mod`, runs each check once and keeps only those that pass. Fast checks run before each code commit; slow ones run in `verify` and in CI. Scripts named `test:…` or `lint:…` are listed with the command that runs them and never run, since a name does not say whether a script ends or changes files; add the ones you want to `gates` by hand.
 
+**`npx resaledger` fails with `EOVERRIDE` or another error about the project's dependencies.** `npx` reads the project's `package.json` before it runs anything, so a dependency tree npm cannot resolve stops it. Give it an empty folder as its prefix: `npx --prefix "$(mktemp -d)" resaledger init`. npm then reads no project, and the command still runs in the current folder. Any empty folder works, also on Windows. Once `init` has run, the guard runs with `node ledger/scripts/records.mjs` and needs no npm.
+
 **I use agent-ledger 0.x.** `npx resaledger migrate --dry-run` shows the plan. `migrate` converts the workspace in place, refuses before writing anything if a single line of the old records would be lost, and prints the commit command and the undo command. [Moving from 0.x](docs/guides/migration.md) has the details.
 
 ## Documentation
