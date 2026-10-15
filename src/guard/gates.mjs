@@ -6,7 +6,7 @@ import { closeSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync,
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadConfig } from './config.mjs'
-import { fail, repositoryRoot } from './util.mjs'
+import { fail, plural, repositoryRoot } from './util.mjs'
 import { fingerprint, isCode, treeReader } from './workspace.mjs'
 
 const GATES_OUTPUT_LINES = 80
@@ -226,8 +226,8 @@ export function verifyCommand(args = []) {
       fail(`wrote ${path}, but could not remove the old stamp ${config.dir}/verified/${entry} (${error.code ?? error.message}). Delete it yourself, then commit the stamps with the records`)
     }
   }
-  const removed = pruned.length > 0 ? `, removed ${pruned.length} old stamp${pruned.length === 1 ? '' : 's'}` : ''
-  console.log(`✔ all ${passed.length} gates passed: wrote ${path}${removed}. Commit it with the records.`)
+  const removed = pruned.length > 0 ? `, removed ${plural(pruned.length, 'old stamp')}` : ''
+  console.log(`✔ ${passed.length === 1 ? 'the gate' : `all ${passed.length} gates`} passed: wrote ${path}${removed}. Commit it with the records.`)
 }
 
 /** gates: lists the commit gates and the verify gates. */

@@ -6,6 +6,16 @@ export function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 }
 
+/** A count and its noun: "1 task", "2 tasks"; many is the plural when it is not word + "s". */
+export function plural(count, word, many = `${word}s`) {
+  return `${count} ${count === 1 ? word : many}`
+}
+
+/** The records counted, as "1 task, 2 decisions, 0 log entries". */
+export function recordCounts(tasks, decisions, logs) {
+  return `${plural(tasks, 'task')}, ${plural(decisions, 'decision')}, ${plural(logs, 'log entry', 'log entries')}`
+}
+
 /** Prints the message to stderr and stops with exit code 1. */
 export function fail(message) {
   console.error(`resaledger: ${message}`)

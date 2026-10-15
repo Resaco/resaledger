@@ -1,7 +1,7 @@
 // Decisions, log entries, plan status lines and the workspace README: parsers over text and
 // validators over parsed records. No file access; a validator returns problems.
 import { posix } from 'node:path'
-import { headings, isEmptyValue, parseFields, relativeLinks, resolveLinkPath, splitLines } from './markdown.mjs'
+import { fieldLinesAfter, headings, isEmptyValue, parseFields, relativeLinks, resolveLinkPath, splitLines } from './markdown.mjs'
 import { likelyTypo } from './util.mjs'
 
 export const SETUP_MARKER = 'TODO(resaledger)'
@@ -23,13 +23,16 @@ function isCalendarDate(value) {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
 }
 
-/** The first H1 of a text and the bullet fields straight after it, with a problem for each repeated field. */
+/**
+ * The first H1 of a text and the bullet fields straight after it, with a problem for each
+ * repeated field; later holds the "- Name: value" lines below the list's end.
+ */
 function titleAndFields(file, text) {
   const lines = splitLines(text)
   const title = headings(text).find((heading) => heading.level === 1)
   const problems = []
-  if (!title) return { title: null, titleLine: 0, fields: [], problems }
-  const { fields } = parseFields(lines, title.line)
+  if (!title) return { title: null, titleLine: 0, fields: [], later: [], problems }
+  const { fields, end } = parseFields(lines, title.line)
   const seen = new Set()
   for (const field of fields) {
     const key = field.name.toLowerCase()
@@ -38,7 +41,19 @@ function titleAndFields(file, text) {
     }
     seen.add(key)
   }
-  return { title: title.text, titleLine: title.line, fields, problems }
+  return { title: title.text, titleLine: title.line, fields, later: fieldLinesAfter(lines, end), problems }
+}
+
+/** A problem for each known field below the field list that the list lacks: it is read as text, not as a field. */
+function lateFieldProblems(record, known) {
+  const listed = new Set(record.fields.map((field) => field.name))
+  return record.later
+    .filter((field) => known.includes(field.name) && !listed.has(field.name))
+    .map((field) => ({
+      file: record.file,
+      line: field.line,
+      message: `"- ${field.name}:" is below the field list, so it is read as text, not as a field; move it up into the list after the heading, with no blank line before it`
+    }))
 }
 
 /** The first field with exactly this name, or undefined. */
@@ -117,6 +132,7 @@ export function validateDecision(decision, context) {
   }
 
   problems.push(...recordFieldNameProblems(decision, DECISION_FIELDS))
+  problems.push(...lateFieldProblems(decision, DECISION_FIELDS))
   problems.push(...datedFileProblems(file, 'decisions', dateValue, '2026-10-14-bullet-fields.md'))
   return problems
 }

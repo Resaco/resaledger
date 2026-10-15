@@ -6,7 +6,7 @@
 // touched. planUpdate() only reads; applyUpdate() writes.
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { AGENT_NAMES, agentConfigured } from '../guard/agents.mjs'
+import { AGENT_NAMES, agentConfigFile, agentConfigured } from '../guard/agents.mjs'
 import { CONFIG_FILE, parseConfig } from '../guard/config.mjs'
 import { ENFORCEMENT_WORKFLOW } from '../guard/enforcement.mjs'
 import { compareVersions, contentHash, normalizeManaged } from '../guard/managed.mjs'
@@ -133,12 +133,18 @@ function readOrNull(root, path) {
 
 const NEWER = `run "npx resaledger@latest update" instead`
 
+/** The state of an agent's configuration in update: added when it held no ResaLedger entries before. */
+function updateAgentState(file, configured) {
+  if (!file.created && !file.changed) return 'unchanged'
+  return configured ? 'replaced' : 'added'
+}
+
 /**
  * Plans the update without writing anything. options is { force, released, agents, workflow }
  * (released defaults to releasedHashes(); agents names agents whose configurations are added;
  * workflow adds the CI workflow, which the team preset has anyway). Returns { refusals, dir, manager, files, writes (path →
  * text), executable, integrate, instructions }. files holds { path, state, from?, note?,
- * diff? } with state 'replaced', 'restored', 'kept', 'manual' or 'unchanged'. Nothing may be
+ * diff? } with state 'replaced', 'added', 'restored', 'kept', 'manual' or 'unchanged'. Nothing may be
  * written when refusals is not empty.
  */
 export function planUpdate(root, options = {}) {
@@ -169,10 +175,10 @@ export function planUpdate(root, options = {}) {
   }
   const table = options.released ?? releasedHashes()
 
-  /** One managed file that update owns as a whole, or its block (write builds the new file). */
-  const judgeFile = (path, key, installed, wanted, judgedDir, write) => {
+  /** One managed file that update owns as a whole, or its block (write builds the new file); absent is the state of a missing one. */
+  const judgeFile = (path, key, installed, wanted, judgedDir, write, absent = 'restored') => {
     if (installed === null) {
-      plan.files.push({ path, state: 'restored' })
+      plan.files.push({ path, state: absent })
       plan.writes.set(path, write())
       return
     }
@@ -272,7 +278,7 @@ export function planUpdate(root, options = {}) {
   const installedWorkflow = readOrNull(root, ENFORCEMENT_WORKFLOW)
   if (installedWorkflow !== null || config.preset === 'team' || options.workflow) {
     const workflow = readFileSync(WORKFLOW_TEMPLATE, 'utf8')
-    judgeFile(ENFORCEMENT_WORKFLOW, 'workflow', installedWorkflow, workflow, null, () => workflow)
+    judgeFile(ENFORCEMENT_WORKFLOW, 'workflow', installedWorkflow, workflow, null, () => workflow, config.preset === 'team' ? 'restored' : 'added')
   }
 
   // 4. The managed block in the root AGENTS.md; the rest of the file is the project's.
@@ -301,12 +307,10 @@ export function planUpdate(root, options = {}) {
   // 5. ResaLedger's entries in the agents' hook configurations; the other entries are the project's.
   // Only configurations that hold ResaLedger's entries are renewed: one a project deleted stays
   // deleted, and "update --agents <names>" adds one.
-  const agents = AGENT_NAMES.filter((agent) => agentConfigured(root, agent) || (options.agents ?? []).includes(agent))
+  const configured = AGENT_NAMES.filter((agent) => agentConfigured(root, agent)).map(agentConfigFile)
+  const agents = AGENT_NAMES.filter((agent) => configured.includes(agentConfigFile(agent)) || (options.agents ?? []).includes(agent))
   const agentPlan = planAgentConfigs(root, agents, dir, plan.writes)
-  for (const file of agentPlan.files) {
-    const state = file.created ? 'restored' : file.changed ? 'replaced' : 'unchanged'
-    plan.files.push({ path: file.path, state, note: "ResaLedger's hook entries" })
-  }
+  for (const file of agentPlan.files) plan.files.push({ path: file.path, state: updateAgentState(file, configured.includes(file.path)), note: "ResaLedger's hook entries" })
   for (const { path, reason, snippet } of agentPlan.manual) {
     plan.files.push({ path, state: 'manual', note: `${reason}, so its hook entries were not renewed; fix it and run update again, or add the entries below by hand` })
     plan.instructions = [plan.instructions, `Add these entries under "hooks" in ${path}:\n${snippet}`].filter(Boolean).join('\n\n')

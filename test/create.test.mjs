@@ -7,6 +7,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileS
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { nextChildId, nextTaskId } from '../src/guard/create.mjs'
+import { parseDecision } from '../src/guard/records.mjs'
 import { ENV, PACKAGE, repository, run, temporary } from './helpers.mjs'
 
 const GUARD = join(temporary(), 'records.mjs')
@@ -218,10 +219,14 @@ describe('records', () => {
     r.git('config', 'user.name', 'Ada Example')
     const date = today()
     const decision = created(r, 'decision', 'Task fields are bullets')
-    assert.equal(r.read(decision), `# Task fields are bullets\n\n- Date: ${date}\n- Decided by: Ada Example\n- Status: accepted\n\n`)
+    assert.equal(r.read(decision), `# Task fields are bullets\n\n- Date: ${date}\n- Decided by: Ada Example\n- Status: accepted\n`)
     const log = created(r, 'log', 'Storage routes, and why paging waits')
     assert.equal(r.read(log), `# ${date} · Storage routes, and why paging waits\n\n- Lane: main\n- Tasks: S1\n\n`)
     created(r, 'S', 'Another')
+    checks(r)
+    // The file ends on the field list, so an appended field joins it.
+    r.write(decision, `${r.read(decision)}- Weakens: wip\n\nWhy.\n`)
+    assert.deepEqual(parseDecision(decision, r.read(decision)).fields.map((field) => field.name), ['Date', 'Decided by', 'Status', 'Weakens'])
     checks(r)
   })
 

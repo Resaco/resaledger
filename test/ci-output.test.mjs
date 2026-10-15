@@ -227,6 +227,7 @@ describe('ci writes the job summary every time', () => {
     const base = await ci(r, 'push', event('refs/heads/main'), {}, ['--only-base-pushes'])
     assert.equal(base.status, 0, base.out)
     assert.match(base.out, /✔ commits: 1 commit pushed/)
+    assert.match(base.out, /^Rules from the commit before the push [0-9a-f]{7}\.$/m)
     assert.match(base.summary, /^### ResaLedger · push to main · ✔ passed/)
 
     // An unrecorded commit on a lane is left to its pull request.
@@ -608,6 +609,7 @@ describe('init and update install the workflow', () => {
     assert.ok(!existsSync(join(r.root, '.github')), 'a solo update adds no workflow by itself')
     const added = r.node(CLI, 'update', '--workflow')
     assert.equal(added.status, 0, added.out)
+    assert.match(added.out, /Added \(1\):\n {2}\.github\/workflows\/resaledger\.yml\n/)
     assert.equal(r.read('.github/workflows/resaledger.yml'), WORKFLOW)
     assert.match(r.node(CLI, 'update').out, /Unchanged \(\d+\):[\s\S]*\.github\/workflows\/resaledger\.yml/)
     r.append('.github/workflows/resaledger.yml', '# our own line\n')
@@ -620,6 +622,7 @@ describe('init and update install the workflow', () => {
     rmSync(join(team.root, '.github', 'workflows', 'resaledger.yml'))
     const restored = team.node(CLI, 'update')
     assert.equal(restored.status, 0, restored.out)
+    assert.match(restored.out, /Restored \(1\):\n {2}\.github\/workflows\/resaledger\.yml\n/)
     assert.equal(team.read('.github/workflows/resaledger.yml'), WORKFLOW)
   })
 

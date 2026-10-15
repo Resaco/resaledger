@@ -5,6 +5,7 @@ import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { parseConfig } from '../src/guard/config.mjs'
+import { recordCounts } from '../src/guard/util.mjs'
 import { checkWorkspace, fingerprint, isCode, loadWorkspace, treeReader } from '../src/guard/workspace.mjs'
 import { PACKAGE, repository, run, temporary } from './helpers.mjs'
 
@@ -316,11 +317,16 @@ describe('the check command', () => {
     assert.equal(built.status, 0, built.out)
   })
 
+  test('counts the records in the singular for one and the plural otherwise', () => {
+    assert.equal(recordCounts(1, 1, 1), '1 task, 1 decision, 1 log entry')
+    assert.equal(recordCounts(0, 2, 3), '0 tasks, 2 decisions, 3 log entries')
+  })
+
   test('passes on a valid workspace and fails on an invalid one', () => {
     const r = repositoryWith()
     const passed = r.node(guard, 'check')
     assert.equal(passed.status, 0, passed.out)
-    assert.equal(passed.out, '✔ records valid: 3 tasks, 1 decisions, 1 log entries\n')
+    assert.equal(passed.out, '✔ records valid: 3 tasks, 1 decision, 1 log entry\n')
 
     r.write('ledger/tasks/S3-serve.md', '# S3 Serve\n\n- Status: maybe\n')
     r.write('ledger/tasks/S4.md', 'no heading\n')

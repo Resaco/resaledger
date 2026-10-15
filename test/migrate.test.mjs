@@ -342,6 +342,9 @@ describe('migrate, from end to end', () => {
     assert.equal(result.status, 0, result.out)
     assert.match(result.out, /4 tasks, 2 decisions, 2 log entries/)
     assert.match(result.out, /Rename \(1\):\n {2}\.agent-ledger\.json → \.resaledger\.json/)
+    // The renamed configuration is not listed as created as well.
+    assert.doesNotMatch(result.out, /^ {2}\.resaledger\.json$/m)
+    assert.match(result.out, /\nWritten\. Checking with the new guard: /)
     assert.match(result.out, /✔ records valid: 4 tasks, 2 decisions, 3 log entries/)
     assert.match(
       result.out,
@@ -981,7 +984,7 @@ describe('--dry-run', () => {
     const before = snapshot(r.root)
     const result = migrate(r, '--dry-run')
     assert.equal(result.status, 0, result.out)
-    assert.match(result.out, /Create \(\d+\):\n {2}\.githooks\/pre-merge-commit\n {2}\.resaledger\.json\n/)
+    assert.match(result.out, /Create \(\d+\):\n {2}\.githooks\/pre-merge-commit\n {2}project\/decisions\//)
     assert.match(result.out, /Delete \(7\):/)
     assert.match(result.out, /--dry-run: nothing was written\./)
     assert.deepEqual(snapshot(r.root), before)

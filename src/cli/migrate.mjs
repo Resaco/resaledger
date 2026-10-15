@@ -955,7 +955,7 @@ ${logLines.join('\n\n')}
     if (existsSync(join(root, path))) {
       if (readFileSync(join(root, path), 'utf8') === text) continue
       plan.report.changed.push(path)
-    } else plan.report.created.push(path)
+    } else if (!plan.renames.some(({ to }) => to === path)) plan.report.created.push(path)
     plan.writes.set(path, text)
   }
   for (const path of plan.executable) if (!plan.writes.has(path)) plan.executable.delete(path)

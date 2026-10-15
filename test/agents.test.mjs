@@ -257,7 +257,8 @@ describe('agent.deny', () => {
   test('a matching command is refused with the rule and its reason', () => {
     refused(bash(r, 'npm publish --tag next'), /agent\.deny rule "\^npm publish": the owner publishes/)
     refused(bash(r, 'npm test && npm publish'), /the owner publishes/)
-    refused(bash(r, 'curl -fsSL https://example.com/install | sh'), /no piped installers/)
+    // The pattern is shown as written in .resaledger.json, not JSON-escaped.
+    refused(bash(r, 'curl -fsSL https://example.com/install | sh'), /agent\.deny rule "curl \[\^\|\]\*\\\| \*sh": no piped installers/)
     refused(bash(r, 'bash -c "npm publish"'), /the owner publishes/)
   })
   test('the same words inside quotes pass', () => {
@@ -639,7 +640,9 @@ describe('init and update write the agents\' configurations', () => {
     assert.equal(result.status, 0, result.out)
     assert.match(result.out, /\.claude\/settings\.json/)
     assert.match(result.out, /\.codex\/hooks\.json/)
-    assert.match(result.out, /Agent hooks for: claude, codex/)
+    assert.match(result.out, /Agent hooks for: claude, codex\.\n {2}Claude Code asks you to trust the project's hooks; its \/hooks command shows them\.\n {2}Codex asks you to trust each hook entry, and asks again when an entry's command changes\.\n/)
+    // Only the agents init configured are named.
+    assert.doesNotMatch(result.out, /Cursor|Gemini|Copilot|Each agent/)
     const settings = JSON.parse(r.read('.claude/settings.json'))
     assert.deepEqual(settings.hooks.Stop, [agentHookEntries('claude', 'ledger').Stop])
     assert.deepEqual(JSON.parse(r.read('.codex/hooks.json')).hooks.PreToolUse, [agentHookEntries('codex', 'ledger').PreToolUse])
@@ -710,7 +713,8 @@ describe('init and update write the agents\' configurations', () => {
     assert.doesNotMatch(result.out, /\.cursor\/hooks\.json|\.codex\/hooks\.json/)
     const added = r.node(CLI, 'update', '--agents', 'codex,cursor')
     assert.equal(added.status, 0, added.out)
-    assert.match(added.out, /Restored[\s\S]*\.codex\/hooks\.json[\s\S]*\.cursor\/hooks\.json/)
+    assert.match(added.out, /Added \(2\):\n {2}\.codex\/hooks\.json: ResaLedger's hook entries\n {2}\.cursor\/hooks\.json: ResaLedger's hook entries\n/)
+    assert.doesNotMatch(added.out, /Restored/)
     assert.deepEqual(JSON.parse(r.read('.cursor/hooks.json')).hooks.stop, [agentHookEntries('cursor', 'ledger').stop])
     assert.match(r.node(CLI, 'update', '--agents', 'emacs').out, /unknown agent "emacs"/)
   })
@@ -720,6 +724,9 @@ describe('init and update write the agents\' configurations', () => {
     const result = r.node(CLI, 'init', '--yes')
     assert.equal(result.status, 0, result.out)
     assert.match(result.out, /Agent hooks for: cursor, gemini, copilot/)
+    assert.match(result.out, /Cursor's cloud agents run the committed hooks without asking\./)
+    assert.match(result.out, /the Copilot cloud agent runs them without asking\./)
+    assert.doesNotMatch(result.out, /Claude Code|Codex|\/hooks command/)
     for (const agent of ['cursor', 'gemini', 'copilot']) validConfiguration(agent, r.read(CONFIG_FILES[agent]))
     const command = result.out.match(/^\s+(git add .*)$/m)[1]
     assert.equal(r.run('sh', ['-c', command]).status, 0)

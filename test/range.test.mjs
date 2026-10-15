@@ -525,7 +525,7 @@ describe('check --range through the bundle', () => {
     commit(r, { 'src/a.js': '1\n', 'ledger/tasks/S1-start.md': DOING }, 'feat: a', 'Task: S1')
     const passed = r.node(guard, 'check', '--range', `${base}..HEAD`)
     assert.equal(passed.status, 0, passed.out)
-    assert.match(passed.out, /^✔ records valid: 1 tasks/)
+    assert.match(passed.out, /^✔ records valid: 1 task,/)
     assert.match(passed.out, /✔ commits recorded: [0-9a-f]+\.\.HEAD \(lane lane-a\)\n$/)
     assert.equal(r.node(guard, 'check', '--range', `${base}..`).status, 0)
 
