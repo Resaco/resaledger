@@ -172,7 +172,11 @@ export function legacyWorkspaceDir(config) {
  * work/ledger.md: the preamble, the phase headings with the text under them, and the tasks.
  * A task's fields are the five 0.x fields wherever they stand in the task (the last one wins,
  * as in 0.x), plus any other `- Name: value` line in the field block right after the heading.
- * Every other line under the task is kept in extra, verbatim and in order.
+ * Every other line under the task is kept in extra, verbatim and in order: an earlier copy of
+ * a field that appears twice stays where it stood, with its continuation lines after it.
+ * attached lists the extra lines that continue a field that counts, such as a second line of
+ * evidence, as { name, index } with index into extra: the indented lines in the block of
+ * fields right after the heading.
  */
 export function parseLegacyLedger(text, file = LEGACY_FILES.ledger) {
   const lines = legacyLines(text)
@@ -222,7 +226,13 @@ export function parseLegacyLedger(text, file = LEGACY_FILES.ledger) {
           valid,
           fields: {},
           extra: [],
-          fieldBlock: true
+          attached: [],
+          // Each line under the heading as { text, kind: 'field' | 'continuation' | 'extra', name }.
+          entries: [],
+          fieldBlock: true,
+          // While the block of fields lasts, the field an indented line continues.
+          continues: null,
+          inBlock: true
         }
         tasks.push(task)
         if (!valid)
@@ -239,20 +249,32 @@ export function parseLegacyLedger(text, file = LEGACY_FILES.ledger) {
       if (field && (known || task.fieldBlock)) {
         const name = field[1]
         if (name in task.fields) {
-          problems.push(problem(file, number, `${task.id}: a second "${name}" field; the last one counts, as in 0.x, and the first is kept as an extra line`))
-          task.extra.push(`- ${name}: ${task.fields[name]}`)
-          delete task.fields[name]
+          problems.push(
+            problem(file, number, `${task.id}: a second "${name}" field; the last one counts, as in 0.x, and the earlier one and its continuation lines move to the task's Notes, word for word and in order`)
+          )
+          for (const entry of task.entries) if (entry.name === name && entry.kind !== 'extra') entry.kind = 'extra'
         }
         task.fields[name] = (field[2] ?? '').trim()
+        task.entries.push({ text: line, kind: 'field', name })
+        if (task.inBlock) task.continues = name
         return
       }
-      if (!line.trim() && task.extra.length === 0) {
+      if (task.inBlock && task.continues !== null && /^[ \t]+\S/.test(line)) {
+        task.entries.push({ text: line, kind: 'continuation', name: task.continues })
+        task.fieldBlock = false
+        return
+      }
+      if (!line.trim() && task.entries.every((entry) => entry.kind === 'field')) {
         // A blank line ends the field block, and blank lines before the extra text are dropped.
-        if (Object.keys(task.fields).length > 0) task.fieldBlock = false
+        if (Object.keys(task.fields).length > 0) {
+          task.fieldBlock = false
+          task.inBlock = false
+        }
         return
       }
       task.fieldBlock = false
-      task.extra.push(line)
+      task.inBlock = false
+      task.entries.push({ text: line, kind: 'extra', name: null })
       return
     }
     if (phaseLines) phaseLines.push(line)
@@ -262,7 +284,12 @@ export function parseLegacyLedger(text, file = LEGACY_FILES.ledger) {
 
   const seen = new Set()
   for (const task of tasks) {
-    delete task.fieldBlock
+    for (const entry of task.entries) {
+      if (entry.kind === 'field') continue
+      if (entry.kind === 'continuation') task.attached.push({ name: entry.name, index: task.extra.length })
+      task.extra.push(entry.text)
+    }
+    for (const key of ['entries', 'fieldBlock', 'continues', 'inBlock']) delete task[key]
     while (task.extra.length > 0 && !task.extra[task.extra.length - 1].trim()) task.extra.pop()
     for (const name of LEGACY_TASK_FIELDS)
       if (task.valid && !(name in task.fields)) problems.push(problem(file, task.line, `${task.id}: the "${name}" field is missing`))

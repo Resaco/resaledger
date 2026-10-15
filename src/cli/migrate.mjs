@@ -13,7 +13,6 @@ import {
   INVALID_UTF8,
   LEGACY_CONFIG_FILE,
   LEGACY_FILES,
-  LEGACY_TASK_FIELDS,
   legacyManualGates,
   legacyProjectRules,
   legacyTableCells,
@@ -21,16 +20,17 @@ import {
   readLegacyWorkspace,
   readSourceText
 } from './legacy.mjs'
-import { agentsBlock, BUILT_GUARD, claudeFile, detectBase, hasAgentsImport, HOOKS_FOLDER, realRelative, removeManagedBlock } from './setup.mjs'
+import { agentsBlock, BUILT_GUARD, claudeFile, detectBase, hasAgentsImport, HOOKS_FOLDER, MANAGED_END, MANAGED_START, realRelative } from './setup.mjs'
 
 const POINTER_START = '<!-- agent-ledger:start -->'
 const POINTER_END = '<!-- agent-ledger:end -->'
 const UNION_COMMENT = '# agent-ledger: records that only grow at the end merge without conflicts'
 const LEGACY_MARKER = 'TODO(agent-ledger)'
 const MARKER = 'TODO(resaledger)'
+// The version line every released 0.x guard has near its top.
+const LEGACY_GUARD_VERSION = /^\/\/ agent-ledger 0\.\d+\.\d+$/m
 const EMPTY_VALUES = new Set(['', '—', '–', '-'])
 const MARKDOWN = /\.(md|markdown)$/i
-const LEGACY_FIELD = /^- ([A-Z][\p{L}]*(?: [\p{L}]+)*):(?:[ \t]+(.*))?$/u
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 // "Blocked on the owner: …", "Waits for the owner." and the like, at the start of a 0.x note or of
 // a sentence in it: what a blocked task waits for, which 1.0 records in its own field.
@@ -46,6 +46,8 @@ export const UNDO_COMMAND = 'git restore -- :/ && git clean -fd -- :/'
 // The sections of the 0.x workspace templates (identical in 0.1, 0.2 and 0.3). A section with
 // another name is the project's own and moves; the template's own are kept in the log entry.
 const STANDARDS_TEMPLATE_SECTIONS = ['Who owns what', 'STATUS.md', 'The task ledger', 'Plans', 'Commits', 'Quality gates']
+// The anchors in standards.md that a link to the README's Manual checks still answers.
+const MANUAL_CHECK_ANCHORS = ['quality-gates', 'manual-checks']
 const AGENTS_TEMPLATE_SECTIONS = ['Start here, every session', 'Session protocol', 'Non-negotiables', 'Project rules', 'Orchestrated work', 'Working agreements']
 
 // The git hooks that agent-ledger 0.1, 0.2 and 0.3 wrote, with {{dir}} for the workspace folder.
@@ -223,6 +225,44 @@ function fencedLines(lines) {
   return result
 }
 
+/**
+ * For each line, whether it is code: in a fenced block, fence lines included, or in an
+ * indented code block (four spaces after a blank line, outside a list).
+ */
+function codeLines(lines) {
+  const fenced = fencedLines(lines)
+  const result = []
+  let previousBlank = true
+  let inCode = false
+  let inList = false
+  lines.forEach((line, index) => {
+    if (fenced[index]) {
+      result.push(true)
+      previousBlank = false
+      inCode = false
+      return
+    }
+    if (!line.trim()) {
+      result.push(inCode)
+      previousBlank = true
+      return
+    }
+    const indent = line.match(/^[ \t]*/)[0].replace(/\t/g, '    ').length
+    if (indent >= 4 && (inCode || (previousBlank && !inList))) {
+      result.push(true)
+      inCode = true
+      previousBlank = false
+      return
+    }
+    inCode = false
+    if (/^ {0,3}(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$)/.test(line)) inList = true
+    else if (indent === 0 && previousBlank) inList = false
+    result.push(false)
+    previousBlank = false
+  })
+  return result
+}
+
 /** A line with its inline code spans blanked out, at the same length. */
 function maskCodeSpans(line) {
   let result = ''
@@ -242,10 +282,10 @@ function maskCodeSpans(line) {
 /** The link targets of a text outside code, as { line, start, end, raw } with 0-based lines. */
 function linkTargets(text) {
   const lines = text.split('\n')
-  const isFenced = fencedLines(lines.map((line) => line.replace(/\r$/, '')))
+  const isCode = codeLines(lines.map((line) => line.replace(/\r$/, '')))
   const targets = []
   lines.forEach((line, index) => {
-    if (isFenced[index]) return
+    if (isCode[index]) return
     const masked = maskCodeSpans(line.replace(/\r$/, ''))
     for (const match of masked.matchAll(INLINE_LINK)) {
       const [start, end] = match.indices[2]
@@ -258,6 +298,23 @@ function linkTargets(text) {
     }
   })
   return targets
+}
+
+const HTML_LINK = /<[a-z][a-z0-9-]*\s[^<>]*?(?<=\s)href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>]+))/dgi
+
+/** The href values of the HTML tags of a text outside code, as { line, raw } with 0-based lines. */
+function htmlLinks(text) {
+  const lines = text.split('\n').map((line) => line.replace(/\r$/, ''))
+  const isCode = codeLines(lines)
+  const links = []
+  lines.forEach((line, index) => {
+    if (isCode[index]) return
+    for (const match of maskCodeSpans(line).matchAll(HTML_LINK)) {
+      const [start, end] = match.indices[1] ?? match.indices[2] ?? match.indices[3]
+      links.push({ line: index, raw: line.slice(start, end) })
+    }
+  })
+  return links
 }
 
 /** The text with every link target replaced by a placeholder: what a link rewrite may not change. */
@@ -295,22 +352,18 @@ function resolveTarget(fromFile, path) {
 function rewriteLinks(text, frame, dest, mapTarget) {
   const lines = text.split('\n')
   const links = []
-  for (const target of linkTargets(text).reverse()) {
-    const angle = target.raw.startsWith('<')
-    const value = angle ? target.raw.slice(1, -1) : target.raw
-    if (!value || value.startsWith('//') || LINK_SCHEME.test(value)) continue
+  // The target value as it reads from dest, or null when it stays; { unresolved } when there is none.
+  const retarget = (value, angle) => {
+    if (!value || value.startsWith('//') || LINK_SCHEME.test(value)) return null
     const hash = value.indexOf('#')
     const rawPath = hash === -1 ? value : value.slice(0, hash)
     const anchor = hash === -1 ? '' : decodePath(value.slice(hash + 1))
-    if (rawPath === '' && frame === dest) continue
+    if (rawPath === '' && frame === dest) return null
     const resolved = rawPath === '' ? frame : resolveTarget(frame, decodePath(rawPath))
-    if (resolved === null) continue
+    if (resolved === null) return null
     const mapped = mapTarget(resolved, anchor)
-    if (mapped && mapped.unresolved) {
-      links.push({ file: dest, line: target.line + 1, target: value, unresolved: mapped.unresolved })
-      continue
-    }
-    if (!mapped && frame === dest) continue
+    if (mapped && mapped.unresolved) return { unresolved: mapped.unresolved }
+    if (!mapped && frame === dest) return null
     const path = mapped ? mapped.path : resolved
     const newAnchor = mapped ? mapped.anchor : anchor
     let relativePath
@@ -320,14 +373,35 @@ function rewriteLinks(text, frame, dest, mapTarget) {
       if (mapped?.folder || relativePath === '.' || (!mapped && rawPath.endsWith('/'))) relativePath = `${relativePath.replace(/\/$/, '')}/`
     }
     if (!angle) relativePath = relativePath.replace(/ /g, '%20')
-    const rewritten = `${relativePath}${newAnchor ? `#${newAnchor}` : ''}`
+    return { rewritten: `${relativePath}${newAnchor ? `#${newAnchor}` : ''}`, mapped }
+  }
+  for (const target of linkTargets(text).reverse()) {
+    const angle = target.raw.startsWith('<')
+    const value = angle ? target.raw.slice(1, -1) : target.raw
+    const result = retarget(value, angle)
+    if (!result) continue
+    if (result.unresolved) {
+      links.push({ file: dest, line: target.line + 1, target: value, unresolved: result.unresolved })
+      continue
+    }
+    const { rewritten, mapped } = result
     const replacement = angle ? `<${rewritten}>` : rewritten
     if (replacement === target.raw) continue
     const line = lines[target.line]
     lines[target.line] = `${line.slice(0, target.start)}${replacement}${line.slice(target.end)}`
     if (mapped) links.push({ file: dest, line: target.line + 1, target: value, rewritten, note: mapped.note ?? null })
   }
-  return { text: lines.join('\n'), links: links.reverse() }
+  links.reverse()
+  // HTML links are listed, not rewritten.
+  for (const link of htmlLinks(text)) {
+    const result = retarget(link.raw.trim(), false)
+    if (!result || (!result.unresolved && result.rewritten === link.raw.trim())) continue
+    const unresolved = result.unresolved
+      ? `an HTML link, which migrate does not rewrite: ${result.unresolved}`
+      : `an HTML link, which migrate does not rewrite; change it to ${result.rewritten}`
+    links.push({ file: dest, line: link.line + 1, target: link.raw, unresolved })
+  }
+  return { text: lines.join('\n'), links: links.sort((a, b) => a.line - b.line) }
 }
 
 // ── The plan ──────────────────────────────────────────────────────────────────────────
@@ -361,30 +435,55 @@ function plannedReader(root, files, contents) {
   }
 }
 
-/** Removes every 0.x pointer block; returns the text without them and the blocks removed, with their line. */
-function removePointers(text) {
-  const lines = sourceLines(text)
+/**
+ * Removes count lines at start, and at the join the blank lines the removal doubled, so that
+ * the text around it keeps one blank line between its parts. No other line is touched.
+ */
+function cutLines(lines, start, count) {
+  lines.splice(start, count)
+  if (start === 0) while (lines.length > 0 && !lines[0].trim()) lines.shift()
+  else while (start < lines.length && !lines[start].trim() && !lines[start - 1].trim()) lines.splice(start, 1)
+}
+
+/** Lines without the blank lines at the end. */
+function trimEndBlankLines(lines) {
+  const out = [...lines]
+  while (out.length > 0 && !out[out.length - 1].trim()) out.pop()
+  return out
+}
+
+/** Removes every block from a line that starts with startMark to one that starts with endMark; returns the blocks, with their line. */
+function cutBlocks(lines, startMark, endMark) {
   const blocks = []
   for (;;) {
-    const start = lines.findIndex((line) => line.trim() === POINTER_START)
+    const start = lines.findIndex((line) => line.trim().startsWith(startMark))
     if (start === -1) break
-    let end = lines.findIndex((line, index) => index > start && line.trim() === POINTER_END)
+    let end = lines.findIndex((line, index) => index > start && line.trim().startsWith(endMark))
     if (end === -1) end = start
     blocks.push({ text: lines.slice(start, end + 1).join('\n'), at: start })
-    lines.splice(start, end - start + 1)
+    cutLines(lines, start, end - start + 1)
   }
+  return blocks
+}
+
+/** Removes every 0.x pointer block; returns the lines without them and the blocks removed, with their line. */
+function removePointers(text) {
+  const lines = sourceLines(text)
+  const blocks = cutBlocks(lines, POINTER_START, POINTER_END)
   return { lines, blocks }
 }
 
-/** Collapses runs of blank lines into one and drops blank lines at the end. */
-function tidyLines(lines) {
-  const out = []
-  for (const line of lines) {
-    if (!line.trim() && (out.length === 0 || !out[out.length - 1].trim())) continue
-    out.push(line)
-  }
-  while (out.length > 0 && !out[out.length - 1].trim()) out.pop()
-  return out
+/** A file's newline style: whether it starts with a byte order mark and whether its lines end in CRLF. */
+function lineStyle(text) {
+  const crlf = text.match(/\r\n/g)?.length ?? 0
+  const lf = text.match(/(?<!\r)\n/g)?.length ?? 0
+  return { bom: text.startsWith('\uFEFF'), crlf: crlf > lf }
+}
+
+/** Text written in a file's newline style. */
+function withLineStyle(text, style) {
+  const lines = style.crlf ? text.replace(/\r?\n/g, '\r\n') : text
+  return style.bom && !lines.startsWith('\uFEFF') ? `\uFEFF${lines}` : lines
 }
 
 /** The current branch, or null in a detached HEAD. */
@@ -443,7 +542,7 @@ export function planMigration(root, options = {}) {
     renames: [],
     executable: new Set(),
     logEntry: null,
-    report: { created: [], changed: [], deleted: [], renamed: [], warnings: [], links: [], waiting: [], unmappedKeys: [], counts: {} },
+    report: { created: [], changed: [], deleted: [], renamed: [], warnings: [], links: [], waiting: [], laneGiven: [], lane: null, unmappedKeys: [], counts: {} },
     problems: [],
     refusals: []
   }
@@ -489,6 +588,7 @@ export function planMigration(root, options = {}) {
   // 2. The new files, as pieces of text with the file their links are relative to.
   const today = options.today ?? localDate()
   const lane = options.lane === undefined ? currentBranch(root) : options.lane
+  plan.report.lane = lane
   const tracked = new Set(gitOut(root, ['ls-files', '-z']).split('\0').filter(Boolean))
   const sources = legacy.sources
   const files = Object.fromEntries(Object.entries(LEGACY_FILES).map(([name, path]) => [name, `${dir}/${path}`]))
@@ -506,20 +606,14 @@ export function planMigration(root, options = {}) {
     if (executable) plan.executable.add(path)
   }
   const logLines = [] // the migration log entry's sections
+  const styles = new Map() // path → the newline style of a file rebuilt from its own text
 
   // Tasks.
-  const ledgerLines = sourceLines(sources.get(files.ledger))
-  const starts = [...legacy.ledger.tasks.map((task) => task.line), ...legacy.ledger.phases.map((phase) => phase.line)].sort((a, b) => a - b)
   const taskFiles = new Map() // ledger anchor → task file
   for (const task of legacy.ledger.tasks) {
-    const next = starts.find((line) => line > task.line)
-    const body = ledgerLines.slice(task.line, next ? next - 1 : ledgerLines.length)
-    const attached = fieldContinuations(body)
-    const extra = [...task.extra]
-    for (const item of attached) {
-      const at = extra.indexOf(item.line)
-      if (at !== -1) extra.splice(at, 1)
-    }
+    const attached = task.attached.map(({ name, index }) => ({ name, line: task.extra[index] }))
+    const attachedAt = new Set(task.attached.map(({ index }) => index))
+    const extra = task.extra.filter((_, index) => !attachedAt.has(index))
     const doing = task.fields.Status === 'doing'
     const notes = [
       ...(isEmptyLegacyValue(task.fields.Notes) ? [] : [task.fields.Notes]),
@@ -531,7 +625,10 @@ export function planMigration(root, options = {}) {
       out.push(value ? `- ${name}: ${value}` : `- ${name}:`)
       for (const item of attached) if (item.name === name) out.push(item.line)
       if (name === 'Status' && doing && !('Lane' in task.fields)) {
-        if (lane) out.push(`- Lane: ${lane}`)
+        if (lane) {
+          out.push(`- Lane: ${lane}`)
+          plan.report.laneGiven.push(task.id)
+        }
         else plan.report.warnings.push(`${task.id} is doing, and HEAD is detached, so it has no lane; add "- Lane: <branch>" to its task file`)
       }
       // 1.0 asks a blocked task what it waits for; 0.x said it in the notes, which stay as they are.
@@ -622,7 +719,8 @@ export function planMigration(root, options = {}) {
   const goal = legacy.readme.sections.get('What is being built')
   if (goal) readmeLines[goal.line - 1] = `${'#'.repeat(goal.level)} Goal`
   const readmeText = readmeLines.map((line) => line.replaceAll(LEGACY_MARKER, MARKER))
-  const readmeSegments = [{ text: tidyLines(readmeText).join('\n'), frame: files.readme }]
+  const readmeSegments = [{ text: trimEndBlankLines(readmeText).join('\n'), frame: files.readme }]
+  styles.set(files.readme, lineStyle(sources.get(files.readme)))
   if (!legacy.readme.sections.has('Manual checks')) {
     const gates = legacyManualGates(legacy.standards)
     let manual
@@ -659,7 +757,9 @@ export function planMigration(root, options = {}) {
     const existing = existsSync(join(root, agentsPath)) ? readSource(agentsPath) : ''
     const { lines, blocks } = removePointers(existing)
     checkPointers('AGENTS.md', blocks)
-    const kept = tidyLines(removeManagedBlock(tidyLines(lines).join('\n')).split('\n')).join('\n')
+    cutBlocks(lines, MANAGED_START, MANAGED_END)
+    const kept = trimEndBlankLines(lines).join('\n')
+    styles.set(agentsPath, lineStyle(existing))
     const segments = []
     if (kept) segments.push({ text: kept, frame: agentsPath })
     for (const section of movedAgents) segments.push({ text: `${segments.length > 0 ? '\n\n' : ''}${sectionText(section)}`, frame: files.agents })
@@ -673,12 +773,18 @@ export function planMigration(root, options = {}) {
     const claudeText = readSource(claudePath)
     const { lines, blocks } = removePointers(claudeText)
     checkPointers('CLAUDE.md', blocks)
+    let out = lines
     if (!hasAgentsImport(lines)) {
       const at = blocks.length > 0 ? blocks[0].at : lines.length
-      lines.splice(at, 0, '', '@AGENTS.md', '')
+      const before = trimEndBlankLines(lines.slice(0, at))
+      const after = lines.slice(at)
+      while (after.length > 0 && !after[0].trim()) after.shift()
+      out = [...before, ...(before.length > 0 ? [''] : []), '@AGENTS.md', ...(after.length > 0 ? ['', ...after] : [])]
     }
-    const text = `${tidyLines(lines).join('\n')}\n`
-    if (blocks.length > 0 || text !== claudeText) put(claudePath, [{ text, frame: claudePath }])
+    const text = `${trimEndBlankLines(out).join('\n')}\n`
+    const style = lineStyle(claudeText)
+    styles.set(claudePath, style)
+    if (blocks.length > 0 || withLineStyle(text, style) !== claudeText) put(claudePath, [{ text, frame: claudePath }])
   }
   if (editedPointers.length > 0) {
     plan.report.warnings.push(`the 0.x pointer block in ${[...new Set(editedPointers.map((item) => item.file))].join(' and ')} was changed by hand; it is removed and kept word for word in the migration's log entry`)
@@ -704,16 +810,28 @@ export function planMigration(root, options = {}) {
 
   // The git hooks, the guard and .gitattributes.
   for (const name of HOOK_NAMES) put(`${HOOKS_FOLDER}/${name}`, [{ text: renderHook(name, dir), frame: null }], true)
-  put(`${dir}/scripts/records.mjs`, [{ text: readFileSync(guardPath, 'utf8'), frame: null }], true)
+  const oldGuard = `${dir}/scripts/records.mjs`
+  if (existsSync(join(root, oldGuard)) && !LEGACY_GUARD_VERSION.test(sourceLines(readFileSync(join(root, oldGuard), 'utf8')).slice(0, 5).join('\n')))
+    plan.report.warnings.push(
+      `${oldGuard} has no "// agent-ledger 0.x.y" version line near its top, which every released 0.x guard has, so it was changed by hand or is not agent-ledger's guard; it is replaced with the 1.0 guard, and the old one stays in git history`
+    )
+  put(oldGuard, [{ text: readFileSync(guardPath, 'utf8'), frame: null }], true)
   if (existsSync(join(root, '.gitattributes'))) {
     const text = readSource('.gitattributes')
     const union = new Set([`${dir}/work/log.md merge=union`, `${dir}/DECISIONS.md merge=union`, UNION_COMMENT])
     const lines = sourceLines(text)
-    const kept = lines.filter((line) => !union.has(line.trim()))
-    if (kept.length !== lines.length) {
-      const tidy = tidyLines(kept)
-      if (tidy.length === 0) plan.deletes.push('.gitattributes')
-      else put('.gitattributes', [{ text: `${tidy.join('\n')}\n`, frame: null }])
+    let cut = false
+    for (let at = lines.findIndex((line) => union.has(line.trim())); at !== -1; at = lines.findIndex((line) => union.has(line.trim()))) {
+      cutLines(lines, at, 1)
+      cut = true
+    }
+    if (cut) {
+      const kept = trimEndBlankLines(lines)
+      if (kept.length === 0) plan.deletes.push('.gitattributes')
+      else {
+        put('.gitattributes', [{ text: `${kept.join('\n')}\n`, frame: null }])
+        styles.set('.gitattributes', lineStyle(text))
+      }
     }
   }
 
@@ -771,6 +889,7 @@ ${logLines.join('\n\n')}
   const before = plannedReader(root, tracked, new Map())
   const after = plannedReader(root, finalFiles, new Map())
   const folder = (path) => (after.exists(path) ? { path, anchor: '', folder: true } : null)
+  const movedStandards = ownSections(legacy.standards, STANDARDS_TEMPLATE_SECTIONS).map((section) => headingAnchor(section.heading))
   const mapTarget = (path, anchor) => {
     if (path === files.ledger) {
       if (anchor && taskFiles.has(anchor)) return { path: taskFiles.get(anchor), anchor: '' }
@@ -788,7 +907,11 @@ ${logLines.join('\n\n')}
       return { ...folder(`${dir}/decisions`), note: anchor ? `#${anchor} names no single decision; the link goes to the decisions folder` : null }
     }
     if (path === files.status) return { path: files.readme, anchor: '', note: anchor ? `#${anchor} is dropped: the status file's facts are in the README` : null }
-    if (path === files.standards) return { path: files.readme, anchor: 'manual-checks' }
+    if (path === files.standards) {
+      if (movedStandards.includes(anchor)) return { path: files.readme, anchor }
+      const precise = !anchor || MANUAL_CHECK_ANCHORS.includes(anchor)
+      return { path: files.readme, anchor: 'manual-checks', note: precise ? null : `#${anchor} is not a manual check; the link goes to the README's Manual checks` }
+    }
     if (path === files.agents) {
       const moved = movedAgents.map((section) => headingAnchor(section.heading))
       return { path: agentsPath ?? 'AGENTS.md', anchor: moved.includes(anchor) ? anchor : '', note: anchor && !moved.includes(anchor) ? `#${anchor} is dropped: the workspace rules are in the root AGENTS.md` : null }
@@ -820,6 +943,7 @@ ${logLines.join('\n\n')}
     if (planned.has(path) || changed) final.set(path, texts.join(''))
   }
   for (const [path, segments] of planned) if (!final.has(path)) final.set(path, segments.map((segment) => segment.text).join(''))
+  for (const [path, style] of styles) if (final.has(path)) final.set(path, withLineStyle(final.get(path), style))
   if (plan.refusals.length > 0) return plan
 
   // 5. The result.
@@ -922,41 +1046,6 @@ function headingAnchor(text) {
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\p{M}\p{Pc}\- ]/gu, '')
     .replaceAll(' ', '-')
-}
-
-/**
- * The indented lines right after a task's fields that continue a field, such as a second line
- * of evidence, as { name, line }. They stay with their field instead of going to Notes. A
- * field that appears twice keeps its lines in Notes, because it is unclear which one they continue.
- */
-function fieldContinuations(body) {
-  const counts = new Map()
-  for (const line of body) {
-    const match = line.match(LEGACY_FIELD)
-    if (match) counts.set(match[1], (counts.get(match[1]) ?? 0) + 1)
-  }
-  const attached = []
-  let last = null
-  let afterContinuation = false
-  for (const line of body) {
-    if (!line.trim()) {
-      if (last === null) continue
-      break
-    }
-    const match = line.match(LEGACY_FIELD)
-    if (match) {
-      if (afterContinuation && !LEGACY_TASK_FIELDS.includes(match[1])) break
-      last = match[1]
-      continue
-    }
-    if (last !== null && /^[ \t]+\S/.test(line)) {
-      attached.push({ name: last, line })
-      afterContinuation = true
-      continue
-    }
-    break
-  }
-  return attached.filter((item) => counts.get(item.name) === 1)
 }
 
 /** The column of each named cell in the decision table's header: by name, else by position. */

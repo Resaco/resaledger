@@ -543,6 +543,13 @@ Screenshots go into [progress/](${DIR}/progress/).
     assert.equal(check.status, 0, check.out)
   })
 
+  test('says which branch the doing tasks without a Lane get', () => {
+    assert.match(
+      result.out,
+      /\ndoing tasks without a Lane get Lane: main; run migrate on the branch the work continues on, or take them over with claim --take afterwards\.\n/
+    )
+  })
+
   test('running it again reports that the repository is already migrated', () => {
     assertRefused(r, [], /\.resaledger\.json exists: this repository is already migrated to ResaLedger 1\.0/)
   })
@@ -605,6 +612,128 @@ describe('other shapes of a 0.x repository', () => {
     assert.equal(result.status, 1, result.out)
     assert.match(result.out, /! A2 is doing, and HEAD is detached, so it has no lane/)
     assert.match(result.out, /A2-another-task\.md:3: a doing task needs a lane/)
+  })
+})
+
+describe('a faithful conversion', () => {
+  test('a duplicated field keeps the one that counts with its lines, and moves the earlier one with its lines to Notes, in order', () => {
+    const task = `
+### A4 Two evidence fields
+- Status: done
+- Depends on: —
+- Plan: —
+- Evidence: \`npm test\`: the first run.
+  The first run's second line.
+  The first run's third line.
+- Evidence: \`npm test\`: the second run.
+  The second run's second line.
+- Notes: —
+`
+    const r = legacyRepository({ files: { [`${DIR}/work/ledger.md`]: LEDGER + task } })
+    const result = migrate(r)
+    assert.equal(result.status, 0, result.out)
+    assert.match(result.out, /! project\/work\/ledger\.md:\d+: A4: a second "Evidence" field; the last one counts, as in 0\.x, and the earlier one and its continuation lines move to the task's Notes, word for word and in order/)
+    assert.equal(
+      r.read(`${DIR}/tasks/A4-two-evidence-fields.md`),
+      `# A4 Two evidence fields
+
+- Status: done
+- Depends on: —
+- Plan: —
+- Evidence: \`npm test\`: the second run.
+  The second run's second line.
+
+## Notes
+
+- Evidence: \`npm test\`: the first run.
+  The first run's second line.
+  The first run's third line.
+`
+    )
+  })
+
+  test('blank lines inside fenced code, and the project text around it, are kept as they were', () => {
+    const code = '```text\nfirst\n\n\nafter two blank lines\n```'
+    const readme = README.replace('Local only.\n', `Local only.\n\n\nTwo blank lines above this paragraph.\n\n${code}\n`)
+    const agents = `# Sample\n\n${code}\n\n${POINTER}\nAfter the pointer.\n`
+    const r = legacyRepository({ files: { [`${DIR}/README.md`]: readme, 'AGENTS.md': agents } })
+    const result = migrate(r)
+    assert.equal(result.status, 0, result.out)
+    assert.ok(r.read(`${DIR}/README.md`).includes(`Local only.\n\n\nTwo blank lines above this paragraph.\n\n${code}\n\n## Manual checks`), r.read(`${DIR}/README.md`))
+    assert.ok(r.read('AGENTS.md').startsWith(`# Sample\n\n${code}\n\nAfter the pointer.\n\n## Project rules`), r.read('AGENTS.md'))
+  })
+
+  test('a standards.md anchor that is not a manual check is listed, an HTML link is listed, and a link in indented code is left alone', () => {
+    const extra = [
+      '',
+      'See [the commit rules](../standards.md#commits), [the gates](../standards.md#quality-gates) and [the release](../standards.md#release-checklist).',
+      '',
+      '<a href="../work/ledger.md#a1-lay-the-base">the ledger entry</a>',
+      '',
+      '    [indented code](../work/ledger.md)',
+      ''
+    ]
+    const plan = PLAN + extra.join('\n')
+    const r = legacyRepository({ files: { [`${DIR}/plan/A-groundwork.md`]: plan } })
+    const result = migrate(r)
+    assert.equal(result.status, 0, result.out)
+    const lines = plan.split('\n')
+    const lineOf = (text) => lines.findIndex((line) => line.includes(text)) + 1
+    const after = r.read(`${DIR}/plan/A-groundwork.md`)
+    assert.ok(after.includes('See [the commit rules](../README.md#manual-checks), [the gates](../README.md#manual-checks) and [the release](../README.md#release-checklist).'), after)
+    assert.match(
+      result.out,
+      new RegExp(`project/plan/A-groundwork\\.md:${lineOf('the commit rules')}: \\.\\./standards\\.md#commits → \\.\\./README\\.md#manual-checks \\(#commits is not a manual check; the link goes to the README's Manual checks\\)`)
+    )
+    assert.doesNotMatch(result.out, /standards\.md#(quality-gates|release-checklist) →/)
+    assert.ok(after.includes('<a href="../work/ledger.md#a1-lay-the-base">the ledger entry</a>'))
+    assert.match(
+      result.out,
+      new RegExp(`project/plan/A-groundwork\\.md:${lineOf('<a href')}: \\.\\./work/ledger\\.md#a1-lay-the-base \\(an HTML link, which migrate does not rewrite; change it to \\.\\./tasks/A1-lay-the-base\\.md\\)`)
+    )
+    assert.ok(after.includes('    [indented code](../work/ledger.md)'))
+    assert.doesNotMatch(result.out, /indented code|A-groundwork\.md:\d+: \.\.\/work\/ledger\.md \(/)
+  })
+
+  test('the README, AGENTS.md and CLAUDE.md keep their byte order mark and CRLF line endings', () => {
+    const windows = (text) => `﻿${text.replace(/\n/g, '\r\n')}`
+    const r = legacyRepository({
+      claude: 'none',
+      files: {
+        '.gitattributes': null,
+        [`${DIR}/README.md`]: windows(README),
+        'AGENTS.md': windows(`# Sample\n\nThe project's own instructions.\n\n${POINTER}`),
+        'CLAUDE.md': windows(`# Notes for Claude\n\nUse the test command.\n\n${POINTER}`)
+      }
+    })
+    const result = migrate(r)
+    assert.equal(result.status, 0, result.out)
+    for (const path of [`${DIR}/README.md`, 'AGENTS.md', 'CLAUDE.md']) {
+      const text = r.read(path)
+      assert.ok(text.startsWith('﻿'), `${path} lost its byte order mark`)
+      assert.ok(text.includes('\r\n'), path)
+      assert.doesNotMatch(text, /(?<!\r)\n/, `${path} has a line that does not end in CRLF`)
+    }
+    assert.match(r.read(`${DIR}/README.md`), /\r\n## Goal\r\n/)
+    assert.equal(r.read('CLAUDE.md'), windows('# Notes for Claude\n\nUse the test command.\n\n@AGENTS.md\n'))
+    const check = r.node(`${DIR}/scripts/records.mjs`, 'check')
+    assert.equal(check.status, 0, check.out)
+  })
+
+  test('a 0.x guard without its version line is warned about and replaced', () => {
+    const r = legacyRepository({ files: { [`${DIR}/scripts/records.mjs`]: '#!/usr/bin/env node\n// my own guard\nconsole.log("checked")\n' } })
+    const result = migrate(r)
+    assert.equal(result.status, 0, result.out)
+    assert.match(
+      result.out,
+      /! project\/scripts\/records\.mjs has no "\/\/ agent-ledger 0\.x\.y" version line near its top, which every released 0\.x guard has, so it was changed by hand or is not agent-ledger's guard; it is replaced with the 1\.0 guard, and the old one stays in git history/
+    )
+    assert.equal(r.read(`${DIR}/scripts/records.mjs`), readFileSync(join(PACKAGE, 'dist', 'records.mjs'), 'utf8'))
+  })
+
+  test('a released 0.x guard is replaced without a warning', () => {
+    const r = legacyRepository()
+    assert.doesNotMatch(migrate(r, '--dry-run').out, /version line/)
   })
 })
 
@@ -820,7 +949,7 @@ describe('a problem with the 1.0 rules', () => {
     const stopped = migrate(r)
     assert.equal(stopped.status, 1, stopped.out)
     assert.match(stopped.out, /Problems with the 1\.0 rules in the result \(1\):\n {2}✖ project\/tasks\/A1-lay-the-base\.md:6: evidence needs a command in backticks/)
-    assert.match(stopped.out, /Nothing was written/)
+    assert.match(stopped.out, /Nothing was written\. .* --accept-problems to write anyway; the commit of the migration is then refused until they are fixed\./)
     assert.deepEqual(snapshot(r.root), before)
 
     const dry = migrate(r, '--dry-run')
@@ -829,11 +958,17 @@ describe('a problem with the 1.0 rules', () => {
 
     const accepted = migrate(r, '--accept-problems')
     assert.equal(accepted.status, 0, accepted.out)
-    assert.match(accepted.out, /Follow-up work: the 1 problems listed above/)
+    assert.match(
+      accepted.out,
+      /Before you commit, fix the 1 problems listed above: the pre-commit hook refuses the commit until they are fixed\. See them again with: node project\/scripts\/records\.mjs check/
+    )
+    assert.doesNotMatch(accepted.out, /commit and fix them/)
     assert.equal(existsSync(join(r.root, '.resaledger.json')), true)
     const check = r.node(`${DIR}/scripts/records.mjs`, 'check')
     assert.equal(check.status, 1)
     assert.match(check.out, /A1-lay-the-base\.md:6: evidence needs a command/)
+    // What the advice says: the hooks refuse the commit.
+    assert.notEqual(r.commit('chore: migrate to ResaLedger 1.0', 'Task: maintenance').status, 0)
   })
 })
 
