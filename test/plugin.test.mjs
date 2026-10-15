@@ -100,7 +100,7 @@ describe('the plugin marketplace', () => {
       assert.equal(typeof manifest.description, 'string')
       // Skills are found in the plugin's skills/ folder, one folder per skill.
       assert.ok(existsSync(join(root, 'skills', plugin.name, 'SKILL.md')))
-      assert.equal(join(plugin.source, 'skills', plugin.name, 'SKILL.md'), SKILL)
+      assert.equal(join(plugin.source, 'skills', plugin.name, 'SKILL.md').split('\\').join('/'), SKILL)
     })
   }
 

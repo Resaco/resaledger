@@ -526,7 +526,8 @@ describe('the workflow template', () => {
 
 describe('the workflow step, run in a real repository', () => {
   const bash = spawnSync('bash', ['-c', 'command -v tar'], { encoding: 'utf8' })
-  const skip = bash.error || bash.status !== 0 ? 'bash and tar are needed' : false
+  // The step runs on the workflow's Ubuntu runner; Windows' GNU tar reads "C:" in a path as a host name.
+  const skip = process.platform === 'win32' ? 'the workflow step runs on Linux' : bash.error || bash.status !== 0 ? 'bash and tar are needed' : false
   const script = parseWorkflow(WORKFLOW).jobs.resaledger.steps.find((step) => typeof step.run === 'string').run
 
   /** Runs the step as GitHub does (bash -e -o pipefail), with a fake npm that packs `release`, or fails. */
