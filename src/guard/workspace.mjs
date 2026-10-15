@@ -253,9 +253,21 @@ export function fingerprint(source, config) {
   return createHash('sha1').update(lines.map((line) => `${line}\n`).join('')).digest('hex')
 }
 
-/** check [--index | --rev <rev>]: validates every record and exits 1 when there is a problem. */
-export function checkCommand(args) {
+/** The current branch of a repository, or null in a detached HEAD. */
+function workspaceCurrentBranch(root) {
+  const result = spawnSync('git', ['symbolic-ref', '--short', '-q', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  return result.status === 0 && result.stdout.trim() !== '' ? result.stdout.trim() : null
+}
+
+/**
+ * check [--index | --rev <rev>] [--range <from>..<to>]: validates every record and exits 1 when
+ * there is a problem. With --range it then checks that every commit in the range is recorded
+ * (spec 5.9), with the current branch as the lane, or no lane in a detached HEAD. The caller
+ * passes the range check in, as checkRange from range.mjs, which itself imports this module.
+ */
+export function checkCommand(args, rangeCheck = null) {
   let source = { kind: 'worktree' }
+  let range = null
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]
     if (arg === '--index') source = { kind: 'index' }
@@ -263,23 +275,34 @@ export function checkCommand(args) {
       if (!args[index + 1]) fail('--rev needs a revision, such as --rev HEAD')
       source = { kind: 'commit', rev: args[index + 1] }
       index += 1
-    } else fail(`unknown option "${arg}" for check; use --index or --rev <rev>`)
+    } else if (arg === '--range') {
+      const value = args[index + 1] ?? ''
+      const at = value.indexOf('..')
+      if (at <= 0 || value.includes('...')) fail('--range needs two revisions, such as --range origin/main..HEAD')
+      range = { from: value.slice(0, at), to: value.slice(at + 2) || 'HEAD' }
+      index += 1
+    } else fail(`unknown option "${arg}" for check; use --index, --rev <rev> or --range <from>..<to>`)
   }
+  if (range !== null && typeof rangeCheck !== 'function') fail('--range is not available in this build')
+  let root
   let reader
   try {
-    reader = treeReader({ ...source, root: repositoryRoot() })
+    root = repositoryRoot()
+    reader = treeReader({ ...source, root })
   } catch {
     fail('not inside a git repository')
   }
   let problems
   let workspace
+  let config = null
   try {
     // The configuration comes from the same source as the records, so an old commit is checked by its own rules.
     const loaded = loadConfig(reader)
     problems = loaded.problems
-    if (loaded.config) {
-      workspace = loadWorkspace(reader, loaded.config)
-      problems = checkWorkspace(workspace, reader, loaded.config)
+    config = loaded.config
+    if (config) {
+      workspace = loadWorkspace(reader, config)
+      problems = checkWorkspace(workspace, reader, config)
     }
   } catch (error) {
     fail(error.message)
@@ -289,4 +312,17 @@ export function checkCommand(args) {
     process.exit(1)
   }
   console.log(`✔ records valid: ${workspace.tasks.length} tasks, ${workspace.decisions.length} decisions, ${workspace.logs.length} log entries`)
+  if (range === null) return
+  const lane = workspaceCurrentBranch(root)
+  let rangeProblems
+  try {
+    rangeProblems = rangeCheck(range.from, range.to, { config, lane, skipGitHubMerges: false, root })
+  } catch (error) {
+    fail(error.message)
+  }
+  if (rangeProblems.length > 0) {
+    for (const { file, message } of rangeProblems) console.error(`✖ ${file}: ${message}`)
+    process.exit(1)
+  }
+  console.log(`✔ commits recorded: ${range.from}..${range.to}${lane === null ? ' (detached HEAD: no lane rule)' : ` (lane ${lane})`}`)
 }

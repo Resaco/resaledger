@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { DEFAULTS, effectiveConfigJson, loadConfig } from './config.mjs'
 import { gatesCommand, verifyCommand } from './gates.mjs'
 import { activateHooks, commitMsg, hooksActive, preCommit, prePush } from './githooks.mjs'
+import { checkRange } from './range.mjs'
 import { fail, repositoryRoot } from './util.mjs'
 import { checkCommand } from './workspace.mjs'
 import { workCommand } from './work.mjs'
@@ -18,7 +19,8 @@ Commands:
             the state: this lane, the other local worktrees, what is ready
             (also: status); turns on the git hooks
   check     validate the records in the working tree
-            (--index: the staged files; --rev <rev>: a commit)
+            (--index: the staged files; --rev <rev>: a commit;
+            --range <from>..<to>: also that every commit names its task)
   config    print the effective configuration
   gates     list the commit gates and the verify gates
   hooks [--activate]
@@ -109,7 +111,7 @@ export function main(argv) {
   if (command === 'version' || command === '--version') console.log(VERSION)
   else if (command === 'help' || command === '--help') process.stdout.write(HELP)
   else if (command === 'work' || command === 'status') workCommand(argv.slice(1))
-  else if (command === 'check') checkCommand(argv.slice(1))
+  else if (command === 'check') checkCommand(argv.slice(1), checkRange)
   else if (command === 'config') configCommand()
   else if (command === 'gates') gatesCommand()
   else if (command === 'verify') verifyCommand(argv.slice(1))
