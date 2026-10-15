@@ -12,6 +12,7 @@ import { slugify, taskFileName } from '../guard/tasks.mjs'
 import { checkWorkspace, loadWorkspace } from '../guard/workspace.mjs'
 import { HOOK_NAMES, renderHook } from './hooks.mjs'
 import {
+  editedLegacyTemplateSection,
   INVALID_UTF8,
   LEGACY_CONFIG_FILE,
   LEGACY_FILES,
@@ -46,7 +47,8 @@ export const COMMIT_COMMAND =
 export const UNDO_COMMAND = 'git restore -- :/ && git clean -fd -- :/'
 
 // The sections of the 0.x workspace templates (identical in 0.1, 0.2 and 0.3). A section with
-// another name is the project's own and moves; the template's own are kept in the log entry.
+// another name, or one whose text the project edited (legacy.mjs compares it with the released
+// templates), is the project's own and moves; the template's own are kept in the log entry.
 const STANDARDS_TEMPLATE_SECTIONS = ['Who owns what', 'STATUS.md', 'The task ledger', 'Plans', 'Commits', 'Quality gates']
 // The anchors in standards.md that a link to the README's Manual checks still answers.
 const MANUAL_CHECK_ANCHORS = ['quality-gates', 'manual-checks']
@@ -697,25 +699,40 @@ export function planMigration(root, options = {}) {
   logLines.push(`## The 0.x status file\n\n\`${files.status}\` as it was:\n\n${fenced(sourceLines(sources.get(files.status)).join('\n'))}`)
 
   // standards.md and the workspace AGENTS.md: template sections to the log, the project's own move.
-  const templateText = (parsed, templateSections, keep) => {
+  // A template section the project edited counts as its own, so its rules stay where agents read them.
+  const edited = { agents: new Set(), standards: new Set() }
+  for (const [name, destination] of [
+    ['agents', 'AGENTS.md'],
+    ['standards', files.readme]
+  ])
+    for (const [key, section] of legacy[name].sections) {
+      if (!editedLegacyTemplateSection(name, key, section.text, dir)) continue
+      edited[name].add(key)
+      plan.report.warnings.push(
+        `${files[name]}: the section "${key}" came from the 0.x template and has project edits, so it moves to ${destination}; review it, since it may describe 0.x commands`
+      )
+    }
+  const isTemplate = (name, templateSections) => (key) => templateSections.includes(key) && !edited[name].has(key)
+  const agentsTemplate = isTemplate('agents', AGENTS_TEMPLATE_SECTIONS)
+  const standardsTemplate = isTemplate('standards', STANDARDS_TEMPLATE_SECTIONS)
+  const templateText = (parsed, isTemplateSection, keep) => {
     const parts = []
     if (parsed.title) parts.push(`# ${parsed.title.text}`)
     if (parsed.preamble) parts.push(parsed.preamble)
     for (const [key, section] of parsed.sections) {
-      if (!templateSections.includes(key) || (keep && keep(key))) continue
+      if (!isTemplateSection(key) || (keep && keep(key))) continue
       parts.push(`${'#'.repeat(section.level)} ${section.heading}${section.text ? `\n\n${section.text}` : ''}`)
     }
     return parts.join('\n\n')
   }
-  const ownSections = (parsed, templateSections) =>
-    [...parsed.sections].filter(([key]) => !templateSections.includes(key)).map(([, section]) => section)
+  const ownSections = (parsed, isTemplateSection) => [...parsed.sections].filter(([key]) => !isTemplateSection(key)).map(([, section]) => section)
   const sectionText = (section) => `${'#'.repeat(section.level)} ${section.heading}${section.text ? `\n\n${section.text}` : ''}`
 
   const projectRules = legacyProjectRules(legacy.agents)
   const rulesArePlaceholder = projectRules === null || projectRules.split('\n').filter((line) => line.trim()).every((line) => line.includes(LEGACY_MARKER))
-  const movedAgents = [...(rulesArePlaceholder ? [] : [legacy.agents.sections.get('Project rules')]), ...ownSections(legacy.agents, AGENTS_TEMPLATE_SECTIONS)]
-  const standardsKept = templateText(legacy.standards, STANDARDS_TEMPLATE_SECTIONS)
-  const agentsKept = templateText(legacy.agents, AGENTS_TEMPLATE_SECTIONS, (key) => key === 'Project rules' && !rulesArePlaceholder)
+  const movedAgents = [...(rulesArePlaceholder ? [] : [legacy.agents.sections.get('Project rules')]), ...ownSections(legacy.agents, agentsTemplate)]
+  const standardsKept = templateText(legacy.standards, standardsTemplate)
+  const agentsKept = templateText(legacy.agents, agentsTemplate, (key) => key === 'Project rules' && !rulesArePlaceholder)
   const templateLog = []
   if (standardsKept) templateLog.push(`### \`${files.standards}\`\n\n${fenced(standardsKept)}`)
   if (agentsKept) templateLog.push(`### \`${files.agents}\`\n\n${fenced(agentsKept)}`)
@@ -738,7 +755,7 @@ export function planMigration(root, options = {}) {
     manual ??= `${MARKER}: the checks that need eyes or judgement, each with what is compared and what passes, or "None".`
     readmeSegments.push({ text: `\n\n## Manual checks\n\n${manual}`, frame: files.standards })
   }
-  for (const section of ownSections(legacy.standards, STANDARDS_TEMPLATE_SECTIONS)) readmeSegments.push({ text: `\n\n${sectionText(section)}`, frame: files.standards })
+  for (const section of ownSections(legacy.standards, standardsTemplate)) readmeSegments.push({ text: `\n\n${sectionText(section)}`, frame: files.standards })
   const atMigration = ['Phase', 'Waiting for the owner']
     .map((name) => ({ name, text: legacy.status.sections.get(name)?.text ?? '' }))
     .filter((part) => part.text)
@@ -907,7 +924,7 @@ ${logLines.join('\n\n')}
   const before = plannedReader(root, tracked, new Map())
   const after = plannedReader(root, finalFiles, new Map())
   const folder = (path) => (after.exists(path) ? { path, anchor: '', folder: true } : null)
-  const movedStandards = ownSections(legacy.standards, STANDARDS_TEMPLATE_SECTIONS).map((section) => headingAnchor(section.heading))
+  const movedStandards = ownSections(legacy.standards, standardsTemplate).map((section) => headingAnchor(section.heading))
   const mapTarget = (path, anchor) => {
     if (path === files.ledger) {
       if (anchor && taskFiles.has(anchor)) return { path: taskFiles.get(anchor), anchor: '' }
