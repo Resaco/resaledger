@@ -30,10 +30,10 @@ The guard is written as modules in `src/guard/` and bundled into one file ([F1](
 | `tasks.mjs` | R3 | `TASK_ID`; `parseTask(path, text) → task`; `validateTask(task, context) → problems`; `validateTaskSet(tasks, context) → problems` (unique ids, dependencies, WIP per lane); `taskFileName(dir, id, title)`; `slugify(title)`; `TASK_FIELDS` |
 | `records.mjs` | R4 | `SETUP_MARKER`; `parseDecision`, `validateDecision`, `parseLogEntry`, `validateLogEntry`, `planStatus(text) → { value, date, by, line } \| null`, `validatePlanStatus(path, status)`, `parseReadme(path, text)` (its `sections` is a Map), `validateReadme` |
 | `workspace.mjs` | R5 | `treeReader(source)` with `source` `{ kind: 'worktree' }`, `{ kind: 'index' }` or `{ kind: 'commit', rev }` and an optional `root`, returning `{ list(prefix), read(path), exists(path) }`; `loadWorkspace(reader, config) → workspace` (parse problems in `workspace.problems`); `checkWorkspace(workspace, reader, config) → problems`; `isCode(path, config)`; `fingerprint(source, config)` (index or commit sources only); `checkCommand(args)`, which reads the configuration from the source it checks |
-| `gates.mjs` | V1 | `runGates(commands) → { passed, failure }`; `stampPath(fingerprint)`; `verifyCommand(options)`; `gatesCommand()` |
+| `gates.mjs` | V1 | `runGates(commands) → { passed, failure }`; `stampPath(config, fingerprint)` → `<dir>/verified/<first 16 hex>.json`; `verifiedStamp(reader, config, fingerprint) → stamp \| null`; `verifyCommand(options)`; `gatesCommand()` |
 | `range.mjs` | V2 | `taskTrailers(message) → ids`; `checkRange(from, to, context) → problems`, with `context = { config, lane, skipGitHubMerges, root }` (`lane` null skips the lane rule) |
 | `handoff.mjs` | V3 | `handoffProblems(context) → problems`; `handoffCommand()` |
-| `githooks.mjs` | H1, H2, H3 | `preCommit()`, `commitMsg(file)`, `prePush(stdin)`, `hooksActive()`, `activateHooks()` |
+| `githooks.mjs` | H1, H2, H3 | `HOOKS_PATH = '.githooks'`; `preCommit()`, `commitMsg(file)`, `prePush(input)`, `hooksActive()` (also true when a hook manager calls the guard), `activateHooks() → 'activated' \| 'active' \| { foreign }` |
 | `lanes.mjs` | W1, W2 | `currentLane()`; `localLanes()`; `remoteLanes(options)` |
 | `work.mjs` | W1 | `workCommand(options)` |
 | `create.mjs` | W3 | `taskCommand(id)`; `newCommand(args)`; `nextTaskId(prefix, known)`; `nextChildId(parent, known)` |
@@ -41,6 +41,7 @@ The guard is written as modules in `src/guard/` and bundled into one file ([F1](
 | `changes.mjs` | W5 | `changesCommand(args)` |
 | `ci.mjs` | C1–C3 | `ciCommand(args)` and its helpers |
 | `agents.mjs` | A1, A2 | `hookCommand(agent, event)` and the input adapters |
+| `cli/hooks.mjs` (package side) | H3 | `HOOK_NAMES`; `renderHook(name, dir)`; `detectHookManager(root)`; `integrateHookManager(root, manager, dir) → { changed, instructions }` |
 | `main.mjs` | F1, then every command task | Parses arguments and calls the commands. It is the bundle's last module. |
 
 ## The workspace object

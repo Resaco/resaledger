@@ -37,3 +37,7 @@ R3 and F2 merged. Task files parse and validate as the specification says, CI is
 ## 2026-10-15 · The record format is complete
 
 R5 merged, which completes phase R: the guard reads a workspace from the working tree, the index or any commit, `check` validates it in about half a second for 300 tasks, and the fingerprint of the code is the same from the index and from the commit and across line-ending styles. 213 tests pass on Node 20, 22 and 24. The commit range check (V2) started.
+
+## 2026-10-15 · The hook scripts, and the finished identity
+
+H3 merged: POSIX hook scripts that find Node or Bun on every platform, `hooks --activate` for a fresh clone, and integration with husky and simple-git-hooks, with snippets for lefthook and the pre-commit framework. 230 tests pass. The designer finished the C1 identity, which waits for the owner's approval. H1 needs V1's gate runner, so V1 and W1 run first, next to V2.

@@ -43,11 +43,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: No spray texture anywhere, by the owner's decision; the grain stays.
 
 ### G2 Final logo and cover
-- Status: doing
+- Status: blocked
 - Depends on: G1
 - Plan: [G-brand.md](../plan/G-brand.md#g2-final-logo-and-cover)
 - Evidence: —
-- Notes: The designer finishes C1 in the private brand files. Next: the owner approves the finished set, then the exports come into `docs/assets/brand/`.
+- Notes: Waiting for the owner: the finished C1 set is ready for approval in the private brand files, with two deliberate deviations to accept: at 16 px the inner corners are square so the three lanes stay crisp, and the light cover's small text uses the wall colour for contrast. After approval, the exports come into `docs/assets/brand/`.
 
 ### G3 Animated explanations of how it works
 - Status: todo
@@ -112,11 +112,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 ## V: Gates, stamps, the range check and handoff
 
 ### V1 Gates and stamps
-- Status: todo
+- Status: doing
 - Depends on: R5
 - Plan: [V-verify.md](../plan/V-verify.md#v1-gates-and-stamps)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `v1-gates` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### V2 The commit range check
 - Status: doing
@@ -149,20 +149,20 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: —
 
 ### H3 Hook scripts and activation
-- Status: doing
+- Status: done
 - Depends on: F1
 - Plan: [H-hooks.md](../plan/H-hooks.md#h3-hook-scripts-and-activation)
-- Evidence: —
-- Notes: A worker builds it on branch `h3-hook-scripts` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs` on `main` after the merge: 230 of 230 on Node 24.18.0, 22.23.3 and 20.20.2; the 17 hook tests in [githooks.test.mjs](../../test/githooks.test.mjs) run the hooks through real git commits and pushes, find Node with a limited PATH, and integrate husky and simple-git-hooks idempotently. Not verified: Windows and Linux (CI); lefthook and the pre-commit framework against real installations.
+- Notes: For lefthook and the pre-commit framework the guard prints a snippet instead of editing YAML. The pre-commit framework passes no stdin to pre-push hooks, so H2 needs its environment variables instead.
 
 ## W: The daily commands
 
 ### W1 `work` on this machine
-- Status: todo
+- Status: doing
 - Depends on: R5, H3
 - Plan: [W-work.md](../plan/W-work.md#w1-work-on-this-machine)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `w1-work` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### W2 `work --all` across pushed branches
 - Status: todo

@@ -1,15 +1,15 @@
 {
   "version": 1,
-  "code": "71fdc1db88d197a17efc137ec09fc6182d9c7672",
-  "verified": "2026-10-15T00:00:53.200Z",
+  "code": "e114438b64d66dd94b50b25228d2b1090ffdcccc",
+  "verified": "2026-10-15T00:03:39.152Z",
   "gates": [
     {
       "run": "node scripts/bundle.mjs --check",
-      "seconds": 0.1
+      "seconds": 0.2
     },
     {
       "run": "npm test",
-      "seconds": 10.4
+      "seconds": 22.6
     }
   ]
 }
