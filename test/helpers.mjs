@@ -50,6 +50,20 @@ export function run(cwd, command, args = [], input) {
   return { status: result.status, out: `${result.stdout}${result.stderr}` }
 }
 
+/**
+ * A clone of this repository at its last 0.x commit, the parent of the commit that moved it to
+ * 1.0, so that tests keep reading real 0.x records; null when that history is missing, as in a
+ * shallow clone.
+ */
+export function legacyClone() {
+  const found = run(PACKAGE, 'git', ['log', '--no-renames', '--diff-filter=D', '--format=%H', '-1', '--', '.agent-ledger.json'])
+  const migration = found.status === 0 ? found.out.trim() : ''
+  if (!/^[0-9a-f]{40}$/.test(migration)) return null
+  const root = join(temporary(), 'legacy')
+  if (run(PACKAGE, 'git', ['clone', '-q', '--no-checkout', PACKAGE, root]).status !== 0) return null
+  return run(root, 'git', ['checkout', '-q', '-b', 'legacy', `${migration}^`]).status === 0 ? root : null
+}
+
 /** Helpers bound to one working folder: a repository or one of its worktrees. */
 function bind(base, root) {
   const r = {

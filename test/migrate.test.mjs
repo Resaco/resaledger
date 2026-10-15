@@ -6,7 +6,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync,
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { convertConfig, lineDiff, planMigration, UNDO_COMMAND } from '../src/cli/migrate.mjs'
-import { PACKAGE, repository, run, temporary } from './helpers.mjs'
+import { legacyClone, PACKAGE, repository, run, temporary } from './helpers.mjs'
 
 const CLI = join(PACKAGE, 'bin', 'resaledger.mjs')
 const DIR = 'project'
@@ -1054,14 +1054,10 @@ describe('the configuration', () => {
 })
 
 describe("this repository's own 0.x workspace", () => {
-  const legacy = existsSync(join(PACKAGE, '.agent-ledger.json'))
+  // This repository at its last 0.x commit, on a branch of its own.
+  const root = legacyClone()
 
-  test('migrates in a clone without losing a line, and the result commits through the new hooks', { skip: !legacy && 'this repository is on 1.0 already' }, () => {
-    const base = temporary()
-    const root = join(base, 'clone')
-    const cloned = run(base, 'git', ['clone', '-q', PACKAGE, root])
-    assert.equal(cloned.status, 0, cloned.out)
-    run(root, 'git', ['checkout', '-q', '-b', 'migrate-test'])
+  test('migrates in a clone without losing a line, and the result commits through the new hooks', { skip: root === null && 'the history before this repository moved to 1.0 is not in this clone' }, () => {
     const result = run(root, process.execPath, [CLI, 'migrate', '--accept-problems'])
     assert.equal(result.status, 0, result.out)
     assert.doesNotMatch(result.out, /not in any new file/)

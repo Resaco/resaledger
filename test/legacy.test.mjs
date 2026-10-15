@@ -27,7 +27,10 @@ import {
   parseLegacyStatus,
   readLegacyWorkspace
 } from '../src/cli/legacy.mjs'
-import { PACKAGE, temporary } from './helpers.mjs'
+import { legacyClone, temporary } from './helpers.mjs'
+
+// This repository at its last 0.x commit.
+const LEGACY = legacyClone()
 
 const crlf = (text) => text.replace(/\n/g, '\r\n')
 
@@ -550,9 +553,9 @@ describe('readLegacyWorkspace', () => {
   })
 })
 
-describe("this repository's own 0.x records", () => {
-  const workspace = readLegacyWorkspace(PACKAGE)
-  const read = (path) => readFileSync(join(PACKAGE, path), 'utf8')
+describe("this repository's own 0.x records", { skip: LEGACY === null && 'the history before this repository moved to 1.0 is not in this clone' }, () => {
+  const workspace = LEGACY === null ? null : readLegacyWorkspace(LEGACY)
+  const read = (path) => readFileSync(join(LEGACY, path), 'utf8')
   const count = (path, pattern) => read(path).split(/\r?\n/).filter((line) => pattern.test(line)).length
 
   test('parse without a problem, with the counts of a plain line scan', () => {
