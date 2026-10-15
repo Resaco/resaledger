@@ -54,6 +54,13 @@ test('email addresses are caught unless no-reply or reserved examples', () => {
   assert.deepEqual(rules(`react${AT}18.3.1 and actions/checkout${AT}v4`), [])
 })
 
+test('a string escape ends an address: an import after \\n is not one, an address after it is', () => {
+  const rules = (text) => checkText(text).map((hit) => hit.rule)
+  assert.deepEqual(rules(`'Use the test command.\\n\\n${AT}AGENTS.md\\n'`), [])
+  assert.deepEqual(rules(`'Contact:\\njane${AT}corp.fi'`), ['email'])
+  assert.deepEqual(rules(`'\\tjane${AT}corp.fi'`), ['email'])
+})
+
 test('deny-list entries match whole words, case-insensitively, spaces included', () => {
   const rules = (text, entries) => checkText(text, denyPatterns(entries)).map((hit) => hit.rule)
   assert.deepEqual(rules(`a ${PRIVATE.toUpperCase()} b`, [PRIVATE]), ['deny-list'])

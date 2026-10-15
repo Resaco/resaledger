@@ -74,7 +74,9 @@ export function checkLine(line, deny = []) {
     if (!PLACEHOLDERS.has(found[1].toLowerCase())) hits.push({ rule: 'home-path', match: found[0] })
   }
   for (const found of line.matchAll(AGENT_MEMORY)) hits.push({ rule: 'agent-memory', match: found[0] })
-  for (const found of line.matchAll(EMAIL)) {
+  // A string escape such as \n ends an address, so an import written after one in a code string
+  // is not read as an address, and an address written after one is still found.
+  for (const found of line.replace(/\\[nrt]/g, ' ').matchAll(EMAIL)) {
     if (!allowedEmail(found[0])) hits.push({ rule: 'email', match: found[0] })
   }
   for (const { entry, pattern } of deny) {
