@@ -194,6 +194,26 @@ test('a handoff older than the last commit naming the task fails', () => {
   assert.equal(handoff(r).out, PASSED)
 })
 
+test('a byte 0x01 in a message neither hides the commit that names the task nor an unrecorded one', () => {
+  const r = verifiedSession()
+  r.write('src/orders.js', 'export const orders = [1]\n')
+  committed(r.git('add', '-A'))
+  r.write('.git/HANDOFF_MSG', 'feat: seed orders\n\n\x01\nTask: S1\n')
+  committed(r.git('commit', '-q', '--cleanup=verbatim', '-F', '.git/HANDOFF_MSG'))
+  verifyAndCommit(r)
+  refused(r, `ledger/tasks/S1.md:10: S1's handoff is older than your last commit on it (${short(r, 'HEAD~1')}): rewrite it`)
+  commit(r, { 'ledger/tasks/S1.md': doingTask('S1', 'main', 'Seeded. Next: views.') }, 'docs: hand off S1')
+  r.write('src/orders.js', 'export const orders = [2]\n')
+  committed(r.git('add', '-A'))
+  r.write('.git/HANDOFF_MSG', 'feat: hide me\n\n\x01')
+  committed(r.git('commit', '-q', '--no-verify', '--cleanup=verbatim', '-F', '.git/HANDOFF_MSG'))
+  verifyAndCommit(r)
+  refused(
+    r,
+    `${short(r, 'HEAD~1')}: "feat: hide me" changes code but names no task. Add a trailer line "Task: <id>" to the message body for the task it belongs to, or "Task: maintenance" for a change with no behaviour change`
+  )
+})
+
 test('a commit made with --no-verify that names no task fails', () => {
   const r = verifiedSession()
   r.write('src/orders.js', 'export const orders = [2]\n')

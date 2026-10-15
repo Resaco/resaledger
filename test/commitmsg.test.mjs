@@ -130,16 +130,60 @@ test('a revert is exempt', () => {
   assert.match(r.git('log', '-1', '--format=%B').out, /This reverts commit/)
 })
 
-test('a release commit is exempt', () => {
+test('a release subject exempts nothing: with code it needs a Task: line and, if conventional, a conventional header', () => {
   const r = workspace({ config: { commitStyle: 'conventional' } })
   r.write('package.json', '{ "version": "1.2.0" }\n')
-  passed(r.commit('Release v1.2.0'))
+  refused(r.commit('Release v1.2.0'), /does not follow Conventional Commits[\s\S]*"Release v1.2.0" changes code but names no task/)
+  passed(r.commit('chore(release): v1.2.0', 'Task: maintenance'))
 })
 
 test('an exempt commit is still refused for attribution when it is forbidden', () => {
-  const r = workspace({ config: { aiAttribution: 'forbid' } })
-  r.write('package.json', '{ "version": "1.2.0" }\n')
-  refused(r.commit('Release v1.2.0', `Co-authored-by: Claude <noreply${AT}anthropic.com>`), /the trailer "Co-authored-by: Claude/)
+  const r = mine({ config: { aiAttribution: 'forbid' } })
+  code(r)
+  passed(r.commit('feat: app', 'Task: S1'))
+  const reverted = r.git('rev-parse', 'HEAD').out.trim()
+  assert.equal(r.git('revert', '--no-commit', 'HEAD').status, 0)
+  const result = r.commit('Revert "feat: app"', `This reverts commit ${reverted}.`, `Co-authored-by: Claude <noreply${AT}anthropic.com>`)
+  refused(result, /the trailer "Co-authored-by: Claude/)
+  assert.doesNotMatch(result.out, /names no task/)
+})
+
+test('an evil merge, with code neither side changed, is refused without a Task: line', () => {
+  const r = mine({ config: { commitStyle: 'conventional' } })
+  r.git('checkout', '-q', '-b', 'side')
+  r.write('notes.md', 'Notes.\n')
+  passed(r.commit('docs: notes'))
+  r.git('checkout', '-q', 'mine')
+  assert.equal(r.git('merge', '-q', '--no-ff', '--no-commit', 'side').status, 0)
+  code(r)
+  r.git('add', '-A')
+  refused(r.git('commit', '-q', '-m', 'Merge branch side'), /"Merge branch side" is a merge that changes code neither side changed \(src\/app\.js\), but names no task/)
+  // With a Task: line it passes; a merge header need not be conventional.
+  passed(r.git('commit', '-q', '-m', 'Merge branch side', '-m', 'Task: S1'))
+})
+
+test('a fake revert is refused: the line must name an ancestor whose change this one inverts', () => {
+  const r = mine()
+  code(r)
+  passed(r.commit('feat: app', 'Task: S1'))
+  const added = r.git('rev-parse', 'HEAD').out.trim()
+  r.write('src/evil.js', '1\n')
+  refused(r.commit('feat: sneak', `This reverts commit ${added}.`), /"feat: sneak" changes code but names no task/)
+  refused(r.commit('feat: sneak', 'This reverts commit 0123456.'), /"feat: sneak" changes code but names no task/)
+})
+
+test('commit --amend that drops the trailer from a code commit is refused', () => {
+  const r = mine()
+  code(r)
+  passed(r.commit('feat: app', 'Task: S1'))
+  refused(r.git('commit', '-q', '--amend', '-m', 'feat: app, trailer removed'), /"feat: app, trailer removed" changes code but names no task/)
+  passed(r.git('commit', '-q', '--amend', '-m', 'feat: app, reworded', '-m', 'Task: S1'))
+  // Amending a records-only commit, or a real revert, with only a new message passes.
+  r.write('notes.md', 'Notes.\n')
+  passed(r.commit('docs: notes'))
+  passed(r.git('commit', '-q', '--amend', '-m', 'docs: more notes'))
+  passed(r.git('revert', '--no-edit', 'HEAD~1'))
+  passed(r.git('commit', '-q', '--amend', '--no-edit'))
 })
 
 // commitStyle: conventional

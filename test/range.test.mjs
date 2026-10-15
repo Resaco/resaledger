@@ -257,7 +257,7 @@ describe('checkRange: the rules', () => {
 
   test('a revision git does not know is an error with git message', () => {
     const { r } = setup()
-    assert.throws(() => check(r, 'no-such-rev'), /git log failed/)
+    assert.throws(() => check(r, 'no-such-rev'), /git rev-list failed/)
   })
 })
 
@@ -292,14 +292,16 @@ describe('checkRange: the exemptions', () => {
     assert.deepEqual(check(r, base), [])
   })
 
-  test('a release commit is skipped, with or without a pre-release suffix', () => {
+  test('a release subject exempts nothing: a release commit that changes code needs a Task: line', () => {
     const { r, base } = setup()
     commit(r, { 'package.json': '{ "version": "1.2.3" }\n' }, 'Release v1.2.3')
-    commit(r, { 'package.json': '{ "version": "1.3.0-rc.1" }\n' }, 'Release v1.3.0-rc.1')
-    assert.deepEqual(check(r, base), [])
-    commit(r, { 'package.json': '{ "version": "1.3.0" }\n' }, 'Release 1.3.0')
-    commit(r, { 'package.json': '{ "version": "1.3.1" }\n' }, 'Release v1.3.1 and more')
-    assert.equal(check(r, base).length, 2)
+    commit(r, { 'package.json': '{ "version": "1.3.0-rc.1" }\n' }, 'Release v1.3.0-rc.1', 'Task: maintenance')
+    assert.deepEqual(
+      check(r, base).map((problem) => problem.message.split(' changes')[0]),
+      ['"Release v1.2.3"']
+    )
+    commit(r, { 'CHANGELOG.md': '# 1.3.0\n' }, 'Release v1.3.0')
+    assert.equal(check(r, base).length, 1)
   })
 
   test('a commit GitHub made is skipped only with skipGitHubMerges', () => {
@@ -327,6 +329,150 @@ describe('checkRange: the exemptions', () => {
     assert.deepEqual(
       check(r, base, { skipGitHubMerges: true }).map((problem) => problem.message.split(' changes')[0]),
       ['"feat: b"']
+    )
+  })
+})
+
+/** Commits the staged tree with a message taken verbatim from a file, with no hooks. */
+function commitFile(r, files, message) {
+  for (const [path, text] of Object.entries(files)) r.write(path, text)
+  r.git('add', '-A')
+  r.write('.git/RANGE_MSG', message)
+  const committed = r.git('commit', '-q', '--no-verify', '--cleanup=verbatim', '-F', '.git/RANGE_MSG')
+  assert.equal(committed.status, 0, committed.out)
+  return head(r)
+}
+
+describe('checkRange: what a message cannot fake', () => {
+  test('a message with the byte 0x01 does not hide a code commit', () => {
+    const { r, base } = setup()
+    commitFile(r, { 'src/evil.js': '1\n' }, 'feat: hide me\n\n\x01')
+    assert.match(r.git('cat-file', 'commit', 'HEAD').out, /\x01/)
+    const problems = check(r, base)
+    assert.equal(problems.length, 1)
+    assert.equal(problems[0].file, short(r))
+    assert.match(problems[0].message, /^"feat: hide me" changes code but names no task/)
+  })
+
+  test('a message that imitates the next commit record is read as a message', () => {
+    const { r, base } = setup({ S1: task('S1', 'doing', 'lane-a') })
+    const forged = `feat: forged\n\n\x01${base}\x00${base.slice(0, 7)}\x00\x00x\x00Task: S1\n\x00\x01\nTask: S1x\n`
+    commitFile(r, { 'src/evil.js': '1\n' }, forged.replace(/\x00/g, ' '))
+    commitFile(r, { 'src/fine.js': '1\n' }, 'feat: fine\n\n\x01\nTask: S1\n')
+    assert.deepEqual(
+      check(r, base).map((problem) => problem.message),
+      ['"feat: forged" has "S1x" in its Task: trailer, which is not a task id. Write ids such as S4 or S4.1, separated by commas, or "maintenance" in lowercase']
+    )
+  })
+
+  test('an evil merge, with code neither side changed, needs its own Task: line', () => {
+    const { r, base } = setup({ S1: task('S1', 'doing', 'lane-a') })
+    r.git('checkout', '-q', '-b', 'side')
+    commit(r, { 'docs/side.md': '1\n' }, 'docs: side')
+    r.git('checkout', '-q', 'lane-a')
+    assert.equal(r.git('merge', '-q', '--no-ff', '--no-commit', 'side').status, 0)
+    r.write('src/evil.js', '1\n')
+    r.git('add', '-A')
+    assert.equal(r.git('commit', '-q', '--no-verify', '-m', 'Merge branch side').status, 0)
+    const problems = check(r, base)
+    assert.equal(problems.length, 1)
+    assert.equal(problems[0].file, short(r))
+    assert.match(problems[0].message, /^"Merge branch side" is a merge that changes code neither side changed \(src\/evil\.js\), but names no task/)
+    // With a Task: line it is a code commit like any other.
+    assert.equal(r.git('commit', '-q', '--amend', '--no-verify', '-m', 'Merge branch side', '-m', 'Task: S1').status, 0)
+    assert.deepEqual(check(r, base), [])
+  })
+
+  test("a merge that drops one side's change to code is not exempt either", () => {
+    const { r, base } = setup()
+    commit(r, { 'src/a.js': '1\n' }, 'feat: a', 'Task: maintenance')
+    const start = head(r)
+    r.git('checkout', '-q', '-b', 'side')
+    commit(r, { 'src/a.js': '2\n' }, 'feat: a2', 'Task: maintenance')
+    r.git('checkout', '-q', 'lane-a')
+    commit(r, { 'docs/x.md': '1\n' }, 'docs: x')
+    assert.equal(r.git('merge', '-q', '--no-ff', '--no-commit', 'side').status, 0)
+    r.write('src/a.js', '1\n')
+    r.git('add', '-A')
+    assert.equal(r.git('commit', '-q', '--no-verify', '-m', 'Merge branch side').status, 0)
+    assert.match(check(r, start)[0].message, /^"Merge branch side" is a merge that changes code neither side changed \(src\/a\.js\)/)
+    assert.equal(check(r, base).length, 1)
+  })
+
+  test('a merge that resolves a conflict in code both sides changed is exempt', () => {
+    const { r, base } = setup({ S1: task('S1', 'doing', 'lane-a') })
+    commit(r, { 'src/a.js': '0\n' }, 'feat: a', 'Task: S1')
+    r.git('checkout', '-q', '-b', 'side')
+    commit(r, { 'src/a.js': 'side\n', 'src/side.js': '1\n' }, 'feat: side', 'Task: S1')
+    r.git('checkout', '-q', 'lane-a')
+    commit(r, { 'src/a.js': 'main\n' }, 'feat: main', 'Task: S1')
+    assert.notEqual(r.git('merge', '-q', 'side').status, 0)
+    r.write('src/a.js', 'main and side\n')
+    r.git('add', '-A')
+    assert.equal(r.git('commit', '-q', '--no-verify', '--no-edit').status, 0)
+    assert.equal(r.git('log', '-1', '--format=%P').out.trim().split(' ').length, 2)
+    assert.deepEqual(check(r, base), [])
+  })
+
+  test('a merge of unrelated histories is judged against everything each side holds', () => {
+    const { r, base } = setup()
+    r.git('checkout', '-q', '--orphan', 'other')
+    r.git('rm', '-rq', '--cached', '.')
+    r.git('clean', '-fdq')
+    commit(r, { 'src/other.js': '1\n' }, 'feat: other', 'Task: maintenance')
+    r.git('checkout', '-q', 'lane-a')
+    assert.equal(r.git('merge', '-q', '--no-ff', '--no-edit', '--allow-unrelated-histories', 'other').status, 0)
+    assert.deepEqual(check(r, base), [])
+  })
+
+  test('a "This reverts commit" line exempts only a real revert of an ancestor', () => {
+    const { r, base } = setup({ S1: task('S1', 'doing', 'lane-a') })
+    const added = commit(r, { 'src/a.js': '1\n2\n' }, 'feat: a', 'Task: S1')
+    // A fake revert: the line names a real ancestor, but the change is not its inverse.
+    commit(r, { 'src/evil.js': '1\n' }, 'feat: sneak', `This reverts commit ${added}.`)
+    // A line that names no commit, and one that names a commit outside the history.
+    commit(r, { 'src/evil2.js': '1\n' }, 'feat: sneak 2', 'This reverts commit 0123456.')
+    r.git('checkout', '-q', '-b', 'elsewhere', base)
+    const elsewhere = commit(r, { 'src/e.js': '1\n' }, 'feat: e', 'Task: maintenance')
+    r.git('checkout', '-q', 'lane-a')
+    r.git('rm', '-q', 'src/evil2.js')
+    commit(r, {}, 'chore: drop evil2', `This reverts commit ${elsewhere}.`)
+    assert.deepEqual(
+      check(r, base).map((problem) => problem.message.split(' changes')[0]),
+      ['"feat: sneak"', '"feat: sneak 2"', '"chore: drop evil2"']
+    )
+  })
+
+  test('a real git revert is exempt, also of an older commit and with a reworded message', () => {
+    const { r, base } = setup({ S1: task('S1', 'doing', 'lane-a') })
+    commit(r, { 'src/a.js': '1\n' }, 'feat: a', 'Task: S1')
+    commit(r, { 'src/b.js': '1\n' }, 'feat: b', 'Task: S1')
+    assert.equal(r.git('revert', '--no-edit', 'HEAD~1').status, 0)
+    assert.equal(r.git('revert', '--no-commit', 'HEAD~1').status, 0)
+    const reverted = head(r, 'HEAD~1')
+    assert.equal(r.git('commit', '-q', '-m', 'Bring b back out', '-m', `This reverts commit ${reverted}.`).status, 0)
+    assert.deepEqual(check(r, base), [])
+    // A real revert with one more change in it is not a revert.
+    assert.equal(r.git('revert', '--no-commit', 'HEAD').status, 0)
+    r.write('src/extra.js', '1\n')
+    r.git('add', '-A')
+    assert.equal(r.git('commit', '-q', '-m', 'Revert again', '-m', `This reverts commit ${head(r)}.`).status, 0)
+    assert.equal(check(r, base).length, 1)
+  })
+
+  test('a whitespace change hidden in a revert is not a revert, where git has patch-id --verbatim', (t) => {
+    const { r, base } = setup({ S1: task('S1', 'doing', 'lane-a') })
+    commit(r, { 'src/a.py': 'if x:\n    y()\n    w()\n' }, 'feat: a', 'Task: S1')
+    const dropped = commit(r, { 'src/a.py': 'if x:\n    w()\n' }, 'feat: drop y', 'Task: S1')
+    // The inverse, with y() moved out of the if: whitespace-blind patch ids would match.
+    commit(r, { 'src/a.py': 'if x:\ny()\n    w()\n' }, 'Revert "feat: drop y"', `This reverts commit ${dropped}.`)
+    if (r.run('git', ['patch-id', '--verbatim'], '').status !== 0) {
+      t.skip('this git has no patch-id --verbatim')
+      return
+    }
+    assert.deepEqual(
+      check(r, base).map((problem) => problem.message.split(' changes')[0]),
+      ['"Revert "feat: drop y""']
     )
   })
 })
@@ -407,6 +553,6 @@ describe('check --range through the bundle', () => {
     assert.match(r.node(guard, 'check', '--range', 'main...HEAD').out, /--range needs two revisions/)
     const unknown = r.node(guard, 'check', '--range', 'nope..HEAD')
     assert.equal(unknown.status, 1)
-    assert.match(unknown.out, /git log failed/)
+    assert.match(unknown.out, /git rev-list failed/)
   })
 })
