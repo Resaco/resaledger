@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ciCommand } from './ci.mjs'
+import { claimCommand } from './claim.mjs'
 import { DEFAULTS, effectiveConfigJson, loadConfig } from './config.mjs'
 import { newCommand, taskCommand } from './create.mjs'
 import { gatesCommand, verifyCommand } from './gates.mjs'
@@ -32,6 +33,14 @@ Commands:
             a decision file with today's date
   new log "<title>"
             a log entry with today's date and this lane
+  claim <id> [--take] [--branch <name>] [--worktree <path>] [--push]
+            take a task: refuses one another lane holds (here, in another
+            worktree or on a pushed branch; team fetches first), sets
+            Status: doing and Lane, and checks the WIP limit and the plan;
+            --take takes it over and records where from; on a protected
+            base, or with --branch, it creates the lane branch first;
+            --worktree creates it in a new worktree; with claimPush or
+            --push it commits the claim alone and pushes the branch
   check     validate the records in the working tree
             (--index: the staged files; --rev <rev>: a commit;
             --range <from>..<to>: also that every commit names its task)
@@ -133,6 +142,7 @@ export function main(argv) {
   else if (command === 'work' || command === 'status') workCommand(argv.slice(1))
   else if (command === 'task') taskCommand(argv[1])
   else if (command === 'new') newCommand(argv.slice(1))
+  else if (command === 'claim') claimCommand(argv.slice(1))
   else if (command === 'ci') ciCommand(argv.slice(1))
   else if (command === 'check') checkCommand(argv.slice(1), checkRange)
   else if (command === 'config') configCommand()
