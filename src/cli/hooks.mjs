@@ -19,12 +19,12 @@ export function renderHook(name, dir) {
 const HOOK_ARGUMENTS = { 'pre-commit': '', 'commit-msg': ' "$1"', 'pre-push': ' "$@"' }
 
 /** The shell command that calls the guard for one hook. */
-function guardCall(name, dir) {
+export function guardCall(name, dir) {
   return `node "${dir}/scripts/records.mjs" ${name}${HOOK_ARGUMENTS[name]}`
 }
 
 /** The comment line that marks the guard's call in a hook manager's file. */
-function callMarker(name) {
+export function callMarker(name) {
   return `# resaledger: ${name} call, managed by ResaLedger; do not edit`
 }
 
