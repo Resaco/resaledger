@@ -116,6 +116,10 @@ export function migrateCommand(args) {
   )
   list('Links that could not be rewritten', unresolved.map((link) => `${link.file}:${link.line}: ${link.target} (${link.unresolved})`))
   list('Waiting for, taken from the notes of blocked tasks', report.waiting.map(({ id, value }) => `${id}: ${value}`))
+  list(
+    'Lanes taken from the one unmerged branch whose commits name the task',
+    report.laneFromBranch.map(({ id, lane }) => `${id}: Lane: ${lane}`)
+  )
   if (report.laneGiven.length > 0)
     console.log(`\ndoing tasks without a Lane get Lane: ${report.lane}; run migrate on the branch the work continues on, or take them over with claim --take afterwards.`)
   list('Warnings', report.warnings.map((warning) => `! ${warning}`))

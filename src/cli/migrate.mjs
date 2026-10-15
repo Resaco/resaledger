@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, posix } from 'node:path'
 import { CONFIG_FILE, isSafeFolderPath, parseConfig, SAFE_FOLDER_RULE } from '../guard/config.mjs'
+import { readCommits, taskTrailers } from '../guard/range.mjs'
 import { slugify, taskFileName } from '../guard/tasks.mjs'
 import { checkWorkspace, loadWorkspace } from '../guard/workspace.mjs'
 import { HOOK_NAMES, renderHook } from './hooks.mjs'
@@ -536,7 +537,7 @@ export function planMigration(root, options = {}) {
     renames: [],
     executable: new Set(),
     logEntry: null,
-    report: { created: [], changed: [], deleted: [], renamed: [], warnings: [], links: [], waiting: [], laneGiven: [], lane: null, unmappedKeys: [], counts: {} },
+    report: { created: [], changed: [], deleted: [], renamed: [], warnings: [], links: [], waiting: [], laneGiven: [], laneFromBranch: [], lane: null, unmappedKeys: [], counts: {} },
     problems: [],
     refusals: []
   }
@@ -587,6 +588,8 @@ export function planMigration(root, options = {}) {
   const today = options.today ?? localDate()
   const lane = options.lane === undefined ? currentBranch(root) : options.lane
   plan.report.lane = lane
+  const unmerged = unmergedBranches(root)
+  const namedBy = branchesNamingTasks(root, unmerged)
   const tracked = new Set(gitOut(root, ['ls-files', '-z']).split('\0').filter(Boolean))
   const sources = legacy.sources
   const files = Object.fromEntries(Object.entries(LEGACY_FILES).map(([name, path]) => [name, `${dir}/${path}`]))
@@ -623,11 +626,17 @@ export function planMigration(root, options = {}) {
       out.push(value ? `- ${name}: ${value}` : `- ${name}:`)
       for (const item of attached) if (item.name === name) out.push(item.line)
       if (name === 'Status' && doing && !('Lane' in task.fields)) {
-        if (lane) {
-          out.push(`- Lane: ${lane}`)
-          plan.report.laneGiven.push(task.id)
+        const branches = [...(namedBy.get(task.id) ?? [])].sort()
+        if (branches.length === 1) {
+          out.push(`- Lane: ${branches[0]}`)
+          plan.report.laneFromBranch.push({ id: task.id, lane: branches[0] })
+        } else {
+          if (lane) {
+            out.push(`- Lane: ${lane}`)
+            plan.report.laneGiven.push(task.id)
+          } else plan.report.warnings.push(`${task.id} is doing, and HEAD is detached, so it has no lane; add "- Lane: <branch>" to its task file`)
+          if (branches.length > 1) plan.report.warnings.push(sharedTaskWarning(task.id, branches, lane))
         }
-        else plan.report.warnings.push(`${task.id} is doing, and HEAD is detached, so it has no lane; add "- Lane: <branch>" to its task file`)
       }
       // 1.0 asks a blocked task what it waits for; 0.x said it in the notes, which stay as they are.
       if (name === 'Status' && value === 'blocked' && !('Waiting for' in task.fields)) {
@@ -954,7 +963,7 @@ ${logLines.join('\n\n')}
   plan.report.deleted = plan.deletes
   plan.report.renamed = plan.renames.map(({ from, to }) => `${from} → ${to}`)
   plan.report.counts = { tasks: legacy.ledger.tasks.length, logEntries: legacy.log.entries.length, decisions: decisions.rows.length }
-  plan.report.warnings.push(...unmergedBranchWarnings(root, dir))
+  plan.report.warnings.push(...unmergedBranchWarnings(unmerged, dir))
 
   // 6. Every write and deletion must stay inside what git tracks, so that the commit holds it
   // and the undo command brings back what was there.
@@ -1143,11 +1152,11 @@ function dropLine(planned, wanted) {
 }
 
 /**
- * Branches with commits that HEAD does not have, as warnings. Those commits stay in the 0.x
- * format, and the 1.0 range check judges each commit by its own tree, where no task file is.
+ * The branches with commits that HEAD does not have, as [{ ref, name, count }]: ref is the full
+ * ref, name the branch name (a remote branch without its remote) and count its commits not in HEAD.
  */
-function unmergedBranchWarnings(root, dir) {
-  const warnings = []
+function unmergedBranches(root) {
+  const branches = []
   const refs = gitOut(root, ['for-each-ref', '--format=%(refname)%00%(symref)', 'refs/heads', 'refs/remotes'])
     .split('\n')
     .filter(Boolean)
@@ -1159,14 +1168,54 @@ function unmergedBranchWarnings(root, dir) {
     const counted = runGit(root, ['rev-list', '--count', `HEAD..${ref}`])
     const count = counted.status === 0 ? Number(counted.stdout.trim()) : 0
     if (!count) continue
+    const name = ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref.replace(/^refs\/remotes\/[^/]+\//, '')
+    branches.push({ ref, name, count })
+  }
+  return branches
+}
+
+/** For each task id that a Task: trailer names in the commits of unmerged branches, the names of those branches. */
+function branchesNamingTasks(root, branches) {
+  const named = new Map()
+  for (const { ref, name } of branches) {
+    let commits
+    try {
+      commits = readCommits(root, [`HEAD..${ref}`])
+    } catch {
+      continue
+    }
+    for (const commit of commits) {
+      for (const id of taskTrailers(commit.message).ids) {
+        if (!named.has(id)) named.set(id, new Set())
+        named.get(id).add(name)
+      }
+    }
+  }
+  return named
+}
+
+/** The warning for a doing task that the commits of more than one unmerged branch name. */
+function sharedTaskWarning(id, branches, lane) {
+  const kept = lane ? `so it gets Lane: ${lane}` : 'so migrate cannot tell which lane holds it'
+  return (
+    `${id} is doing, and commits on more than one unmerged branch name it (${branches.join(', ')}), ${kept}. ` +
+    `To give it to one of them, add "- Lane: <branch>" under its "- Status: doing" in the 0.x ledger, commit, and migrate again`
+  )
+}
+
+/**
+ * The unmerged branches as warnings. Their commits stay in the 0.x format, and the 1.0 range
+ * check judges each commit by its own tree, where no task file is.
+ */
+function unmergedBranchWarnings(branches, dir) {
+  return branches.map(({ ref, count }) => {
     const name = ref.replace(/^refs\/(heads|remotes)\//, '')
     const its = count === 1 ? 'Its commit stays' : `Its ${count} commits stay`
-    warnings.push(
+    return (
       `the branch ${name} is not merged. ${its} in the 0.x format, and the 1.0 range check judges each commit by its own tree, where no task file is, so merged as it is it fails handoff and CI. ` +
-        `Merge or close it before migrating, or rebase it onto this branch afterwards and make again, in the 1.0 files, any change it made in ${dir}/`
+      `Merge or close it before migrating, or rebase it onto this branch afterwards and make again, in the 1.0 files, any change it made in ${dir}/`
     )
-  }
-  return warnings
+  })
 }
 
 /** Writes a plan: the files, their modes, the renames and the deletions. */

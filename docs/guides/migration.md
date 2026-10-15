@@ -10,7 +10,7 @@ The records become one file per record. The text of each record is kept word for
 
 | 0.x | 1.0 |
 | --- | --- |
-| `work/ledger.md`, one `### <id> <title>` per task | `tasks/<id>-<slug>.md`, with the same fields. A `doing` task gets a `Lane:` (an existing one wins, else the current branch), and its Notes become its `## Handoff`. Lines under a task that are not its fields go into its `## Notes`. |
+| `work/ledger.md`, one `### <id> <title>` per task | `tasks/<id>-<slug>.md`, with the same fields. A `doing` task gets a `Lane:`: an existing one wins, else the one unmerged branch whose commits name the task in a `Task:` trailer, else the current branch. Its Notes become its `## Handoff`. Lines under a task that are not its fields go into its `## Notes`. |
 | `work/log.md` | `log/<date>-<slug>.md`, one file per entry. |
 | `DECISIONS.md`, one table row per decision | `decisions/<date>-<slug>.md`, with Decided by from the third column. |
 | `STATUS.md` | Its Phase and Waiting for the owner go to the README under `## At migration`. |
@@ -39,7 +39,7 @@ git branch --no-merged
 a2-prices
 ```
 
-A lane's commits stay in the 0.x format. The 1.0 check judges each commit by its own tree, and those trees have no task files, so a lane merged after the migration fails `handoff` and CI. `migrate` warns about each one:
+A lane's commits stay in the 0.x format. The 1.0 check judges each commit by its own tree, and those trees have no task files, so a lane merged after the migration fails `handoff` and CI. `migrate` warns about each one, and gives a task in progress to the lane whose commits name it:
 
 ```bash
 npx resaledger migrate --dry-run
@@ -52,6 +52,8 @@ build/tasks/A1-show-the-opening-hours.md
 build/tasks/A2-add-a-price-list.md
 Delete (6):
 build/work/ledger.md
+Lanes taken from the one unmerged branch whose commits name the task (1):
+A2: Lane: a2-prices
 Warnings (1):
 ! the branch a2-prices is not merged. Its commit stays in the 0.x format, and the 1.0 range check judges each commit by its own tree, where no task file is, so merged as it is it fails handoff and CI. Merge or close it before migrating, or rebase it onto this branch afterwards and make again, in the 1.0 files, any change it made in build/
 --dry-run: nothing was written.
@@ -63,7 +65,7 @@ Warnings (1):
 git merge --no-edit a2-prices
 ```
 
-If a lane has to stay open, write its branch into its task in the 0.x ledger first, so the migrated task belongs to it: add `- Lane: a2-prices` under the task's `- Status: doing`, and commit. After the migration, rebase the lane onto the migrated base, and make again, in the 1.0 files, any change the lane made in the workspace:
+If a lane has to stay open, migrate anyway. A `doing` task without a `Lane:` goes to the lane whose commits name it, here `a2-prices`, so the lane keeps its task. After the migration, rebase the lane onto the migrated base, make again, in the 1.0 files, any change the lane made in the workspace, and rewrite the task's `## Handoff`:
 
 <!-- not run: the alternative to merging the lane first -->
 
@@ -72,7 +74,7 @@ git switch a2-prices
 git rebase main
 ```
 
-Without the `Lane:` line, the migrated task belongs to the branch you migrated on, and the lane's rebased commits name a task another lane holds. `claim --take` afterwards does not help those commits, because the check judges each commit against the lanes before it.
+When the commits of more than one unmerged branch name the same task, the task gets the branch you migrate on, and a warning names the branches. To give it to one of them, add `- Lane: <branch>` under the task's `- Status: doing` in the 0.x ledger, commit, and migrate again. `claim --take` after the migration does not help the lane's rebased commits, because the check judges each commit against the lanes before it.
 
 ## Migrate
 
