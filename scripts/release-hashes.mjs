@@ -6,8 +6,9 @@
 // Run it at every release, after the version in package.json is set and before the release
 // commit and `npm publish`: the release-candidate task (L3) runs it when it cuts the
 // candidate, and commits the table with the release. It builds the guard afresh, hashes the
-// guard, the git hook templates and the AGENTS.md block template exactly as `update` hashes
-// installed copies (src/cli/update.mjs), and adds one SHA-256 per file under the version.
+// guard, the git hook templates, the workflow template and the AGENTS.md block template exactly
+// as `update` hashes installed copies (src/cli/update.mjs), and adds one SHA-256 per file under
+// the version.
 // Earlier versions' entries are kept; running it twice for one version changes nothing.
 //
 // --check writes nothing and exits 1 when the table lacks this version's hashes or has
