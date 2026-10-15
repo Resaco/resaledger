@@ -90,3 +90,51 @@ export function ownershipProblems(context) {
   }
   return problems
 }
+
+/**
+ * The tasks of `after` that name another lane and change here: a Lane other than `lane`, and
+ * text that is neither in `before` nor in any `accepted` Map. A branch carries such a task only
+ * as a copy of the lane it names, as when it is stacked on that lane. Returns [{ id, task, text,
+ * holder }], holder being the Lane the task names.
+ */
+export function foreignLaneTasks(context) {
+  const { before, after, lane } = context
+  const accepted = context.accepted ?? []
+  const foreign = []
+  for (const [id, { task, text }] of after) {
+    if (!task.lane || task.lane === lane) continue
+    if (before.get(id)?.text === text) continue
+    if (accepted.some((tasks) => tasks.get(id)?.text === text)) continue
+    foreign.push({ id, task, text, holder: task.lane })
+  }
+  return foreign
+}
+
+/**
+ * The problems of the tasks from foreignLaneTasks against the copies on their lanes' branches.
+ * copies is a Map from id to { branch, task, text } (task and text null when that branch has no
+ * such file); an id is missing when the lane has no branch to read.
+ *
+ * A copy equal to the lane's is fine. Otherwise it is a problem when this copy holds the task,
+ * or the lane's copy does: only that lane changes a task it holds (spec 6.2), and a branch that
+ * claims a task names its own lane. A done, dropped or todo task the lane no longer holds can be
+ * edited by anyone.
+ */
+export function laneCopyProblems(tasks, copies, config) {
+  const guard = `node ${config.dir}/scripts/records.mjs`
+  const problems = []
+  for (const { id, task, text, holder } of tasks) {
+    const copy = copies.get(id)
+    if (copy?.text === text) continue
+    const held = ownershipHolder(task) !== null
+    const copyHeld = copy?.task ? ownershipHolder(copy.task) !== null : false
+    if (!held && !copyHeld) continue
+    const where = copy ? `branch "${copy.branch}"` : `lane "${holder}", whose branch is not in this clone`
+    problems.push({
+      file: task.file,
+      line: 0,
+      message: `task ${id} is held by lane "${holder}", and this branch's copy differs from that of ${where}. Only that lane changes it: rebase on "${holder}" for its latest copy, or claim the task for this lane with "${guard} claim ${id}" (with --take while "${holder}" holds it)`
+    })
+  }
+  return problems
+}

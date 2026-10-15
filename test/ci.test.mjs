@@ -8,7 +8,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { contentHash, normalizeManaged } from '../src/guard/managed.mjs'
-import { ENV, PACKAGE, repository, run, temporary } from './helpers.mjs'
+import { budget, ENV, PACKAGE, repository, run, temporary } from './helpers.mjs'
 
 const GUARD = join(temporary(), 'records.mjs')
 const built = run(PACKAGE, process.execPath, [join(PACKAGE, 'scripts', 'bundle.mjs'), '--out', GUARD])
@@ -324,6 +324,82 @@ describe('ci on a pull request', () => {
     commit(r, { 'src/flour.js': '1\n' }, 'feat: flour', 'Task: S2')
     passed(ci(r, 'pull_request', pullRequest(r, 'lane-b')))
     passed(ci(r, 'pull_request', pullRequest(r, 'lane-b', { base: 'lane-a' })))
+  })
+
+  test("a stacked lane carries the holder's copy of its task; changing that task fails", () => {
+    const r = setup({ tasks: [['S1', 'Bake bread'], ['S2', 'Buy flour']] })
+    r.git('checkout', '-q', '-b', 'lane-a')
+    commit(r, task('S1', 'Bake bread', { status: 'doing', lane: 'lane-a' }), 'chore: claim S1', 'Task: S1')
+    r.git('checkout', '-q', '-b', 'lane-b')
+    commit(r, task('S2', 'Buy flour', { status: 'doing', lane: 'lane-b' }), 'chore: claim S2', 'Task: S2')
+    commit(r, { 'src/flour.js': '1\n' }, 'feat: flour', 'Task: S2')
+    passed(ci(r, 'pull_request', pullRequest(r, 'lane-b')))
+    // Finishing lane A's task on lane B is lane A's change, even as done.
+    commit(r, task('S1', 'Bake bread', { status: 'done', lane: 'lane-a' }), 'docs: finish S1 as lane-a')
+    failed(
+      ci(r, 'pull_request', pullRequest(r, 'lane-b')),
+      /ledger\/tasks\/S1\.md: task S1 is held by lane "lane-a", and this branch's copy differs from that of branch "lane-a"\. Only that lane changes it: rebase on "lane-a"/
+    )
+  })
+
+  test('a stale copy of the holder\'s task fails until the stacked lane rebases on it', () => {
+    const r = setup({ tasks: [['S1', 'Bake bread'], ['S2', 'Buy flour']] })
+    r.git('checkout', '-q', '-b', 'lane-a')
+    commit(r, task('S1', 'Bake bread', { status: 'doing', lane: 'lane-a' }), 'chore: claim S1', 'Task: S1')
+    r.git('checkout', '-q', '-b', 'lane-b')
+    commit(r, task('S2', 'Buy flour', { status: 'doing', lane: 'lane-b' }), 'chore: claim S2', 'Task: S2')
+    r.git('checkout', '-q', 'lane-a')
+    commit(r, task('S1', 'Bake bread', { status: 'doing', lane: 'lane-a', note: 'Half baked.' }), 'docs: S1 note')
+    failed(ci(r, 'pull_request', pullRequest(r, 'lane-b')), /task S1 is held by lane "lane-a", and this branch's copy differs/)
+    r.git('checkout', '-q', 'lane-b')
+    assert.equal(r.git('rebase', '-q', 'lane-a').status, 0)
+    passed(ci(r, 'pull_request', pullRequest(r, 'lane-b')))
+  })
+
+  test('claiming a task under another lane\'s name fails, also when that lane has no branch here', () => {
+    const r = setup({ tasks: [['S1', 'Bake bread'], ['S2', 'Buy flour']] })
+    r.git('checkout', '-q', '-b', 'lane-a')
+    commit(r, task('S1', 'Bake bread', { status: 'doing', lane: 'lane-a' }), 'chore: claim S1', 'Task: S1')
+    r.git('checkout', '-q', '-b', 'lane-c', 'main')
+    commit(r, task('S2', 'Buy flour', { status: 'doing', lane: 'lane-a' }), 'chore: claim', 'Task: S2')
+    commit(r, { 'src/flour.js': '1\n' }, 'feat: flour', 'Task: S2')
+    failed(ci(r, 'pull_request', pullRequest(r, 'lane-c')), /task S2 is held by lane "lane-a", and this branch's copy differs from that of branch "lane-a"/)
+    r.git('branch', '-q', '-D', 'lane-a')
+    failed(ci(r, 'pull_request', pullRequest(r, 'lane-c')), /task S2 is held by lane "lane-a", and this branch's copy differs from that of lane "lane-a", whose branch is not in this clone/)
+    // A done task that no lane holds any more can be edited by anyone.
+    r.git('checkout', '-q', '-b', 'lane-d', 'main')
+    commit(r, task('S2', 'Buy flour', { status: 'done', lane: 'gone' }), 'docs: S2 was done elsewhere')
+    passed(ci(r, 'pull_request', pullRequest(r, 'lane-d')))
+  })
+
+  test("the holder's remote-tracking branch is read before a local branch of that name", () => {
+    const r = setup({ tasks: [['S1', 'Bake bread']] })
+    r.git('checkout', '-q', '-b', 'lane-a')
+    const claim = commit(r, task('S1', 'Bake bread', { status: 'doing', lane: 'lane-a' }), 'chore: claim S1', 'Task: S1')
+    r.git('checkout', '-q', '-b', 'lane-b')
+    commit(r, { 'src/b.js': '1\n' }, 'feat: b', 'Task: maintenance')
+    r.git('checkout', '-q', 'lane-a')
+    commit(r, task('S1', 'Bake bread', { status: 'doing', lane: 'lane-a', note: 'Local only.' }), 'docs: S1 note')
+    failed(ci(r, 'pull_request', pullRequest(r, 'lane-b')), /copy differs from that of branch "lane-a"/)
+    r.git('remote', 'add', 'origin', 'https://example.invalid/shop.git')
+    r.git('update-ref', 'refs/remotes/origin/lane-a', claim)
+    passed(ci(r, 'pull_request', pullRequest(r, 'lane-b')))
+  })
+
+  test('fifty stacked tasks of fifty lanes are read in one batch', () => {
+    const ids = Array.from({ length: 50 }, (_, index) => `S${index + 1}`)
+    const r = setup({ tasks: ids.map((id) => [id, `Task ${id}`]) })
+    r.git('checkout', '-q', '-b', 'lanes')
+    const files = Object.assign({}, ...ids.map((id) => task(id, `Task ${id}`, { status: 'doing', lane: `lane-${id.toLowerCase()}` })))
+    const claims = commit(r, files, 'chore: claim fifty tasks', 'Task: maintenance')
+    for (const id of ids) r.git('branch', '-q', `lane-${id.toLowerCase()}`, claims)
+    r.git('checkout', '-q', '-b', 'lane-top')
+    commit(r, { 'ledger/tasks/S51.md': taskFile('S51', 'Top', { status: 'doing', lane: 'lane-top' }) }, 'chore: claim S51', 'Task: S51')
+    commit(r, { 'src/top.js': '1\n' }, 'feat: top', 'Task: S51')
+    const started = Date.now()
+    passed(ci(r, 'pull_request', pullRequest(r, 'lane-top')))
+    const took = Date.now() - started
+    assert.ok(took < budget(3000), `ci took ${took} ms`)
   })
 
   test('the first pull request that adds ResaLedger is judged by its own rules, and says so', () => {
