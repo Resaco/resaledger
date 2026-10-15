@@ -4,6 +4,33 @@ All notable changes to ResaLedger are recorded here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] - 2026-10-15
+
+The second release candidate, with the fixes from the first installations of rc.1 in real repositories and the first migrations of 0.x workspaces.
+
+### Added
+
+- **`agent.pushNeedsHandoff`.** With `true`, the agent hooks refuse an agent's `git push` while `handoff` fails in the worktree the push runs in, with handoff's own message. The check that the lane is pushed is left out, since the push does that. `ci` lists turning the key off as a weakening.
+- **`init` tries `package.json`'s `check` script** as a verify gate, as it already did the Makefile's `check`. Scripts named `test:…` or `lint:…` are listed with the command that runs each and never run, since a name does not say whether a script ends or changes files.
+- **`migrate` says when agent hooks are missing**, and gives the command that adds them, such as `npx resaledger update --agents claude`.
+- **[Work outside the code](docs/guides/outside-the-code.md)**, a guide to content edited in a CMS, server settings and other work the hooks cannot see, with evidence someone else can check.
+
+### Changed
+
+- **The agent hooks read the configuration committed at HEAD**, as the agents guide already said, so an uncommitted edit of `.resaledger.json` no longer lifts a deny rule.
+- **`new` writes `- Evidence: —`.** A done task whose evidence is still `—` is refused with a message that says what to write in its place, and CI shows no evidence for it.
+- **The typo distance depends on the length of the known name**: two letters for a name of six letters or more, one for a shorter one, and a swap of two neighbouring letters counts as one. A free field such as `Later` is no longer refused as a typo of `Lane`, nor a configuration key `id` as a typo of `dir`.
+- **Releases are staged on npm** and published when a maintainer approves them with two-factor authentication ([docs/releasing.md](docs/releasing.md)).
+
+### Fixed
+
+- **`migrate` renames the old configuration file in `.gitattributes`**, so a rule such as `export-ignore` keeps `.resaledger.json` out of `git archive`. A longer pattern that only contains the old name is reported and left alone.
+- **`migrate` keeps edited 0.x template sections active.** A section of the workspace `AGENTS.md` or `standards.md` whose template text the project edited stays where the project's own sections go, with a warning, instead of leaving the instructions for the migration's log entry.
+- **The CI comment mentions nobody and references no issue.** `@name`, `#12`, `owner/repo#12` and `GH-12` from the records are shown as written but not linked.
+- **`init` titles the workspace README with a scoped package's own name**: `@scope/web` gives `web`.
+- **`claim` no longer speaks of pushing in a repository without a remote.**
+- **`npx resaledger` in a repository whose dependencies npm cannot resolve** stops with `EOVERRIDE` before ResaLedger starts. The README and the guides give the way past it: `npx --prefix "$(mktemp -d)" resaledger init` reads no project and still runs in the current folder.
+
 ## [1.0.0-rc.1] - 2026-10-15
 
 The release candidate for ResaLedger 1.0.0, the first release under this name. It replaces agent-ledger 0.x with one record format that works the same for one person and for many people and agents working in parallel. 0.x workspaces convert with `npx resaledger migrate`.
@@ -43,5 +70,6 @@ The release candidate for ResaLedger 1.0.0, the first release under this name. I
 
 `npx resaledger migrate` converts an agent-ledger 0.1, 0.2 or 0.3 workspace in place. It refuses a dirty tree, builds everything in memory, checks that no line of the old records is lost, rewrites links into the old files, and never commits; it prints the commit command and the undo command (`git restore -- :/ && git clean -fd -- :/`). Merge or close open lanes first, or rebase them onto the migrated base afterwards: a task in progress takes the one open lane whose commits name it. The full mapping is in [section 14 of the specification](ledger/plan/spec.md#14-migration-from-0x).
 
-[Unreleased]: https://github.com/Resaco/resaledger/compare/v1.0.0-rc.1...HEAD
+[Unreleased]: https://github.com/Resaco/resaledger/compare/v1.0.0-rc.2...HEAD
+[1.0.0-rc.2]: https://github.com/Resaco/resaledger/compare/v1.0.0-rc.1...v1.0.0-rc.2
 [1.0.0-rc.1]: https://github.com/Resaco/resaledger/releases/tag/v1.0.0-rc.1
