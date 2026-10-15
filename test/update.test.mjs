@@ -57,7 +57,7 @@ describe('a clean update', () => {
 
   test('finds every managed file unchanged and writes nothing', () => {
     assert.equal(result.status, 0, result.out)
-    assert.match(result.out, /Unchanged \(6\):\n {2}ledger\/scripts\/records\.mjs\n {2}\.githooks\/pre-commit\n {2}\.githooks\/pre-merge-commit\n {2}\.githooks\/commit-msg\n {2}\.githooks\/pre-push\n {2}AGENTS\.md \(managed block\)\n/)
+    assert.match(result.out, /Unchanged \(7\):\n {2}ledger\/scripts\/records\.mjs\n {2}\.githooks\/pre-commit\n {2}\.githooks\/pre-merge-commit\n {2}\.githooks\/commit-msg\n {2}\.githooks\/pre-push\n {2}\.gitattributes\n {2}AGENTS\.md \(managed block\)\n/)
     assert.match(result.out, /Nothing to change\./)
     assert.equal(r.git('status', '--porcelain').out, '')
   })
@@ -93,7 +93,7 @@ describe('an update from a released version', () => {
   test('replaces the files that are the older release and keeps the rest', () => {
     assert.equal(result.status, 0, result.out)
     assert.match(result.out, /Replaced \(3\):\n {2}ledger\/scripts\/records\.mjs \(was 0\.9\.0\)\n {2}\.githooks\/pre-commit \(was 0\.9\.0\)\n {2}AGENTS\.md \(managed block\) \(was 0\.9\.0\)\n/)
-    assert.match(result.out, /Unchanged \(3\):\n {2}\.githooks\/pre-merge-commit\n {2}\.githooks\/commit-msg\n {2}\.githooks\/pre-push\n/)
+    assert.match(result.out, /Unchanged \(4\):\n {2}\.githooks\/pre-merge-commit\n {2}\.githooks\/commit-msg\n {2}\.githooks\/pre-push\n {2}\.gitattributes\n/)
     assert.equal(r.read(GUARD), readFileSync(join(current, 'dist', 'records.mjs'), 'utf8'))
     assert.ok(executable(r, GUARD))
     assert.doesNotMatch(r.read('.githooks/pre-commit'), /an older wording/)
@@ -123,8 +123,42 @@ describe('an update from a released version', () => {
     assert.equal(committed.status, 0, committed.out)
     const again = r.node(join(current, 'bin', 'resaledger.mjs'), 'update')
     assert.equal(again.status, 0, again.out)
-    assert.match(again.out, /Unchanged \(6\)/)
+    assert.match(again.out, /Unchanged \(7\)/)
     assert.match(again.out, /Nothing to change\./)
+  })
+})
+
+describe('the LF rule for the hooks in .gitattributes', () => {
+  test('an install without it gets it as one listed change, which commits through the hooks', () => {
+    const r = setUp(CLI, { '.gitattributes': '*.png binary\n' })
+    assert.equal(r.read('.gitattributes'), '*.png binary\n.githooks/* text eol=lf\n')
+    // An install from before the rule: the line is gone.
+    r.write('.gitattributes', '*.png binary\n')
+    assert.equal(r.commit('chore: an older install', 'Task: maintenance').status, 0)
+    const result = update(r)
+    assert.equal(result.status, 0, result.out)
+    assert.match(result.out, /Replaced \(1\):\n {2}\.gitattributes: the line "\.githooks\/\* text eol=lf" added\n/)
+    assert.equal(r.read('.gitattributes'), '*.png binary\n.githooks/* text eol=lf\n')
+    const command = printedCommit(result.out)
+    assert.equal(command, `git add .gitattributes && git commit -m "chore: update ResaLedger to ${VERSION}" -m "Task: maintenance"`)
+    const committed = r.run('sh', ['-c', command])
+    assert.equal(committed.status, 0, committed.out)
+    const again = update(r)
+    assert.match(again.out, /Nothing to change\./)
+  })
+
+  test('a missing .gitattributes is restored with the rule, and an equivalent rule is left alone', () => {
+    const r = setUp()
+    assert.equal(r.git('rm', '-q', '.gitattributes').status, 0)
+    assert.equal(r.commit('chore: drop the attributes', 'Task: maintenance').status, 0)
+    const restored = update(r)
+    assert.match(restored.out, /Restored \(1\):\n {2}\.gitattributes: the line "\.githooks\/\* text eol=lf" added\n/)
+    assert.equal(r.read('.gitattributes'), '.githooks/* text eol=lf\n')
+    r.write('.gitattributes', '* text=auto eol=lf\n')
+    assert.equal(r.commit('chore: one rule for every file', 'Task: maintenance').status, 0)
+    const kept = update(r)
+    assert.match(kept.out, /Nothing to change\./)
+    assert.equal(r.read('.gitattributes'), '* text=auto eol=lf\n')
   })
 })
 

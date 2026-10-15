@@ -10,6 +10,11 @@ import { detectHookManager } from './hooks.mjs'
 export const PACKAGE_ROOT = resolve(fileURLToPath(new URL('../../', import.meta.url)))
 export const BUILT_GUARD = join(PACKAGE_ROOT, 'dist', 'records.mjs')
 export const HOOKS_FOLDER = '.githooks'
+export const GITATTRIBUTES_FILE = '.gitattributes'
+// Git for Windows may check the hooks out with CRLF, and sh then fails on "\r".
+export const HOOKS_EOL_RULE = `${HOOKS_FOLDER}/* text eol=lf`
+// The branch the setup is committed on when the current branch is protected.
+export const SETUP_BRANCH = 'resaledger-setup'
 
 const AGENTS_BLOCK = new URL('../../templates/agents-block.md', import.meta.url)
 export const MANAGED_START = '<!-- resaledger:start'
@@ -128,4 +133,43 @@ export function hooksNote(result, dir) {
   if (result.state === 'active') return `✔ git hooks are on: core.hooksPath is ${HOOKS_FOLDER}`
   if (result.state === 'manager') return `! ${result.manager} manages the git hooks here, so core.hooksPath was not changed; the guard runs from ${result.manager}'s hooks (${calls})`
   return `! core.hooksPath is "${result.hooksPath}", so the hooks in ${HOOKS_FOLDER}/ do not run; call the guard from your hooks instead (${calls})`
+}
+
+// Patterns whose eol=lf rule covers every hook, as an existing equivalent of HOOKS_EOL_RULE.
+const HOOKS_EOL_PATTERNS = new Set(['*', `${HOOKS_FOLDER}/*`, `${HOOKS_FOLDER}/**`, `/${HOOKS_FOLDER}/*`, `/${HOOKS_FOLDER}/**`])
+
+/** True when a .gitattributes text has a rule that checks every hook out with LF. */
+export function hasHooksEolRule(text) {
+  return text.split(/\r?\n/).some((line) => {
+    const [pattern, ...attributes] = line.trim().split(/\s+/)
+    return HOOKS_EOL_PATTERNS.has(pattern) && attributes.includes('eol=lf') && !attributes.includes('-text') && !attributes.includes('binary')
+  })
+}
+
+/** The .gitattributes text (null when the file is missing) with HOOKS_EOL_RULE added, unless it has an equivalent; every other line is kept. */
+export function withHooksEolRule(text) {
+  if (text === null || text === '') return `${HOOKS_EOL_RULE}\n`
+  if (hasHooksEolRule(text)) return text
+  const newline = text.includes('\r\n') ? '\r\n' : '\n'
+  return `${text}${text.endsWith('\n') ? '' : newline}${HOOKS_EOL_RULE}${newline}`
+}
+
+/** The current branch, or null when HEAD is detached. */
+export function currentBranch(root) {
+  const result = setupGit(root, ['symbolic-ref', '--short', '-q', 'HEAD'])
+  return result.status === 0 && result.stdout.trim() ? result.stdout.trim() : null
+}
+
+/**
+ * The next steps that commit the setup, each a line of text with its command. commit is the
+ * commit command, config the planned configuration and what names the change, such as "the setup". On a protected branch the pre-commit
+ * hook that was just installed refuses the commit, so the steps make a setup branch first,
+ * then push it for a pull request, which is judged by its own rules (spec 10).
+ */
+export function setupCommitSteps(branch, config, commit, what = 'the setup') {
+  if (branch === null || !config.protected.includes(branch)) return [`Commit ${what}:\n       ${commit}`]
+  return [
+    `"${branch}" is protected, so commit ${what} on a new branch:\n       git switch -c ${SETUP_BRANCH} && ${commit}`,
+    `Push it and open a pull request into ${branch}; the first pull request that adds ResaLedger is judged by its own rules:\n       git push -u origin ${SETUP_BRANCH}`
+  ]
 }

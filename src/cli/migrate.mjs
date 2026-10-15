@@ -5,7 +5,7 @@
 import { spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, posix } from 'node:path'
-import { CONFIG_FILE, parseConfig } from '../guard/config.mjs'
+import { CONFIG_FILE, isSafeFolderPath, parseConfig, SAFE_FOLDER_RULE } from '../guard/config.mjs'
 import { slugify, taskFileName } from '../guard/tasks.mjs'
 import { checkWorkspace, loadWorkspace } from '../guard/workspace.mjs'
 import { HOOK_NAMES, renderHook } from './hooks.mjs'
@@ -20,7 +20,7 @@ import {
   readLegacyWorkspace,
   readSourceText
 } from './legacy.mjs'
-import { agentsBlock, BUILT_GUARD, claudeFile, detectBase, hasAgentsImport, HOOKS_FOLDER, MANAGED_END, MANAGED_START, realRelative } from './setup.mjs'
+import { agentsBlock, BUILT_GUARD, claudeFile, currentBranch, detectBase, GITATTRIBUTES_FILE, hasAgentsImport, hasHooksEolRule, HOOKS_FOLDER, MANAGED_END, MANAGED_START, realRelative, withHooksEolRule } from './setup.mjs'
 
 const POINTER_START = '<!-- agent-ledger:start -->'
 const POINTER_END = '<!-- agent-ledger:end -->'
@@ -486,12 +486,6 @@ function withLineStyle(text, style) {
   return style.bom && !lines.startsWith('\uFEFF') ? `\uFEFF${lines}` : lines
 }
 
-/** The current branch, or null in a detached HEAD. */
-function currentBranch(root) {
-  const result = runGit(root, ['symbolic-ref', '--short', '-q', 'HEAD'])
-  return result.status === 0 && result.stdout.trim() ? result.stdout.trim() : null
-}
-
 /** The 1.0 configuration for a 0.x one, and the keys that have no 1.0 meaning. */
 export function convertConfig(legacy) {
   const config = { version: 2, dir: legacy.dir }
@@ -570,6 +564,10 @@ export function planMigration(root, options = {}) {
     else plan.report.warnings.push(`${item.file}${item.line ? `:${item.line}` : ''}: ${item.message}`)
   }
   const dir = legacy.dir
+  if (dir && !isSafeFolderPath(dir)) {
+    refuse(`${LEGACY_CONFIG_FILE}: "dir" is ${JSON.stringify(dir)}; ResaLedger 1.0 pastes it into the git hooks, so it must be ${SAFE_FOLDER_RULE}. Rename the folder and "dir" in a commit of their own, then migrate`)
+    return plan
+  }
   if (dir) {
     for (const name of HOOK_NAMES) {
       const path = `${HOOKS_FOLDER}/${name}`
@@ -816,23 +814,20 @@ export function planMigration(root, options = {}) {
       `${oldGuard} has no "// agent-ledger 0.x.y" version line near its top, which every released 0.x guard has, so it was changed by hand or is not agent-ledger's guard; it is replaced with the 1.0 guard, and the old one stays in git history`
     )
   put(oldGuard, [{ text: readFileSync(guardPath, 'utf8'), frame: null }], true)
-  if (existsSync(join(root, '.gitattributes'))) {
-    const text = readSource('.gitattributes')
-    const union = new Set([`${dir}/work/log.md merge=union`, `${dir}/DECISIONS.md merge=union`, UNION_COMMENT])
-    const lines = sourceLines(text)
-    let cut = false
-    for (let at = lines.findIndex((line) => union.has(line.trim())); at !== -1; at = lines.findIndex((line) => union.has(line.trim()))) {
-      cutLines(lines, at, 1)
-      cut = true
-    }
-    if (cut) {
-      const kept = trimEndBlankLines(lines)
-      if (kept.length === 0) plan.deletes.push('.gitattributes')
-      else {
-        put('.gitattributes', [{ text: `${kept.join('\n')}\n`, frame: null }])
-        styles.set('.gitattributes', lineStyle(text))
-      }
-    }
+  // The union rules go, and the hooks get LF line ends, also under Git for Windows.
+  const attributesText = existsSync(join(root, GITATTRIBUTES_FILE)) ? readSource(GITATTRIBUTES_FILE) : null
+  const attributeLines = attributesText === null ? [] : sourceLines(attributesText)
+  const union = new Set([`${dir}/work/log.md merge=union`, `${dir}/DECISIONS.md merge=union`, UNION_COMMENT])
+  let cut = false
+  for (let at = attributeLines.findIndex((line) => union.has(line.trim())); at !== -1; at = attributeLines.findIndex((line) => union.has(line.trim()))) {
+    cutLines(attributeLines, at, 1)
+    cut = true
+  }
+  const kept = trimEndBlankLines(attributeLines)
+  const attributes = withHooksEolRule(kept.length === 0 ? null : `${kept.join('\n')}\n`)
+  if (attributesText === null || cut || !hasHooksEolRule(attributesText)) {
+    put(GITATTRIBUTES_FILE, [{ text: attributes, frame: null }])
+    if (attributesText !== null) styles.set(GITATTRIBUTES_FILE, lineStyle(attributesText))
   }
 
   // The configuration.

@@ -1,12 +1,15 @@
 // `resaledger init` on real repositories, driven through the package's command line with
 // stdin that is not a terminal: solo and team, --dir, every refusal, an existing AGENTS.md
-// and CLAUDE.md, husky, the project name, and the printed commit command run through the
-// installed hooks. The interactive path is covered through initOptions.
+// and CLAUDE.md, husky, the project name, the printed commit command run through the
+// installed hooks, a workspace folder that would break out of the hooks, the LF rule in
+// .gitattributes, and the setup commit on a protected branch. The interactive path is
+// covered through initOptions.
 import assert from 'node:assert/strict'
-import { lstatSync, mkdirSync, rmSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, lstatSync, mkdirSync, rmSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { GOAL_MARKER, goModuleName, initOptions, parseInitArgs, planInit, presetFromAnswer, projectName, tomlTableName } from '../src/cli/init.mjs'
+import { hasHooksEolRule, HOOKS_EOL_RULE, SETUP_BRANCH, withHooksEolRule } from '../src/cli/setup.mjs'
 import { PACKAGE, repository, run, temporary } from './helpers.mjs'
 
 const CLI = join(PACKAGE, 'bin', 'resaledger.mjs')
@@ -75,7 +78,7 @@ describe('a solo setup off a terminal', () => {
 
   test('writes the git hooks and turns them on', () => {
     for (const name of ['pre-commit', 'pre-merge-commit', 'commit-msg', 'pre-push']) {
-      assert.match(r.read(`.githooks/${name}`), new RegExp(`"ledger/scripts/records\\.mjs" ${name}`))
+      assert.match(r.read(`.githooks/${name}`), new RegExp(`'ledger/scripts/records\\.mjs' ${name}`))
       if (process.platform !== 'win32') assert.ok(statSync(join(r.root, '.githooks', name)).mode & 0o100)
     }
     assert.equal(r.git('config', '--get', 'core.hooksPath').out.trim(), '.githooks')
@@ -91,12 +94,12 @@ describe('a solo setup off a terminal', () => {
   })
 
   test('prints what it did and the next steps', () => {
-    assert.match(result.out, /Created \(8\):\n {2}\.githooks\/commit-msg\n {2}\.githooks\/pre-commit\n {2}\.githooks\/pre-merge-commit\n {2}\.githooks\/pre-push\n {2}\.resaledger\.json\n {2}AGENTS\.md\n {2}ledger\/README\.md\n {2}ledger\/scripts\/records\.mjs\n/)
+    assert.match(result.out, /Created \(9\):\n {2}\.gitattributes\n {2}\.githooks\/commit-msg\n {2}\.githooks\/pre-commit\n {2}\.githooks\/pre-merge-commit\n {2}\.githooks\/pre-push\n {2}\.resaledger\.json\n {2}AGENTS\.md\n {2}ledger\/README\.md\n {2}ledger\/scripts\/records\.mjs\n/)
     assert.match(result.out, /Write the project's own text in ledger\/README\.md .*\(Goal, Environments, Manual checks\)/)
     assert.match(result.out, /3\. Start working: node ledger\/scripts\/records\.mjs work/)
     assert.equal(
       printedCommit(result.out),
-      'git add .resaledger.json AGENTS.md ledger/README.md ledger/scripts/records.mjs && git add --chmod=+x .githooks/commit-msg .githooks/pre-commit .githooks/pre-merge-commit .githooks/pre-push && git commit -m "chore: set up ResaLedger" -m "Task: maintenance"'
+      'git add .gitattributes .resaledger.json AGENTS.md ledger/README.md ledger/scripts/records.mjs && git add --chmod=+x .githooks/commit-msg .githooks/pre-commit .githooks/pre-merge-commit .githooks/pre-push && git commit -m "chore: set up ResaLedger" -m "Task: maintenance"'
     )
   })
 
@@ -120,6 +123,18 @@ describe('a solo setup off a terminal', () => {
     assert.match(r.git('log', '-1', '--format=%B').out, /^chore: set up ResaLedger\n\nTask: maintenance\n/)
     // The hooks are committed as executable on every platform, Windows included.
     for (const name of ['pre-commit', 'pre-merge-commit', 'commit-msg', 'pre-push']) assert.match(r.git('ls-files', '-s', `.githooks/${name}`).out, /^100755 /)
+  })
+
+  test('.gitattributes keeps the hooks LF in a clone that converts line ends, as Git for Windows does', () => {
+    assert.equal(r.read('.gitattributes'), `${HOOKS_EOL_RULE}\n`)
+    const clone = join(temporary(), 'clone')
+    const cloned = run(r.base, 'git', ['clone', '-q', '-c', 'core.autocrlf=true', r.root, clone])
+    assert.equal(cloned.status, 0, cloned.out)
+    // The conversion is on: an ordinary text file comes out with CRLF.
+    assert.match(readFileSync(join(clone, 'AGENTS.md'), 'utf8'), /\r\n/)
+    for (const name of ['pre-commit', 'pre-merge-commit', 'commit-msg', 'pre-push']) {
+      assert.doesNotMatch(readFileSync(join(clone, '.githooks', name), 'utf8'), /\r/, name)
+    }
   })
 
   test('a second init is refused as already set up and changes nothing', () => {
@@ -146,14 +161,14 @@ describe('the team preset and --dir', () => {
     assert.equal(result.status, 0, result.out)
     assert.deepEqual(JSON.parse(r.read('.resaledger.json')), { version: 2, preset: 'solo', dir: 'records', gates: { commit: [], verify: [] } })
     assert.deepEqual(readdirSync(join(r.root, 'records')).sort(), ['README.md', 'scripts'])
-    assert.match(r.read('.githooks/pre-commit'), /"records\/scripts\/records\.mjs" pre-commit/)
+    assert.match(r.read('.githooks/pre-commit'), /'records\/scripts\/records\.mjs' pre-commit/)
     assert.match(r.read('AGENTS.md'), /node records\/scripts\/records\.mjs work/)
     assert.match(result.out, /Start working: node records\/scripts\/records\.mjs work/)
   })
 
   test('--dir=ledger is the default and is not written', () => {
     const r = project()
-    assert.equal(init(r, '--dir=./ledger/').status, 0)
+    assert.equal(init(r, '--dir=ledger').status, 0)
     assert.equal('dir' in JSON.parse(r.read('.resaledger.json')), false)
   })
 
@@ -162,7 +177,7 @@ describe('the team preset and --dir', () => {
     const before = snapshot(r.root)
     const result = init(r, '--dir', '../outside')
     assert.equal(result.status, 1)
-    assert.match(result.out, /✖ --dir: "dir" must be a relative folder inside the repository/)
+    assert.match(result.out, /--dir "\.\.\/outside" is not a folder name ResaLedger accepts; use '\/'-separated names of letters, digits/)
     assert.deepEqual(snapshot(r.root), before)
   })
 
@@ -409,5 +424,163 @@ describe('the answers', () => {
     assert.match(readme, /## Goal\n\nA tool that keeps a task ledger\.\n/)
     assert.equal(readme.includes(GOAL_MARKER), false)
     assert.equal(plan.goalMarker, false)
+  })
+})
+
+/** The git commands printed in init's next steps, in order. */
+function printedCommands(out) {
+  return out
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('git '))
+}
+
+describe('a workspace folder that would break out of the hooks', () => {
+  const HOSTILE = ['x"; touch pwned; "', "x'; touch pwned; '", 'x$(touch pwned)', 'x`touch pwned`', 'x;touch pwned', 'a b', '-x', 'docs/../x', 'ledger/']
+
+  test('--dir with shell syntax is refused before anything is written', () => {
+    const r = project()
+    const before = snapshot(r.root)
+    for (const dir of HOSTILE) {
+      for (const args of [['--dir', dir], [`--dir=${dir}`]]) {
+        const result = init(r, ...args, '--yes')
+        assert.equal(result.status, 1, `${dir}: ${result.out}`)
+        assert.match(result.out, /is not a folder name ResaLedger accepts; use '\/'-separated names of letters, digits, '\.', '_' and '-'/, dir)
+      }
+    }
+    assert.deepEqual(snapshot(r.root), before)
+    assert.equal(existsSync(join(r.root, 'pwned')), false)
+    assert.equal(r.git('config', '--get', 'core.hooksPath').out, '')
+  })
+
+  test('planInit refuses it with the configuration\'s rule too, and the hook templates refuse to render it', async () => {
+    const r = project()
+    const plan = planInit(r.root, { preset: 'solo', dir: HOSTILE[0], goal: '', agents: null })
+    assert.match(plan.refusals.join('\n'), /--dir: "dir" must be a relative folder inside the repository/)
+    assert.equal(plan.writes.size, 0)
+    const { guardCall, renderHook } = await import('../src/cli/hooks.mjs')
+    assert.throws(() => renderHook('pre-commit', HOSTILE[0]), /is not '\/'-separated names/)
+    assert.throws(() => guardCall('pre-commit', HOSTILE[0]), /is not '\/'-separated names/)
+    assert.match(renderHook('pre-commit', 'docs/ledger'), /^exec "\$runtime" 'docs\/ledger\/scripts\/records\.mjs' pre-commit$/m)
+  })
+
+  test('a committed configuration with such a dir is refused by check and by the pre-commit hook', () => {
+    const r = project()
+    const result = init(r, '--yes')
+    assert.equal(result.status, 0, result.out)
+    assert.equal(r.run('sh', ['-c', printedCommit(result.out)]).status, 0)
+    const bad = `${JSON.stringify({ version: 2, dir: HOSTILE[0] }, null, 2)}\n`
+    // The hook refuses to commit it, and runs nothing from it.
+    r.write('.resaledger.json', bad)
+    const refused = r.commit('chore: move the workspace', 'Task: maintenance')
+    assert.notEqual(refused.status, 0, refused.out)
+    assert.match(refused.out, /"dir" must be a relative folder inside the repository/)
+    // Committed without the hooks, check refuses it too.
+    const committed = r.git('-c', 'core.hooksPath=no-hooks', 'commit', '-q', '-m', 'chore: move the workspace', '-m', 'Task: maintenance')
+    assert.equal(committed.status, 0, committed.out)
+    const check = r.node('ledger/scripts/records.mjs', 'check')
+    assert.equal(check.status, 1, check.out)
+    assert.match(check.out, /✖ \.resaledger\.json:3: "dir" must be a relative folder inside the repository, such as "ledger" or "docs\/ledger"/)
+    assert.equal(existsSync(join(r.root, 'pwned')), false)
+  })
+
+  test('a nested --dir works from end to end', () => {
+    const r = project()
+    const result = init(r, '--dir', 'docs/ledger', '--yes')
+    assert.equal(result.status, 0, result.out)
+    assert.deepEqual(JSON.parse(r.read('.resaledger.json')).dir, 'docs/ledger')
+    assert.match(r.read('.githooks/pre-commit'), /'docs\/ledger\/scripts\/records\.mjs' pre-commit/)
+    const committed = r.run('sh', ['-c', printedCommit(result.out)])
+    assert.equal(committed.status, 0, committed.out)
+    assert.equal(r.git('status', '--porcelain').out, '')
+    // The installed hooks call the guard in the nested folder.
+    r.write('docs/ledger/tasks/X1-broken.md', '# X1 Broken\n\n- Status: nonsense\n')
+    const refused = r.commit('docs: a broken task')
+    assert.notEqual(refused.status, 0, refused.out)
+    assert.match(refused.out, /"nonsense" is not a status/)
+    rmSync(join(r.root, 'docs', 'ledger', 'tasks'), { recursive: true })
+    const check = r.node('docs/ledger/scripts/records.mjs', 'check')
+    assert.equal(check.status, 0, check.out)
+  })
+})
+
+describe('the LF rule for the hooks in .gitattributes', () => {
+  test('an existing .gitattributes keeps its lines and gets the rule once', () => {
+    const r = project({ '.gitattributes': '* text=auto\n*.png binary' })
+    const result = init(r, '--yes')
+    assert.equal(result.status, 0, result.out)
+    assert.equal(r.read('.gitattributes'), `* text=auto\n*.png binary\n${HOOKS_EOL_RULE}\n`)
+    assert.match(result.out, /Changed \(1\):\n {2}\.gitattributes\n/)
+  })
+
+  test('a CRLF .gitattributes gets the rule with CRLF', () => {
+    const r = project({ '.gitattributes': '* text=auto\r\n' })
+    assert.equal(init(r, '--yes').status, 0)
+    assert.equal(r.read('.gitattributes'), `* text=auto\r\n${HOOKS_EOL_RULE}\r\n`)
+  })
+
+  test('an equivalent rule is accepted and the file is left alone', () => {
+    const r = project({ '.gitattributes': '/.githooks/** eol=lf\n' })
+    const result = init(r, '--yes')
+    assert.equal(result.status, 0, result.out)
+    assert.equal(r.read('.gitattributes'), '/.githooks/** eol=lf\n')
+    assert.doesNotMatch(result.out, /\.gitattributes/)
+  })
+
+  test('with a hook manager there is no .githooks/, so no rule', () => {
+    const r = project({ '.husky/pre-commit': 'npm run lint\n' })
+    assert.equal(init(r, '--yes').status, 0)
+    assert.equal(existsSync(join(r.root, '.gitattributes')), false)
+  })
+
+  test('hasHooksEolRule and withHooksEolRule', () => {
+    for (const text of ['.githooks/* text eol=lf', '.githooks/** eol=lf', '/.githooks/* text eol=lf', '* text=auto eol=lf', '# x\r\n* eol=lf\r\n']) assert.ok(hasHooksEolRule(text), text)
+    for (const text of ['', '* text=auto', '.githooks/pre-commit eol=lf', '.githooks/* -text eol=lf', '.githooks/* binary eol=lf', '# .githooks/* eol=lf', 'src/* eol=lf']) assert.ok(!hasHooksEolRule(text), text)
+    assert.equal(withHooksEolRule(null), `${HOOKS_EOL_RULE}\n`)
+    assert.equal(withHooksEolRule(''), `${HOOKS_EOL_RULE}\n`)
+    assert.equal(withHooksEolRule('*.png binary\n'), `*.png binary\n${HOOKS_EOL_RULE}\n`)
+    assert.equal(withHooksEolRule(withHooksEolRule('*.png binary')), `*.png binary\n${HOOKS_EOL_RULE}\n`)
+  })
+})
+
+describe('the setup commit in the team preset', () => {
+  test('on the protected base, the printed steps make a setup branch, commit there and push it', () => {
+    const r = project()
+    r.remote()
+    assert.equal(r.push('main').status, 0)
+    const result = init(r, '--team', '--yes')
+    assert.equal(result.status, 0, result.out)
+    assert.match(result.out, /2\. "main" is protected, so commit the setup on a new branch:\n {7}git switch -c resaledger-setup && git add /)
+    assert.match(result.out, /3\. Push it and open a pull request into main; the first pull request that adds ResaLedger is judged by its own rules:\n {7}git push -u origin resaledger-setup\n/)
+    assert.match(result.out, /4\. Start working: node ledger\/scripts\/records\.mjs work/)
+    const [commit, push, ...rest] = printedCommands(result.out)
+    assert.deepEqual(rest, [])
+    // Without the branch, the hook init has just installed refuses the commit on main.
+    const onMain = r.run('sh', ['-c', commit.replace(`git switch -c ${SETUP_BRANCH} && `, '')])
+    assert.notEqual(onMain.status, 0, onMain.out)
+    assert.match(onMain.out, /"main" is a protected branch/)
+    assert.equal(r.git('reset', '-q').status, 0)
+    const committed = r.run('sh', ['-c', commit])
+    assert.equal(committed.status, 0, committed.out)
+    assert.equal(r.git('symbolic-ref', '--short', 'HEAD').out.trim(), SETUP_BRANCH)
+    assert.equal(r.git('status', '--porcelain').out, '')
+    assert.match(r.git('log', '-1', '--format=%B').out, /^chore: set up ResaLedger\n\nTask: maintenance\n/)
+    for (const name of ['pre-commit', 'pre-merge-commit', 'commit-msg', 'pre-push']) assert.match(r.git('ls-files', '-s', `.githooks/${name}`).out, /^100755 /)
+    const pushed = r.run('sh', ['-c', push])
+    assert.equal(pushed.status, 0, pushed.out)
+    assert.equal(r.git('rev-parse', `origin/${SETUP_BRANCH}`).out, r.git('rev-parse', 'HEAD').out)
+    assert.equal(r.git('rev-parse', 'origin/main').out, r.git('rev-parse', 'main').out)
+  })
+
+  test('on a branch that is not protected, the setup is committed where it is', () => {
+    const r = project()
+    assert.equal(r.git('switch', '-q', '-c', 'chore/setup').status, 0)
+    const result = init(r, '--team', '--yes')
+    assert.equal(result.status, 0, result.out)
+    assert.doesNotMatch(result.out, /is protected|git switch|git push/)
+    const committed = r.run('sh', ['-c', printedCommit(result.out)])
+    assert.equal(committed.status, 0, committed.out)
+    assert.equal(r.git('symbolic-ref', '--short', 'HEAD').out.trim(), 'chore/setup')
+    assert.equal(r.git('status', '--porcelain').out, '')
   })
 })

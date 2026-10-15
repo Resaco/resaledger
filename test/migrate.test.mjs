@@ -488,8 +488,8 @@ Screenshots go into [progress/](${DIR}/progress/).
     assert.equal(read('.claude/settings.json'), SETTINGS.replace(/records\.mjs\\" hook /g, 'records.mjs\\" hook claude '))
   })
 
-  test('.gitattributes keeps its own rules and loses the union rules', () => {
-    assert.equal(read('.gitattributes'), '* text=auto\n')
+  test('.gitattributes keeps its own rules, loses the union rules and gets the LF rule for the hooks', () => {
+    assert.equal(read('.gitattributes'), '* text=auto\n.githooks/* text eol=lf\n')
   })
 
   test('links into the removed files are rewritten everywhere, and what cannot be is listed', () => {
@@ -778,11 +778,61 @@ describe('refusals, each of which changes nothing', () => {
     assertRefused(r, ['--dry-run'], /already migrated/)
   })
 
+  test('a workspace folder whose name would break out of the hooks', () => {
+    const r = legacyRepository({ files: { '.agent-ledger.json': JSON.stringify({ ...CONFIG, dir: 'x"; touch pwned; "' }) } })
+    assertRefused(r, [], /\.agent-ledger\.json: "dir" is "x\\"; touch pwned; \\""; ResaLedger 1\.0 pastes it into the git hooks, so it must be '\/'-separated names/)
+    assert.equal(existsSync(join(r.root, 'pwned')), false)
+  })
+
   test('an unknown option', () => {
     const r = legacyRepository()
     const result = migrate(r, '--yes')
     assert.equal(result.status, 1)
     assert.match(result.out, /unknown option "--yes" for migrate/)
+  })
+})
+
+describe('the LF rule for the hooks and a protected base', () => {
+  const UNION = `# agent-ledger: records that only grow at the end merge without conflicts\n${DIR}/work/log.md merge=union\n${DIR}/DECISIONS.md merge=union\n`
+
+  test('a .gitattributes with only the union rules keeps only the LF rule, and a missing one is created', () => {
+    for (const before of [UNION, null]) {
+      const r = legacyRepository({ files: { '.gitattributes': before } })
+      const result = migrate(r)
+      assert.equal(result.status, 0, result.out)
+      assert.equal(r.read('.gitattributes'), '.githooks/* text eol=lf\n')
+    }
+  })
+
+  test('an existing LF rule is kept as it is', () => {
+    const r = legacyRepository({ files: { '.gitattributes': `* text=auto eol=lf\n${UNION}` } })
+    assert.equal(migrate(r).status, 0)
+    assert.equal(r.read('.gitattributes'), '* text=auto eol=lf\n')
+  })
+
+  test('on a protected base, the printed steps commit the migration on a setup branch and push it', () => {
+    const r = legacyRepository({ files: { '.agent-ledger.json': JSON.stringify({ ...CONFIG, branches: { protected: ['main'], pattern: '' } }) } })
+    r.remote()
+    assert.equal(r.push('main').status, 0)
+    const result = migrate(r)
+    assert.equal(result.status, 0, result.out)
+    assert.match(result.out, /1\. "main" is protected, so commit the migration on a new branch:\n {7}git switch -c resaledger-setup && git add -A && /)
+    assert.match(result.out, /2\. Push it and open a pull request into main; the first pull request that adds ResaLedger is judged by its own rules:\n {7}git push -u origin resaledger-setup\n/)
+    const commands = result.out.split('\n').map((line) => line.trim())
+    const commit = commands.find((line) => line.startsWith('git switch -c'))
+    const push = commands.find((line) => line.startsWith('git push'))
+    // Without the branch, the new pre-commit hook refuses the commit on main.
+    const onMain = r.run('sh', ['-c', commit.replace('git switch -c resaledger-setup && ', '')])
+    assert.notEqual(onMain.status, 0, onMain.out)
+    assert.match(onMain.out, /"main" is a protected branch/)
+    const committed = r.run('sh', ['-c', commit])
+    assert.equal(committed.status, 0, committed.out)
+    assert.equal(r.git('symbolic-ref', '--short', 'HEAD').out.trim(), 'resaledger-setup')
+    assert.equal(r.git('status', '--porcelain').out, '')
+    assert.match(r.git('log', '-1', '--format=%B').out, /^chore: migrate to ResaLedger 1\.0\n\nTask: maintenance\n/)
+    const pushed = r.run('sh', ['-c', push])
+    assert.equal(pushed.status, 0, pushed.out)
+    assert.equal(r.git('rev-parse', 'origin/resaledger-setup').out, r.git('rev-parse', 'HEAD').out)
   })
 })
 

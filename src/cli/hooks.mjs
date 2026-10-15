@@ -2,6 +2,7 @@
 // adding the guard's calls to a hook manager that a repository already uses.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { isSafeFolderPath, SAFE_FOLDER_RULE } from '../guard/config.mjs'
 import { GIT_HOOKS } from '../guard/githooks.mjs'
 
 // pre-merge-commit runs pre-commit's checks for a merge that commits by itself, which runs no pre-commit.
@@ -11,9 +12,16 @@ const TEMPLATES = new URL('../../templates/hooks/', import.meta.url)
 const LEFTHOOK_FILES = ['lefthook.yml', 'lefthook.yaml', '.lefthook.yml', '.lefthook.yaml']
 const PRE_COMMIT_FILE = '.pre-commit-config.yaml'
 
+/** Throws unless dir is a folder path that is safe to paste into a shell script or YAML. */
+function assertSafeDir(dir) {
+  if (!isSafeFolderPath(dir)) throw new Error(`the workspace folder ${JSON.stringify(dir)} is not ${SAFE_FOLDER_RULE}`)
+}
+
 /** The hook script for .githooks/<name>, calling the guard in the workspace folder dir. */
 export function renderHook(name, dir) {
   if (!HOOK_NAMES.includes(name)) throw new Error(`unknown hook "${name}"; expected one of ${HOOK_NAMES.join(', ')}`)
+  // The configuration refuses an unsafe dir already; the template quotes it as well.
+  assertSafeDir(dir)
   return readFileSync(new URL(name, TEMPLATES), 'utf8').replaceAll('{{dir}}', dir)
 }
 
@@ -22,6 +30,7 @@ const HOOK_ARGUMENTS = { 'pre-commit': '', 'pre-merge-commit': '', 'commit-msg':
 
 /** The shell command that calls the guard for one hook. */
 export function guardCall(name, dir) {
+  assertSafeDir(dir)
   return `node "${dir}/scripts/records.mjs" ${name}${HOOK_ARGUMENTS[name]}`
 }
 
@@ -154,6 +163,7 @@ Then run "pre-commit install --hook-type pre-commit --hook-type pre-merge-commit
  * Returns { changed: [repository-relative files], instructions: string | null }.
  */
 export function integrateHookManager(root, manager, dir) {
+  assertSafeDir(dir)
   if (manager === 'husky') return integrateHusky(root, dir)
   if (manager === 'simple-git-hooks') return integrateSimpleGitHooks(root, dir)
   if (manager === 'lefthook') return { changed: [], instructions: lefthookSnippet(dir) }
