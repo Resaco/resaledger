@@ -24,8 +24,10 @@ export function temporary(prefix = 'resaledger-') {
 const GLOBAL_CONFIG = join(temporary('resaledger-config-'), 'gitconfig')
 writeFileSync(GLOBAL_CONFIG, '')
 
-// Variables such as GIT_DIR or GIT_INDEX_FILE leak in when the tests run inside a git hook.
-const inherited = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_')))
+// Variables such as GIT_DIR or GIT_INDEX_FILE leak in when the tests run inside a git hook, and
+// GitHub Actions sets GITHUB_EVENT_NAME and GITHUB_EVENT_PATH for its own run, which ci would read.
+const LEAKING = ['GIT_', 'GITHUB_', 'PRE_COMMIT_']
+const inherited = Object.fromEntries(Object.entries(process.env).filter(([name]) => !LEAKING.some((prefix) => name.startsWith(prefix))))
 export const ENV = {
   ...inherited,
   GIT_CONFIG_GLOBAL: GLOBAL_CONFIG,
