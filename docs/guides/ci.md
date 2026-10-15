@@ -43,7 +43,7 @@ Its permissions are read-only, apart from `pull-requests: write` for its one job
 
 ### What you see
 
-The check writes the same Markdown to the job summary and, on a pull request from the same repository, to one comment that it updates on each run. It lists each task the pull request moves, with its evidence, and the result of each check. Titles and evidence show as written: code spans stay, and no record can add an image, a link or bold text to the comment. A pull request from a fork gets no comment, because its token cannot write; the job summary still has everything. A failure to comment prints a warning and never changes the result.
+The check writes the same Markdown to the job summary and, on a pull request from the same repository, to one comment that it updates on each run. It lists each task the pull request moves, with its evidence, and the result of each check. Titles and evidence show as written: code spans stay, and no record can add an image, a link or bold text to the comment. Nor can a record notify anyone: `@name`, `#12`, `owner/repo#12` and `GH-12` outside code spans get an invisible word joiner after the `@`, `#` or `GH`, so they read as written but GitHub neither mentions the person nor adds a reference to the issue. Copied from the comment, such text carries the joiner along. A pull request from a fork gets no comment, because its token cannot write; the job summary still has everything. A failure to comment prints a warning and never changes the result.
 
 Make the check required, and protect the workflow with CODEOWNERS: [the team guide](team.md#make-resaledger-a-required-status-check) shows both.
 
