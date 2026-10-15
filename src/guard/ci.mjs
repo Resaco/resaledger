@@ -100,6 +100,16 @@ function ciRules(root, primary, fallback) {
   throw new CiError(`neither ${candidates.map(({ commit, from }) => `the ${from} ${ciShort(commit)}`).join(' nor ')} has ${CONFIG_FILE}, so there are no rules to check against`)
 }
 
+/**
+ * The rules with the workspace folder of a commit's own valid configuration, so that each tree's
+ * records are read where that tree keeps them: a pull request may move `dir` (spec 10). Every
+ * other rule stays the base's.
+ */
+function ciTreeConfig(root, commit, config) {
+  const own = loadConfig(treeReader({ kind: 'commit', rev: commit, root })).config
+  return own && own.dir !== config.dir ? { ...config, dir: own.dir } : config
+}
+
 /** The records check of a commit: its own configuration must be valid, and every record. */
 function ciRecordsCheck(root, commit, config) {
   const reader = treeReader({ kind: 'commit', rev: commit, root })
@@ -133,17 +143,19 @@ function ciCommitsCheck(root, from, to, config, lane, skipGitHubMerges, note) {
 }
 
 /**
- * The decisions and log entries the merge base has and the head lacks, as problems: they are
- * only ever added (spec 6.2), and a renamed one would also pass for a new decision.
+ * The decisions and log entries the merge base has (in its folder `beforeDir`) and the head lacks
+ * (in `afterDir`), as problems: they are only ever added (spec 6.2), and a renamed one would also
+ * pass for a new decision.
  */
-function ciRemovedRecords(root, mergeBase, head, config) {
+function ciRemovedRecords(root, mergeBase, head, beforeDir, afterDir) {
   const before = treeReader({ kind: 'commit', rev: mergeBase, root })
   const after = treeReader({ kind: 'commit', rev: head, root })
   const problems = []
   for (const [folder, kind] of [['decisions', 'decision'], ['log', 'log entry']]) {
-    const prefix = `${config.dir}/${folder}/`
-    for (const file of before.list(`${config.dir}/${folder}`)) {
-      if (!/\.md$/i.test(file) || file.slice(prefix.length).includes('/') || after.exists(file)) continue
+    const prefix = `${beforeDir}/${folder}/`
+    for (const file of before.list(`${beforeDir}/${folder}`)) {
+      const name = file.slice(prefix.length)
+      if (!/\.md$/i.test(file) || name.includes('/') || after.exists(`${afterDir}/${folder}/${name}`)) continue
       problems.push({ file, line: 0, message: `this ${kind} is deleted or renamed, but the merge base has it. Decisions and log entries are only added: restore it${kind === 'decision' ? ', and supersede it with a new decision' : ''}` })
     }
   }
@@ -308,12 +320,14 @@ function ciPullRequest(root, options) {
   const rules = ciRules(root, { commit: base, from: 'base' }, { commit: head, from: 'head' })
   const { config } = rules
   const { lane } = options
-  const tasksAt = (commit) => taskRecordsById(treeReader({ kind: 'commit', rev: commit, root }), config.dir)
+  // Each tree is read with its own folder, and tasks are compared by id, so a move of dir is judged.
+  const configAt = (commit) => ciTreeConfig(root, commit, config)
+  const tasksAt = (commit) => taskRecordsById(treeReader({ kind: 'commit', rev: commit, root }), configAt(commit).dir)
   const mergeBaseTasks = tasksAt(mergeBase)
   const headTasks = tasksAt(head)
   const baseTasks = base === mergeBase ? mergeBaseTasks : tasksAt(base)
 
-  const checks = [ciRecordsCheck(root, head, config)]
+  const checks = [ciRecordsCheck(root, head, configAt(head))]
   checks.push(ciCommitsCheck(root, mergeBase, head, config, lane, false, null))
 
   const ownership = ownershipProblems({
@@ -329,7 +343,7 @@ function ciPullRequest(root, options) {
   const reported = new Set(ownership.map(({ file }) => file))
   const foreign = foreignLaneTasks({ before: mergeBaseTasks, after: headTasks, lane, accepted: [baseTasks] }).filter(({ task }) => !reported.has(task.file))
   ownership.push(...laneCopyProblems(foreign, ciLaneCopies(root, foreign), config))
-  ownership.push(...ciRemovedRecords(root, mergeBase, head, config))
+  ownership.push(...ciRemovedRecords(root, mergeBase, head, configAt(mergeBase).dir, configAt(head).dir))
   const changed = [...headTasks].filter(([id, { text }]) => mergeBaseTasks.get(id)?.text !== text).length
   checks.push({ name: 'ownership', ok: ownership.length === 0, problems: ownership, counts: { changed }, note: null })
   checks.push(ciIdsCheck(root, config, { mergeBaseTasks, headTasks, baseTasks, base, head, lane, fork: options.fork }))
@@ -337,7 +351,7 @@ function ciPullRequest(root, options) {
   const moved = ciMovedTasks(mergeBaseTasks, headTasks)
   checks.push({ name: 'moved', ok: true, problems: [], counts: { moved: moved.length }, note: null })
 
-  const { check, gates } = ciGatesCheck(root, config, head)
+  const { check, gates } = ciGatesCheck(root, configAt(head), head)
   checks.push(check)
 
   // The pull request's own changes start at the merge base; a merge base from before the base
@@ -377,10 +391,10 @@ function ciPush(root, options) {
   const { config } = rules
   const skipped = ciSkippedPush(options, config)
   if (skipped) return { from: null, rules, checks: [], moved: [], gates: null, enforcement: null, skipped }
-  const checks = [ciRecordsCheck(root, after, config)]
+  const checks = [ciRecordsCheck(root, after, ciTreeConfig(root, after, config))]
   const note = newBranch ? 'a new branch: its commits are checked in their pull request' : null
   checks.push(ciCommitsCheck(root, from, after, config, null, true, note))
-  const tasksAt = (commit) => taskRecordsById(treeReader({ kind: 'commit', rev: commit, root }), config.dir)
+  const tasksAt = (commit) => taskRecordsById(treeReader({ kind: 'commit', rev: commit, root }), ciTreeConfig(root, commit, config).dir)
   const moved = from === null ? [] : ciMovedTasks(tasksAt(from), tasksAt(after))
   checks.push({ name: 'moved', ok: true, problems: [], counts: { moved: moved.length }, note: null })
   return { from, rules, checks, moved, gates: null, enforcement: null }

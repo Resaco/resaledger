@@ -4,7 +4,7 @@
 // a shallow clone and the --base/--head/--lane flags.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { contentHash, normalizeManaged } from '../src/guard/managed.mjs'
@@ -718,6 +718,58 @@ describe('ci and changes to enforcement', () => {
     const result = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
     passed(result)
     assert.match(result.out, /✔ enforcement: unchanged/)
+  })
+})
+
+describe('ci and a moved workspace', () => {
+  const OLD = '# Keep the folder\n\n- Date: 2026-10-01\n- Decided by: alice\n- Weakens: dir\n\nAn old decision that names dir.\n'
+  const MOVE = '# Move the workspace\n\n- Date: 2026-10-15\n- Decided by: alice\n- Weakens: dir\n\nThe records move under docs/.\n'
+  const LOG = '# 2026-10-15 · Bake\n\n- Lane: main\n- Tasks: —\n\nBaked.\n'
+
+  /** Main with two tasks, an old decision naming dir and a log entry; lane-a moves ledger/ to docs/ledger/. */
+  function moved({ drop = null } = {}) {
+    const r = setup({ tasks: [['S1', 'Bake bread'], ['S2', 'Buy flour', { status: 'done' }]] })
+    commit(r, { 'ledger/decisions/2026-10-01-keep.md': OLD, 'ledger/log/2026-10-15-bake.md': LOG }, 'docs: records', 'Task: maintenance')
+    r.git('checkout', '-q', '-b', 'lane-a')
+    mkdirSync(join(r.root, 'docs'))
+    assert.equal(r.git('mv', 'ledger', 'docs/ledger').status, 0)
+    const dropped = drop ? r.git('rm', '-q', '-f', `docs/ledger/tasks/${drop}.md`) : { status: 0 }
+    assert.equal(dropped.status, 0, dropped.out)
+    commit(r, { '.resaledger.json': `${JSON.stringify({ version: 2, dir: 'docs/ledger' }, null, 2)}\n` }, 'chore: move the workspace', 'Task: maintenance')
+    return r
+  }
+
+  test('a move to docs/ledger/ with a decision naming dir passes, and so does the push that merges it', () => {
+    const r = moved()
+    commit(r, { 'docs/ledger/decisions/2026-10-15-move.md': MOVE }, 'docs: decide the move', 'Task: maintenance')
+    const result = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
+    passed(result)
+    assert.match(result.out, /✔ records: .*2 tasks/)
+    assert.match(result.out, /dir moved from "ledger" to "docs\/ledger" · weakening, decided in docs\/ledger\/decisions\/2026-10-15-move\.md by alice/)
+
+    r.git('checkout', '-q', 'main')
+    const before = rev(r)
+    assert.equal(r.git('merge', '-q', '--no-ff', '-m', 'Merge pull request #3 from team/lane-a', 'lane-a').status, 0)
+    passed(ci(r, 'push', { before, after: rev(r), ref: 'refs/heads/main' }))
+  })
+
+  test('without a new decision it fails on enforcement only; the old decision that moved along does not count', () => {
+    const r = moved()
+    const result = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
+    failed(result, /✖ enforcement: 1 weakening change no decision names/)
+    assert.match(result.out, /✔ records:/)
+    assert.match(result.out, /✔ ownership:/)
+    assert.match(result.out, /✔ ids:/)
+    assert.match(result.out, /✔ commits:/)
+  })
+
+  test('a move that also deletes a task fails on ownership', () => {
+    const r = moved({ drop: 'S1' })
+    commit(r, { 'docs/ledger/decisions/2026-10-15-move.md': MOVE }, 'docs: decide the move', 'Task: maintenance')
+    const result = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
+    failed(result, /✖ ownership: 1 problem/)
+    assert.match(result.out, /task S1 is deleted or its id renamed, but it exists on main/)
+    assert.match(result.out, /✔ records:/)
   })
 })
 
