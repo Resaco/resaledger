@@ -4,13 +4,13 @@ All notable changes to ResaLedger are recorded here. The format follows [Keep a 
 
 ## [Unreleased]
 
-## [1.0.0-rc.2] - 2026-10-15
+## [1.0.0-rc.2] - 2026-10-16
 
 The second release candidate, with the fixes from the first installations of rc.1 in real repositories and the first migrations of 0.x workspaces.
 
 ### Added
 
-- **`agent.pushNeedsHandoff`.** With `true`, the agent hooks refuse an agent's `git push` while `handoff` fails in the worktree the push runs in, with handoff's own message. The check that the lane is pushed is left out, since the push does that. `ci` lists turning the key off as a weakening.
+- **`agent.pushNeedsHandoff`.** With `true`, the agent hooks refuse an agent's `git push` while `handoff` fails in the worktree the push runs in, with handoff's own message. The check that the lane is pushed is left out, since the push does that. The check runs before the command, so a push after a commit or a switch in the same command is refused with the advice to push on its own; a dry run is not judged. `ci` lists turning the key off as a weakening.
 - **`init` tries `package.json`'s `check` script** as a verify gate, as it already did the Makefile's `check`. Scripts named `test:…` or `lint:…` are listed with the command that runs each and never run, since a name does not say whether a script ends or changes files.
 - **`migrate` says when agent hooks are missing**, and gives the command that adds them, such as `npx resaledger update --agents claude`.
 - **[Work outside the code](docs/guides/outside-the-code.md)**, a guide to content edited in a CMS, server settings and other work the hooks cannot see, with evidence someone else can check.
@@ -26,7 +26,7 @@ The second release candidate, with the fixes from the first installations of rc.
 
 - **`migrate` renames the old configuration file in `.gitattributes`**, so a rule such as `export-ignore` keeps `.resaledger.json` out of `git archive`. A longer pattern that only contains the old name is reported and left alone.
 - **`migrate` keeps edited 0.x template sections active.** A section of the workspace `AGENTS.md` or `standards.md` whose template text the project edited stays where the project's own sections go, with a warning, instead of leaving the instructions for the migration's log entry.
-- **The CI comment mentions nobody and references no issue.** `@name`, `#12`, `owner/repo#12` and `GH-12` from the records are shown as written but not linked.
+- **The CI comment mentions nobody and references no issue.** `@name`, `#12`, `owner/repo#12` and `GH-12` from the records are shown as written but not linked; a URL's `#` fragment and a path such as `gh-2-fix.md` stay as they are.
 - **`init` titles the workspace README with a scoped package's own name**: `@scope/web` gives `web`.
 - **`claim` no longer speaks of pushing in a repository without a remote.**
 - **`npx resaledger` in a repository whose dependencies npm cannot resolve** stops with `EOVERRIDE` before ResaLedger starts. The README and the guides give the way past it: `npx --prefix "$(mktemp -d)" resaledger init` reads no project and still runs in the current folder.

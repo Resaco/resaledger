@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ResaLedger 1.0.0-rc.1
+// ResaLedger 1.0.0-rc.2
 // The ResaLedger guard: one file with no dependencies, run by the git hooks, the agent
 // hooks and CI. Built from its source modules by scripts/bundle.mjs; do not edit it here.
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -10,8 +10,8 @@ import { dirname, isAbsolute, join, posix, relative, resolve } from 'node:path'
 import { isatty } from 'node:tty'
 import { fileURLToPath } from 'node:url'
 
-const VERSION = '1.0.0-rc.1'
-const RELEASED = {"hooks/commit-msg":{"1.0.0-rc.1":"aed52395adb1fd45357244e5d78ddc3c60b0e5fc558678b1f7464f42b740f667"},"hooks/pre-commit":{"1.0.0-rc.1":"26abf45bfc0570188dc7cd368e4a40269835b79bfcf72efb30d839017a5322e8"},"hooks/pre-merge-commit":{"1.0.0-rc.1":"f62d8a0d3dfd87e4816e311a095b8f93e9329955adf668077a0cc10ace224b7f"},"hooks/pre-push":{"1.0.0-rc.1":"68ac4461397ecad35218104129f87f02fce5964cbcc71f346dcac424282f553a"},"workflow":{"1.0.0-rc.1":"ef7bdb309f6d0137ad2602be587d06ec2013be44664e6ccd99f2ef3da426e68f"}}
+const VERSION = '1.0.0-rc.2'
+const RELEASED = {"guard":{"1.0.0-rc.1":"5865d816045d07943149d2672863d8692583792e291834b0a22817811b3ffa15"},"hooks/commit-msg":{"1.0.0-rc.1":"aed52395adb1fd45357244e5d78ddc3c60b0e5fc558678b1f7464f42b740f667","1.0.0-rc.2":"aed52395adb1fd45357244e5d78ddc3c60b0e5fc558678b1f7464f42b740f667"},"hooks/pre-commit":{"1.0.0-rc.1":"26abf45bfc0570188dc7cd368e4a40269835b79bfcf72efb30d839017a5322e8","1.0.0-rc.2":"26abf45bfc0570188dc7cd368e4a40269835b79bfcf72efb30d839017a5322e8"},"hooks/pre-merge-commit":{"1.0.0-rc.1":"f62d8a0d3dfd87e4816e311a095b8f93e9329955adf668077a0cc10ace224b7f","1.0.0-rc.2":"f62d8a0d3dfd87e4816e311a095b8f93e9329955adf668077a0cc10ace224b7f"},"hooks/pre-push":{"1.0.0-rc.1":"68ac4461397ecad35218104129f87f02fce5964cbcc71f346dcac424282f553a","1.0.0-rc.2":"68ac4461397ecad35218104129f87f02fce5964cbcc71f346dcac424282f553a"},"workflow":{"1.0.0-rc.1":"ef7bdb309f6d0137ad2602be587d06ec2013be44664e6ccd99f2ef3da426e68f","1.0.0-rc.2":"ef7bdb309f6d0137ad2602be587d06ec2013be44664e6ccd99f2ef3da426e68f"}}
 
 // --- util.mjs ---
 // Small helpers that every part of the guard uses.
@@ -4752,9 +4752,27 @@ function agentsGitRefusal(args, context, cwd) {
     }
     const protectedRefusal = agentsProtectedPushRefusal(options, refspecs, context, folder)
     if (protectedRefusal) return protectedRefusal
-    if (context.config.agent.pushNeedsHandoff) return agentsPushHandoffRefusal(context, folder)
+    if (context.config.agent.pushNeedsHandoff) {
+      // A dry run pushes nothing.
+      if (options.some((option) => option === '--dry-run' || agentsShortHas(option, 'n'))) return null
+      if (context.changedBy) {
+        return `"git push" follows "git ${context.changedBy}" in the same command, and agent.pushNeedsHandoff judges a push before the command runs, so it cannot see what "git ${context.changedBy}" changes. Run "git push" as a command of its own, after the rest has run`
+      }
+      return agentsPushHandoffRefusal(context, folder)
+    }
   }
   return null
+}
+
+// The git commands that change the commits, the index or the checkout, for a push after them.
+const AGENTS_CHANGING = ['add', 'am', 'apply', 'checkout', 'cherry-pick', 'clean', 'commit', 'merge', 'mv', 'pull', 'rebase', 'reset', 'restore', 'revert', 'rm', 'stash', 'switch']
+
+/** Notes the last git command so far in a command line that changes the commits, the index or the checkout. */
+function agentsTrackChange(args, context, cwd) {
+  const { sub, rest } = agentsGitInvocation(args, cwd)
+  if (!AGENTS_CHANGING.includes(sub)) return
+  if (sub === 'stash' && ['list', 'show'].includes(rest[0])) return
+  context.changedBy = sub
 }
 
 /** The refusal for a push that would reach a protected branch, or null. */
@@ -4798,6 +4816,9 @@ function agentsPushHandoffRefusal(context, folder) {
   const root = worktree.top
   const { config, problems: configProblems } =
     root === agentsRealPath(context.root) && context.loadedConfig ? { config: context.loadedConfig, problems: [] } : loadConfig(agentsCommittedFile(root))
+  if (!config && agentsCommittedFile(root)(CONFIG_FILE) === null && worktree.branch) {
+    return `the lane "${worktree.branch}" has no ${CONFIG_FILE} at its last commit: the lane branched before ResaLedger was set up. Merge the base branch into it, which brings the configuration, and push again`
+  }
   const problems = config ? handoffProblems({ root, config: { ...config, requirePushed: false }, lane: worktree.branch }) : configProblems
   if (problems.length === 0) return null
   return `agent.pushNeedsHandoff is on, so an agent pushes only work that is handed over, and "${context.guard} handoff" does not pass here:
@@ -4985,7 +5006,10 @@ function agentsShellRefusal(text, context, folder = context.cwd) {
       if (reason) return reason
     }
     editRefusal ??= agentsEditRefusal(agentsWrittenPaths(command).map((path) => resolve(cwd, agentsExpandHome(path))), context)
-    if (program === 'git') agentsTrackSwitch(command.args, context, cwd)
+    if (program === 'git') {
+      agentsTrackSwitch(command.args, context, cwd)
+      agentsTrackChange(command.args, context, cwd)
+    }
     if (program === 'cd' && command.depth === 0 && command.words[1] && !command.words[1].dynamic) cwd = resolve(cwd, agentsExpandHome(command.args[1]))
   }
   if (context.config.agent.deny.length > 0) {
@@ -5148,7 +5172,9 @@ function agentsContext(session, adapter) {
     sessionKey: key,
     adapter,
     worktrees: new Map(),
-    switched: new Map()
+    switched: new Map(),
+    // The last git command so far in this command line that changes the commits, the index or the checkout.
+    changedBy: null
   }
 }
 
@@ -6508,15 +6534,18 @@ function ciClosingRun(text, from, length) {
  * Plain text outside code spans, escaped: backslashes, Markdown's inline punctuation and `<`.
  * Mentions (@name), issue references (#12, owner/repo#12, GH-12) get a word joiner (U+2060)
  * after the @, the # or GH: it is invisible, but GitHub then neither notifies anyone nor leaves
- * a reference in another issue. A backslash or an HTML entity would not stop either.
+ * a reference in another issue. A backslash or an HTML entity would not stop either. A # inside
+ * a URL and a GH- inside a path or slug are no references and stay as written.
  */
 function ciMarkdownEscape(text) {
   return text
     .replace(/[\\`*_[\]~]/g, '\\$&')
     .replace(/</g, '&lt;')
     .replace(/(^|[^\w])@(?=\w)/g, '$1@\u2060')
-    .replace(/#(?=\d)/g, '#\u2060')
-    .replace(/\bGH(?=-\d)/gi, '$&\u2060')
+    // A joiner after a URL's # would end GitHub's autolink there.
+    .replace(/\S+/g, (token) => (token.includes('://') ? token : token.replace(/#(?=\d)/g, '#\u2060')))
+    // GH-12 in capitals, not inside a path or a slug such as tasks/gh-2-fix.md or fix-GH-4.
+    .replace(/(^|[^\w/.\\-])GH(?=-\d)/g, '$1GH\u2060')
 }
 
 /** A command as a Markdown code span, on one line. */

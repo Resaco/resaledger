@@ -1,6 +1,6 @@
 {
   "name": "resaledger",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "description": "A task ledger inside your repository that coding agents can't skip, can't fake and can't collide on.",
   "type": "module",
   "bin": {

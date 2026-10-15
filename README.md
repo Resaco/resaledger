@@ -15,7 +15,7 @@ Coding agents lose track of what they were doing, say the tests pass when nobody
 
 No dependencies, Node 20 or newer. Works with Claude Code, Codex, Cursor, Gemini CLI and GitHub Copilot, and with people.
 
-**Status: release candidate.** 1.0.0-rc.1 is on npm under the `next` tag: until 1.0.0 is out, write `npx resaledger@next` wherever this page says `npx resaledger`. This repository is built with ResaLedger itself: its own tasks, decisions and log are in [`ledger/`](ledger/README.md).
+**Status: release candidate.** 1.0.0-rc.2 is on npm under the `next` tag: until 1.0.0 is out, write `npx resaledger@next` wherever this page says `npx resaledger`. This repository is built with ResaLedger itself: its own tasks, decisions and log are in [`ledger/`](ledger/README.md).
 
 ## Quickstart
 
