@@ -1,12 +1,13 @@
 // work: the state on one screen, in real repositories with the bundled guard and its hooks
 // installed, so that turning the hooks on is real. Lanes are real worktrees.
 import assert from 'node:assert/strict'
-import { chmodSync, readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { chmodSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { HOOK_NAMES, renderHook } from '../src/cli/hooks.mjs'
 import { compareTaskIds } from '../src/guard/work.mjs'
-import { PACKAGE, repository, run, temporary } from './helpers.mjs'
+import { ENV, PACKAGE, repository, run, temporary } from './helpers.mjs'
 
 const GUARD = join(temporary(), 'records.mjs')
 const built = run(PACKAGE, process.execPath, [join(PACKAGE, 'scripts', 'bundle.mjs'), '--out', GUARD])
@@ -61,8 +62,8 @@ function work(r, ...args) {
   return r.node('ledger/scripts/records.mjs', 'work', ...args)
 }
 
-function workJson(r) {
-  const result = work(r, '--json')
+function workJson(r, ...args) {
+  const result = work(r, '--json', ...args)
   assert.equal(result.status, 0, result.out)
   return JSON.parse(result.out)
 }
@@ -317,4 +318,234 @@ test('the header says whether the gates passed on the code at HEAD', () => {
 test('with no gates the header says nothing about verification', () => {
   const r = workspace()
   assert.deepEqual(workJson(r).verification, { state: 'no-gates', gates: 0 })
+})
+
+// work --all: the pushed lanes. A second clone of the bare remote does the other lanes' work,
+// with no hooks, and pushes it; the repository under test sees it after a fetch.
+
+/** A clone of r's remote next to r, with git and file helpers. */
+function cloneOf(r, name = 'clone') {
+  const root = join(r.base, name)
+  const cloned = run(r.base, 'git', ['clone', '-q', join(r.base, 'remote.git'), root])
+  if (cloned.status !== 0) throw new Error(`git clone failed: ${cloned.out}`)
+  const c = {
+    root,
+    git: (...args) => {
+      const result = run(root, 'git', args)
+      if (result.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.out}`)
+      return result.out
+    },
+    write: (path, text) => writeFileSync(join(root, path), text),
+    /** A branch from main with these task files, committed (at a date, when given) and pushed. */
+    lane: (branch, files, date) => {
+      c.git('checkout', '-q', '-b', branch, 'main')
+      for (const [id, title, fields] of files) c.write(`ledger/tasks/${id}.md`, taskFile(id, title, fields))
+      c.git('add', '-A')
+      const dates = date ? { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : {}
+      const message = `chore: claim ${files.map(([id]) => id).join(', ')}`
+      const committed = spawnSync('git', ['commit', '-q', '--allow-empty', '-m', message], { cwd: root, env: { ...ENV, ...dates }, encoding: 'utf8' })
+      if (committed.status !== 0) throw new Error(`git commit failed: ${committed.stdout}${committed.stderr}`)
+      c.git('push', '-q', '-u', 'origin', branch)
+      c.git('checkout', '-q', 'main')
+    }
+  }
+  return c
+}
+
+/** A workspace with a bare remote, its main pushed, and a clone of that remote. */
+function pushedWorkspace(options) {
+  const r = workspace(options)
+  r.remote()
+  assert.equal(r.push('-u', 'main').status, 0)
+  return { r, c: cloneOf(r) }
+}
+
+test('work --all shows pushed lanes newest first, with what each holds, and warns of a task held by two', () => {
+  const { r, c } = pushedWorkspace({ tasks: [['S1', 'One'], ['S2', 'Two'], ['S3', 'Three']] })
+  c.lane('a', [['S1', 'One', { status: 'doing', lane: 'a' }]], '2030-01-01T10:00:00Z')
+  c.lane('b', [['S1', 'One', { status: 'doing', lane: 'b' }], ['S2', 'Two', { status: 'doing', lane: 'b' }]], '2030-01-02T10:00:00Z')
+  c.lane('quiet', [], '2030-01-03T10:00:00Z')
+  assert.equal(r.fetch().status, 0)
+
+  const plain = workJson(r)
+  assert.deepEqual(plain.lanes.map((lane) => lane.source), ['this'])
+  assert.equal('base' in plain, false)
+
+  const state = workJson(r, '--all')
+  assert.equal(state.base, 'origin/main')
+  assert.equal(state.fetch, null)
+  const remote = state.lanes.filter((lane) => lane.source === 'remote')
+  assert.deepEqual(
+    remote.map((lane) => [lane.branch, lane.holds, lane.ahead, lane.verification]),
+    [
+      ['quiet', [], 1, null],
+      ['b', ['S1', 'S2'], 1, 'no-gates'],
+      ['a', ['S1'], 1, 'no-gates']
+    ]
+  )
+  assert.deepEqual(Object.keys(remote[0]), ['branch', 'source', 'holds', 'lastCommit', 'pushed', 'remote', 'ref', 'commit', 'ahead', 'verification'])
+  assert.equal(remote[0].ref, 'refs/remotes/origin/quiet')
+  assert.equal(remote[0].lastCommit.author, 'Test')
+  assert.equal(state.lanes[0].pushed, true)
+  assert.deepEqual(state.warnings.doubleClaims, [{ id: 'S1', lanes: ['a', 'b'] }])
+  assert.deepEqual(state.warnings.staleClaims, [])
+  assert.deepEqual(state.ready.map((task) => task.id), ['S3'])
+
+  const text = work(r, '--all')
+  assert.equal(text.status, 0, text.out)
+  assert.match(
+    text.out,
+    /\nPushed lanes not merged into origin\/main\n {2}origin\/quiet: holds nothing · 1 ahead · Test 2030-01-03\n {2}origin\/b: S1, S2 · 1 ahead · Test 2030-01-02\n {2}origin\/a: S1 · 1 ahead · Test 2030-01-01\n/
+  )
+  assert.match(text.out, /\nWarnings\n {2}S1 is doing in 2 lanes: a, b\./)
+  assert.doesNotMatch(work(r).out, /Pushed lanes/)
+})
+
+test('work --all: a task that is the base\'s own is no lane\'s claim, and a merged lane is not shown', () => {
+  const { r, c } = pushedWorkspace({ tasks: [['S1', 'One', { status: 'doing', lane: 'main' }], ['S2', 'Two']] })
+  // The lane changes another file only: S1 on it is the base's own task.
+  c.git('checkout', '-q', '-b', 'docs')
+  c.write('notes.md', 'Notes.\n')
+  c.git('add', '-A')
+  c.git('commit', '-q', '-m', 'docs: notes')
+  c.git('push', '-q', 'origin', 'docs')
+  c.git('checkout', '-q', 'main')
+  c.lane('done-lane', [['S2', 'Two', { status: 'done' }]])
+  c.git('merge', '-q', '--ff-only', 'done-lane')
+  c.git('push', '-q', 'origin', 'main')
+  assert.equal(r.fetch().status, 0)
+
+  const state = workJson(r, '--all')
+  assert.deepEqual(
+    state.lanes.map((lane) => [lane.branch, lane.source, lane.holds]),
+    [['main', 'this', ['S1']], ['docs', 'remote', []]]
+  )
+  assert.deepEqual(state.warnings.doubleClaims, [])
+  assert.deepEqual(state.warnings.staleClaims, [])
+})
+
+test('work --all: a claim left by a merged branch, and by a deleted one, is a stale claim; --fetch prunes', () => {
+  const { r, c } = pushedWorkspace({ tasks: [['S1', 'One'], ['S2', 'Two'], ['S3', 'Three']] })
+  c.lane('m', [['S1', 'One', { status: 'doing', lane: 'm' }]])
+  c.git('merge', '-q', '--no-ff', '-m', 'Merge m', 'm')
+  c.lane('g', [['S2', 'Two', { status: 'doing', lane: 'g' }]])
+  c.git('merge', '-q', '--no-ff', '-m', 'Merge g', 'g')
+  c.git('push', '-q', 'origin', 'main')
+  assert.equal(r.fetch().status, 0)
+  c.git('push', '-q', 'origin', '--delete', 'g')
+
+  // As last fetched, g still exists, merged.
+  const before = workJson(r, '--all')
+  assert.deepEqual(before.lanes.map((lane) => lane.branch), ['main'])
+  assert.deepEqual(
+    before.warnings.staleClaims.map((claim) => [claim.id, claim.lane, claim.reason]),
+    [['S1', 'm', 'merged'], ['S2', 'g', 'merged']]
+  )
+
+  const fetched = work(r, '--fetch')
+  assert.equal(fetched.status, 0, fetched.out)
+  assert.doesNotMatch(fetched.out, /could not fetch/)
+  assert.match(fetched.out, /\nPushed lanes not merged into origin\/main\n {2}none\n/)
+  assert.match(fetched.out, /\n {2}S1 is held by m, which is merged into origin\/main: a stale claim\. Take it over with claim S1 --take\n/)
+  assert.match(fetched.out, /\n {2}S2 is held by g, which is gone: a stale claim\. Take it over with claim S2 --take\n/)
+  const after = workJson(r, '--all')
+  assert.deepEqual(after.fetch, null)
+  assert.deepEqual(
+    after.warnings.staleClaims.map((claim) => [claim.id, claim.reason]),
+    [['S1', 'merged'], ['S2', 'gone']]
+  )
+  // The plain work does not read the base: this lane is behind it and sees no claim.
+  assert.deepEqual(workJson(r).warnings.staleClaims, [])
+})
+
+test('work --fetch against an unreachable remote says so in one line and continues offline', () => {
+  const { r, c } = pushedWorkspace({ tasks: [['S1', 'One']] })
+  c.lane('a', [['S1', 'One', { status: 'doing', lane: 'a' }]])
+  assert.equal(r.fetch().status, 0)
+  r.git('remote', 'set-url', 'origin', join(r.base, 'gone.git'))
+
+  const result = work(r, '--fetch')
+  assert.equal(result.status, 0, result.out)
+  const failures = result.out.split('\n').filter((line) => line.startsWith('✖'))
+  assert.equal(failures.length, 1)
+  assert.match(failures[0], /^✖ could not fetch from origin: .+; showing the branches as last fetched$/)
+  assert.match(result.out, /\n {2}origin\/a: S1 · 1 ahead/)
+
+  const json = r.node('ledger/scripts/records.mjs', 'work', '--fetch', '--json')
+  assert.equal(json.status, 0, json.out)
+  // run() joins stdout and stderr: the object, then the note on stderr.
+  assert.match(json.out, /\n✖ could not fetch from origin: /)
+  const state = JSON.parse(json.out.slice(0, json.out.lastIndexOf('}') + 1))
+  assert.equal(state.fetch.ok, false)
+  assert.equal(state.fetch.remote, 'origin')
+  assert.deepEqual(state.lanes.map((lane) => lane.branch), ['main', 'a'])
+})
+
+test('work --all: a lane that is a local worktree and pushed shows once, as the local lane', () => {
+  const r = workspace({ tasks: [['S1', 'One'], ['S2', 'Two']] })
+  r.remote()
+  assert.equal(r.push('-u', 'main').status, 0)
+  const w = r.worktree('w')
+  w.write('ledger/tasks/S1.md', taskFile('S1', 'One', { status: 'doing', lane: 'w' }))
+  assert.equal(w.commit('chore: claim S1').status, 0)
+  assert.equal(w.push('-u', 'w').status, 0)
+  // Uncommitted on disk: the local lane reads it, the pushed branch does not have it.
+  w.write('ledger/tasks/S2.md', taskFile('S2', 'Two', { status: 'doing', lane: 'w' }))
+
+  const state = workJson(r, '--all')
+  assert.deepEqual(
+    state.lanes.map((lane) => [lane.branch, lane.source, lane.holds, lane.pushed]),
+    [['main', 'this', [], true], ['w', 'worktree', ['S1', 'S2'], true]]
+  )
+  assert.match(work(r, '--all').out, /\nOther lanes\n {2}w: S1, S2 · pushed\n/)
+  assert.doesNotMatch(work(r).out, /pushed/)
+})
+
+test('work --all: whether a pushed lane\'s head is verified', () => {
+  const { r, c } = pushedWorkspace({ config: { gates: { verify: ['node -e "process.exit(0)"'] } }, tasks: [['S1', 'One'], ['S2', 'Two']] })
+  c.lane('v', [['S1', 'One', { status: 'doing', lane: 'v' }]])
+  c.git('checkout', '-q', 'v')
+  const verified = run(c.root, process.execPath, ['ledger/scripts/records.mjs', 'verify'])
+  assert.equal(verified.status, 0, verified.out)
+  c.git('add', '-A')
+  c.git('commit', '-q', '-m', 'chore: stamp')
+  c.git('push', '-q', 'origin', 'v')
+  c.git('checkout', '-q', 'main')
+  c.lane('u', [['S2', 'Two', { status: 'doing', lane: 'u' }]])
+  assert.equal(r.fetch().status, 0)
+
+  const remote = workJson(r, '--all').lanes.filter((lane) => lane.source === 'remote')
+  assert.deepEqual(
+    remote.map((lane) => [lane.branch, lane.ahead, lane.verification]).sort(),
+    [['u', 1, 'unverified'], ['v', 2, 'verified']]
+  )
+  assert.match(work(r, '--all').out, /\n {2}origin\/v: S1 · 2 ahead · Test [\d-]+ · verified\n/)
+})
+
+test('work --all finishes within the budget on 500 pushed branches', (t) => {
+  const { r, c } = pushedWorkspace({ tasks: Array.from({ length: 50 }, (_, index) => [`S${index + 1}`, `Task ${index + 1}`]) })
+  // Five lane heads, each changing a task, and 500 remote-tracking refs over them.
+  const heads = []
+  for (let index = 0; index < 5; index += 1) {
+    c.lane(`head-${index}`, [[`S${index + 1}`, `Task ${index + 1}`, { status: 'doing', lane: `lane-${index}` }]])
+    heads.push(c.git('rev-parse', `head-${index}`).trim())
+  }
+  assert.equal(r.fetch().status, 0)
+  const updates = Array.from({ length: 500 }, (_, index) => `create refs/remotes/origin/lane-${index} ${heads[index % heads.length]}\n`).join('')
+  const created = r.run('git', ['update-ref', '--stdin'], updates)
+  assert.equal(created.status, 0, created.out)
+  work(r, '--all')
+
+  const started = process.hrtime.bigint()
+  const result = work(r, '--all', '--json')
+  const elapsed = Number(process.hrtime.bigint() - started) / 1e6
+  assert.equal(result.status, 0, result.out)
+  const state = JSON.parse(result.out)
+  assert.equal(state.lanes.filter((lane) => lane.source === 'remote').length, 505)
+  assert.deepEqual(state.lanes.find((lane) => lane.branch === 'lane-3').holds, ['S4'])
+  const plainStarted = process.hrtime.bigint()
+  assert.equal(work(r, '--json').status, 0)
+  const plain = Number(process.hrtime.bigint() - plainStarted) / 1e6
+  t.diagnostic(`work --all on 500 branches: ${elapsed.toFixed(0)} ms, including node start-up; plain work: ${plain.toFixed(0)} ms`)
+  assert.ok(elapsed < 2000, `work --all took ${elapsed} ms`)
 })

@@ -18,9 +18,10 @@ const HELP = `ResaLedger ${VERSION}
 Usage: node ledger/scripts/records.mjs <command>
 
 Commands:
-  work [--json]
+  work [--all] [--fetch] [--json]
             the state: this lane, the other local worktrees, what is ready
-            (also: status); turns on the git hooks
+            (also: status); turns on the git hooks; --all adds the pushed
+            branches not merged into the base, --fetch fetches them first
   task <id> one task file, then the plan section its Plan link points to
   new [<prefix>] "<title>" [--under <id>] [--issue <n>]
             a todo task with the next free id (prefix T by default):
