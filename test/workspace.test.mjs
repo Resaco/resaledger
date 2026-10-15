@@ -320,6 +320,12 @@ describe('the check command', () => {
     assert.equal(r.node(guard, 'check', '--rev', 'HEAD~1').status, 0)
   })
 
+  test('passes on a README that still has setup markers, which only handoff asks about', () => {
+    const r = repositoryWith({ ...VALID, 'ledger/README.md': VALID['ledger/README.md'].replace('A small app.', 'TODO(resaledger): what is being built, for whom.') })
+    const passed = r.node(guard, 'check')
+    assert.equal(passed.status, 0, passed.out)
+  })
+
   test('prints a problem with no line without a line number, and refuses bad options', () => {
     const files = { ...VALID }
     delete files['ledger/README.md']

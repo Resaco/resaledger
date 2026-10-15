@@ -216,7 +216,11 @@ export function parseReadme(path, text) {
   return { file: path, sections, markers }
 }
 
-/** Problems with the README: a missing required section, an empty section, and every setup marker left. */
+/**
+ * Problems with the shape of the README: a missing required section or an empty one. Setup
+ * markers are not among them, so the files `init` writes can be committed at once; whether the
+ * README is written is a question for the end of a session (readmeMarkerProblems).
+ */
 export function validateReadme(readme) {
   const { file } = readme
   const problems = []
@@ -231,8 +235,14 @@ export function validateReadme(readme) {
       problems.push({ file, line: section.line, message: `the section "## ${name}" is empty; write the project's own text under it` })
     }
   }
-  for (const line of readme.markers) {
-    problems.push({ file, line, message: `a ${SETUP_MARKER} marker is left; write the project's own text here and remove the marker` })
-  }
   return problems
+}
+
+/** A problem for every setup marker left in the README. handoff asks for none; check and the hooks do not. */
+export function readmeMarkerProblems(readme) {
+  return readme.markers.map((line) => ({
+    file: readme.file,
+    line,
+    message: `a ${SETUP_MARKER} marker is left; write the project's own text here and remove the marker`
+  }))
 }

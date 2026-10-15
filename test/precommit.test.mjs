@@ -230,6 +230,14 @@ test('during a merge, a task staged as the merged lane left it passes', () => {
   passed(r.git('commit', '-q', '--no-edit'))
 })
 
+test('a README with setup markers is committed; only handoff asks for the text', () => {
+  const r = repository()
+  install(r)
+  r.write('ledger/README.md', README.replace('Build a small web shop for local bakers.', 'TODO(resaledger): what is being built, for whom.'))
+  r.git('config', 'core.hooksPath', '.githooks')
+  passed(r.commit('chore: set up ResaLedger'))
+})
+
 test('the first commit in an empty repository passes', () => {
   const r = repository()
   install(r)

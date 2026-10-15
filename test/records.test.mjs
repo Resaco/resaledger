@@ -6,6 +6,7 @@ import {
   parseDecision,
   parseLogEntry,
   parseReadme,
+  readmeMarkerProblems,
   planStatus,
   validateDecision,
   validateLogEntry,
@@ -277,15 +278,16 @@ describe('the workspace README', () => {
     assert.match(problems[0].message, /"## Goal" is empty/)
   })
 
-  test('fails while a marker is left, and passes once the text is written', () => {
+  test('a marker keeps the shape valid, and is reported for handoff until the text is written', () => {
     const marked = complete.replace('A ledger for agents.', `${SETUP_MARKER}: what is being built, for whom.`).replace('None.', `${SETUP_MARKER}`)
     const readme = parseReadme(README_FILE, marked)
     assert.deepEqual(readme.markers, [5, 13])
-    const problems = validateReadme(readme)
+    assert.deepEqual(validateReadme(readme), [])
+    const problems = readmeMarkerProblems(readme)
     assert.equal(problems.length, 2)
-    assert.deepEqual(problems.map((problem) => problem.line), [5, 13])
+    assert.deepEqual(problems.map((problem) => [problem.file, problem.line]), [[README_FILE, 5], [README_FILE, 13]])
     assert.match(problems[0].message, /write the project's own text here/)
-    assert.deepEqual(validateReadme(parseReadme(README_FILE, complete)), [])
+    assert.deepEqual(readmeMarkerProblems(parseReadme(README_FILE, complete)), [])
   })
 
   test('reports every required section of an empty README', () => {

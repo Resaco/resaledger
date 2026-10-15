@@ -1,12 +1,13 @@
-// The end-of-session check (spec 8): the records are valid, the hooks are active, the tree is
-// clean, the gates passed on this code, every task in progress has a current handoff note, the
-// unpushed commits are recorded and, in the team preset, the lane is pushed.
+// The end-of-session check (spec 8): the records are valid, the README is written, the hooks are
+// active, the tree is clean, the gates passed on this code, every task in progress has a current
+// handoff note, the unpushed commits are recorded and, in the team preset, the lane is pushed.
 import { spawnSync } from 'node:child_process'
 import { loadConfig } from './config.mjs'
 import { stampPath, verifiedStamp } from './gates.mjs'
 import { hooksActive } from './githooks.mjs'
 import { currentLane } from './lanes.mjs'
 import { checkRange, taskTrailers } from './range.mjs'
+import { readmeMarkerProblems } from './records.mjs'
 import { fail, repositoryRoot } from './util.mjs'
 import { checkWorkspace, fingerprint, isCode, loadWorkspace, treeReader } from './workspace.mjs'
 
@@ -165,6 +166,7 @@ export function handoffProblems(context) {
   const reader = treeReader({ kind: 'worktree', root })
   const workspace = loadWorkspace(reader, config)
   problems.push(...checkWorkspace(workspace, reader, config))
+  if (workspace.readme !== null) problems.push(...readmeMarkerProblems(workspace.readme))
 
   if (!hooksActive()) problems.push({ file: '', line: 0, message: 'the git hooks are not active in this clone: run work or hooks --activate' })
 
