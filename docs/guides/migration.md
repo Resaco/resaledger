@@ -174,6 +174,14 @@ Next: the rye bread price.
 
 The README now has `## Manual checks` with a `TODO(resaledger)` marker when `standards.md` listed none. Write the project's own text there; `handoff` asks for it. The 1.0 protocol is in the root `AGENTS.md`, and [the solo guide](solo.md) walks through it.
 
+## Git LFS
+
+When Git LFS wrote its hooks into `.githooks/`, `migrate` replaces its `pre-push`, tracked or not, because the 1.0 guard runs Git LFS's `pre-push` after its own checks in a repository whose tracked `.gitattributes` names `filter=lfs`. It leaves Git LFS's other hooks alone: when they are not tracked, they do not count as uncommitted changes, and the printed commit command leaves them out. The report names the replaced hook and says that after the undo command, `git lfs update --force` brings Git LFS's hooks back.
+
+A rule that hides a hook `migrate` must commit, such as a `.githooks/pre-push` line in `.git/info/exclude`, is refused with its file and line. Remove the line, then run `migrate` again.
+
+In every other clone, `git lfs install` then reports that a `pre-push` exists and stops. That is expected: it has set its filters all the same, and its other hooks, which only file locking needs, come from `git lfs update --manual`. [The solo guide](solo.md#git-lfs) shows what it prints.
+
 ## What can go wrong
 
 `migrate` refuses, and changes nothing, when:
