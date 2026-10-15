@@ -590,8 +590,8 @@ Distribution:
 | `DECISIONS.md`, one table row per decision | `decisions/<date>-<slug>.md`, with Decided by from the third column. Text before or after the table goes to the migration's log entry. |
 | `STATUS.md` | Phase and Waiting for the owner go to the README under `## At migration`. The whole file is kept word for word in the migration's log entry. |
 | Workspace `README.md` | Stays; What is being built becomes Goal. Its other sections stay as they are. |
-| `standards.md` | Its manual gates move to the README's Manual checks, and any section that the 0.x template did not have moves to the README under its own heading. The template's own sections are kept in the migration's log entry; the file is removed. |
-| Workspace `AGENTS.md` | Its Project rules, and any section the 0.x template did not have, move into the root `AGENTS.md`, above the managed block. The template's own sections are kept in the migration's log entry; the file is removed. |
+| `standards.md` | Its manual gates move to the README's Manual checks, and any section that the 0.x template did not have, or whose template text the project edited, moves to the README under its own heading, with a warning for an edited one. The template's own sections, as a 0.x release wrote them, are kept in the migration's log entry; the file is removed. |
+| Workspace `AGENTS.md` | Its Project rules, and any section the 0.x template did not have or whose template text the project edited, move into the root `AGENTS.md`, above the managed block, with a warning for an edited one. The template's own sections, as a 0.x release wrote them, are kept in the migration's log entry; the file is removed. |
 | `work/verified.json` | Removed. Run `verify`. |
 | `progress/` | Stays where it is, so links keep working. |
 | `plan/` | Unchanged. |
