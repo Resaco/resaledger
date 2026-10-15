@@ -15,3 +15,9 @@ A second model reviewed P12 and P13 (`636e8e6..c7d8660`) on 2026-10-16, with exp
 | 7 | init, migrate | low | `isGitLfsHook` accepts a command substitution inside the message of the not-installed branch, so a hook changed only there is replaced. | Accepted: the branch only runs when git-lfs is missing, and its text is Git LFS's. |
 
 Checked and found sound: the cost of the detection (about 13–25 ms per push on an index of 8,000 entries; `git lfs version` about 55 ms, only in repositories that use Git LFS), multi-ref and tag pushes (git's whole input reaches Git LFS, and a tag push uploaded its objects), a staged `.gitattributes`, no Git LFS on a refused push, its exit code and output passed through, the commit commands that keep Git LFS's `post-*` hooks out, the restore command printed after an undo, and the guides' quotation of what `git lfs install` prints.
+
+## After the fixes
+
+The reviewer's own scenarios, rerun against the code with [P12.1](../../tasks/P12.1-git-lfs-is-found-in-the-pushed-commits.md) and [P13.1](../../tasks/P13.1-a-hook-manager-s-git-lfs-line-ignored.md) merged, with git-lfs 3.8.0 and a bare remote on disk: a branch that brings Git LFS pushed from another checkout, `grep.patternType=fixed` and a rule only in `.git/info/attributes` each upload their LFS object, where they uploaded none before; a tag push and a staged `.gitattributes` still upload theirs; a push the guard refuses uploads nothing.
+
+What remains: a hook manager's `pre-push` written by hand with `git lfs pre-push` before the guard's call still lets Git LFS read git's input first, so the guard sees none. `init` refuses that setup and the snippets for lefthook and pre-commit say not to write it; the guard cannot tell input another command already read from no input at all.
