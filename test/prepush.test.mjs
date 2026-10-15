@@ -157,6 +157,22 @@ test("an adopted project's history before ResaLedger is not judged", () => {
   refused(r.push('main'), new RegExp(`main: ${sneak}: "feat: sneak"`))
 })
 
+test('a range that starts before adoption starts at the commit that added the configuration', () => {
+  // The remote's main predates ResaLedger; a branch adopts it, so the merge base is older.
+  const r = repository()
+  r.remote()
+  r.write('src/old.js', 'console.log("old")\n')
+  must(r.commit('add the old shop'))
+  must(r.push('main'))
+  r.git('checkout', '-q', '-b', 'adopt')
+  install(r, {}, [['S1', 'Bake bread']])
+  must(r.commit('chore: start'))
+  r.git('config', 'core.hooksPath', '.githooks')
+  passed(r.push('adopt'))
+  const sneak = unrecorded(r)
+  refused(r.push('adopt'), new RegExp(`adopt: ${sneak}: "feat: sneak"`))
+})
+
 test("a task another lane holds before the push is refused, with the local branch as the lane", () => {
   const r = workspace({ tasks: [['S1', 'Bake bread', { status: 'doing', lane: 'other' }]] })
   r.git('checkout', '-q', '-b', 'mine')

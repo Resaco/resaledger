@@ -323,7 +323,7 @@ A lane is a branch with someone working on it, and its identity is the branch na
 
 ### 6.2 One owner per task
 
-A task that is `doing`, or `blocked` with a Lane, belongs to that lane, and only that lane changes its file. pre-commit refuses a change to another lane's task, and so does CI in a pull request. The two exceptions are claiming a task nobody holds and taking one over with `claim --take`, which records where it came from. Tasks that are `todo` without a lane, `done` or `dropped` can be edited by anyone; such edits are rare, such as planning or fixing a link.
+A task that is `doing`, or `blocked` with a Lane, belongs to that lane, and only that lane changes its file. pre-commit refuses a change to another lane's task, and so does CI in a pull request. A held task is never deleted, not even in a merge that brings in the lane that holds it. The two exceptions are claiming a task nobody holds and taking one over with `claim --take`, which records where it came from. Tasks that are `todo` without a lane, `done` or `dropped` can be edited by anyone; such edits are rare, such as planning or fixing a link.
 
 Every other record is added and never edited: decisions (apart from marking one superseded), log entries and stamps. Plans and the workspace README are shared, and they change outside normal work.
 
@@ -383,13 +383,15 @@ The starting hypothesis gave each lane its own status file. Measured against the
 
 | | solo | team |
 | --- | --- | --- |
-| Commits on the base branch | allowed | refused by pre-commit and agent hooks |
+| Commits on the base branch | allowed | refused by pre-commit, pre-merge-commit and agent hooks |
 | Pushes to the base branch | allowed | refused by pre-push and agent hooks |
 | `claim` on the base branch | claims in place | creates a lane branch first |
 | `claim` pushes | no | yes |
 | `handoff` wants the lane pushed | no | yes |
 | CI workflow | offered | installed |
 | How lanes merge | ordinary merges, locally or by pull request | pull requests |
+
+A fast-forward merge makes no commit, so no commit hook sees it; pre-push and the agent hooks refuse it when it reaches the remote base.
 
 Switching is one line in the configuration, and the format does not change. A solo developer who starts parallel agents does not need to switch: lanes are branches in both presets.
 
@@ -415,7 +417,7 @@ The guard in the repository runs as `node ledger/scripts/records.mjs <command>`;
 | `ci [--base <ref> --head <ref>]` | The CI check ([section 10](#10-ci)). |
 | `changes [--since <ref>] [--json]` | The tasks finished since a tag, as a draft for the changelog and the release notes. Read-only. |
 | `gates`, `config`, `version` | The gates, the effective configuration, the version. |
-| `pre-commit`, `commit-msg <file>`, `pre-push`, `hook <agent> <event>` | Called by git and by agent hooks. |
+| `pre-commit`, `pre-merge-commit`, `commit-msg <file>`, `pre-push`, `hook <agent> <event>` | Called by git and by agent hooks. |
 
 The package adds `init`, `update` and `migrate` ([sections 13–15](#13-installation-and-distribution)) and passes every other command to the repository's own guard, so the committed version always decides.
 
@@ -425,10 +427,10 @@ The package adds `init`, `update` and `migrate` ([sections 13–15](#13-installa
 
 ## 9. What runs where
 
-| Check | pre-commit | commit-msg | pre-push | handoff | CI, pull request | CI, push to base |
+| Check | pre-commit, pre-merge-commit | commit-msg | pre-push | handoff | CI, pull request | CI, push to base |
 | --- | --- | --- | --- | --- | --- | --- |
 | Records are valid | ✓ | | | ✓ | ✓ | ✓ |
-| No change to another lane's task, no deleted task | ✓ | | | | ✓ | |
+| No change to another lane's task, no held task deleted | ✓ | | | | ✓ | |
 | No commit or push on a protected branch; branch name | ✓ | | ✓ | | | |
 | A code commit names a task held by its lane | | ✓ | ✓ range | ✓ range | ✓ range | ✓ new commits |
 | Commit gates pass | ✓ on code commits | | | | ✓ | |
@@ -502,7 +504,7 @@ Rules taken from how the five agents behave today. Hooks stay fast, because the 
 - **A stamp is a claim.** Anyone can write one by hand. CI reruns the gates by default, so a forged stamp never gets through CI. For a solo developer without CI, the stamp guards against forgetting, not against the developer.
 - **A pull request can change the gates, the guard or the workflow.** CI judges it with the base's rules, lists every enforcement change and fails a weakening one unless a decision file names it. The workflow file itself is beyond any check's reach; the team guide protects it with CODEOWNERS.
 - **Gates run the pull request's code.** They run under `pull_request`, with no secrets and a read-only token for forks, never under `pull_request_target`.
-- **The guard runs only commands from a configuration it trusts**: the local file in hooks, the base branch's file in CI.
+- **The guard runs only commands from a configuration it trusts.** The rules (the base, the protected branches, the branch pattern and the gates) come from a committed configuration the change cannot alter: HEAD's in pre-commit, pre-merge-commit and commit-msg, the remote base's as last fetched (else HEAD's) in pre-push, and the base branch's in CI. Staging `"protected": []` does not unprotect the commit that stages it.
 
 ## 13. Installation and distribution
 

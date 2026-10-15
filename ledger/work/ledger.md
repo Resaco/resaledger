@@ -209,11 +209,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: For C3: the workflow must run on `pull_request`, never `pull_request_target`, because the gates run the pull request's code; and gate output appears above the `ci` header today. Pre-commit clears git's location variables while it reads the other worktrees, because git sets `GIT_INDEX_FILE` for hooks; W2 moves that into `localLanes`, so every caller is safe.
 
 ### C2 Changes to enforcement
-- Status: todo
+- Status: doing
 - Depends on: C1
 - Plan: [C-ci.md](../plan/C-ci.md#c2-changes-to-enforcement)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `c2-enforcement`.
 
 ### C3 Output, workflow and templates
 - Status: todo
@@ -239,11 +239,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: The cause was not the session state: reading stdin before the caller wrote it returned nothing, so every hook allowed, pre-tool refusals and pre-push's ref list included. `readStdin` now waits for the input, and session starts are written atomically and never replaced.
 
 ### A2 Cursor, Gemini CLI and GitHub Copilot
-- Status: todo
+- Status: doing
 - Depends on: A1
 - Plan: [A-agents.md](../plan/A-agents.md#a2-cursor-gemini-cli-and-github-copilot)
 - Evidence: —
-- Notes: Also add to the built-in refusals the commands that throw work away (`reset --hard`, `clean -f`, `checkout -- .`, `restore`) when they would hit another lane's worktree or a protected branch: on 15 October an experimenting reviewer's shell ran such a chain in the lead's checkout. Decide too whether `update` adds back an agent configuration a project removed on purpose.
+- Notes: A worker builds it on branch `a2-agents`. Also add to the built-in refusals the commands that throw work away (`reset --hard`, `clean -f`, `checkout -- .`, `restore`) when they would hit another lane's worktree or a protected branch: on 15 October an experimenting reviewer's shell ran such a chain in the lead's checkout. Decide too whether `update` adds back an agent configuration a project removed on purpose.
 
 ### A3 The `AGENTS.md` block, the skill and the plugin
 - Status: todo
@@ -337,25 +337,25 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: Commits are read length-prefixed through `git cat-file --batch`, and a commit that cannot be read is refused, never passed. Spec section 5.9 now says when a merge or a revert is exempt; a release is not. `git commit --allow-empty` on top of a code commit now needs a `Task:` line, because commit-msg cannot tell it from `--amend`; a `prepare-commit-msg` hook would.
 
 ### T3.2 Hooks judged by the committed rules
-- Status: doing
+- Status: done
 - Depends on: T3
 - Plan: [The review](../evidence/t3/review.md#findings), findings 4, 6 and 9
-- Evidence: —
-- Notes: A worker fixes it on branch `t3-2-rules`. Ship a `pre-merge-commit` hook; take the protected branches, the branch pattern and the gates from the committed configuration, not the staged one; refuse deleting a task another lane holds.
+- Evidence: 754 of 754 on Node 24.18.0, 22.23.3 and 20.20.2 after the merge; [precommit.test.mjs](../../test/precommit.test.mjs) refuses a merge onto the protected base through the shipped `pre-merge-commit`, a staged `"protected": []` and deleting a task another lane holds after merging it in, and [prepush.test.mjs](../../test/prepush.test.mjs) judges a push by the remote base's rules and starts a range older than adoption at the adoption commit.
+- Notes: Worked on branch `t3-2-rules`. Ship a `pre-merge-commit` hook; take the protected branches, the branch pattern and the gates from the committed configuration, not the staged one; refuse deleting a task another lane holds.
 
 ### T3.3 handoff and verify at the edges
 - Status: done
 - Depends on: T3
 - Plan: [The review](../evidence/t3/review.md#findings), findings 5, 8, 10 and 11
 - Evidence: 721 of 721 on Node 24.18.0, 22.23.3 and 20.20.2 on the branch; [handoff.test.mjs](../../test/handoff.test.mjs) passes the first `handoff` after ten commits made before adoption, [adoption.test.mjs](../../test/adoption.test.mjs) covers the shared range start, and [gates.test.mjs](../../test/gates.test.mjs) covers pruning only stamps and refusing code hidden with `skip-worktree` or `assume-unchanged`.
-- Notes: Spec section 5.10 now says which workspace files are code. Pre-push should take its range start through `adoptionStart` too; T3.2 or the lead wires it in when T3.2 merges.
+- Notes: Spec section 5.10 now says which workspace files are code. Pre-push takes its range start through `adoptionStart` too since T3.2 merged.
 
 ### T3.4 Setup that works everywhere
-- Status: todo
+- Status: doing
 - Depends on: T3
 - Plan: [The review](../evidence/t3/review.md#findings), findings 12 and 13
 - Evidence: —
-- Notes: Restrict `dir` and `codePaths` to safe path segments; add `.githooks/* text eol=lf` to `.gitattributes` in `init` and `migrate`; and in the team preset let `init` set up on a branch, because the protected base refuses the setup commit (seen during the review).
+- Notes: A worker builds it on branch `t3-4-setup`. Restrict `dir` and `codePaths` to safe path segments; add `.githooks/* text eol=lf` to `.gitattributes` in `init` and `migrate`; and in the team preset let `init` set up on a branch, because the protected base refuses the setup commit (seen during the review).
 
 ### T4 Independent review of the CI check
 - Status: todo
