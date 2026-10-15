@@ -172,11 +172,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: —
 
 ### W3 `task` and `new`
-- Status: todo
+- Status: doing
 - Depends on: W1
 - Plan: [W-work.md](../plan/W-work.md#w3-task-and-new)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `w3-task-new` in its own worktree; `new` reuses C1's id scan (`ids.mjs`). Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### W4 `claim`
 - Status: todo
@@ -195,11 +195,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 ## C: The CI check
 
 ### C1 The CI check
-- Status: doing
+- Status: done
 - Depends on: V1, V2, H1
 - Plan: [C-ci.md](../plan/C-ci.md#c1-the-ci-check)
-- Evidence: —
-- Notes: A worker builds it on branch `c1-ci-check` in its own worktree, including the id check that pre-commit shares. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs` on `main` after merging C1 and H2: 466 of 466 on Node 24.18.0, 22.23.3 and 20.20.2. The 27 tests in [ci.test.mjs](../../test/ci.test.mjs) run simulated GitHub events for each rule, a fork, pushes after a squash merge and after a merge commit, the first pull request that adds ResaLedger, rules taken from the base when the head weakens its own, `ci.runGates: false` with and without a stamp, and a shallow clone; the 6 tests in [ids.test.mjs](../../test/ids.test.mjs) cover the id scan across branches and worktrees, and a commit that adds a task takes about 1 s with 51 branches. Not verified: a real GitHub Actions run (C3 adds the workflow) and Windows.
+- Notes: For C3: the workflow must run on `pull_request`, never `pull_request_target`, because the gates run the pull request's code; and gate output appears above the `ci` header today. Pre-commit clears git's location variables while it reads the other worktrees, because git sets `GIT_INDEX_FILE` for hooks; W2 moves that into `localLanes`, so every caller is safe.
 
 ### C2 Changes to enforcement
 - Status: todo
