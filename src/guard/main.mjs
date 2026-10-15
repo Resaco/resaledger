@@ -17,9 +17,10 @@ const HELP = `ResaLedger ${VERSION}
 Usage: node ledger/scripts/records.mjs <command>
 
 Commands:
-  work [--json]
+  work [--all] [--fetch] [--json]
             the state: this lane, the other local worktrees, what is ready
-            (also: status); turns on the git hooks
+            (also: status); turns on the git hooks; --all adds the pushed
+            branches not merged into the base, --fetch fetches them first
   check     validate the records in the working tree
             (--index: the staged files; --rev <rev>: a commit;
             --range <from>..<to>: also that every commit names its task)
