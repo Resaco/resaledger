@@ -194,13 +194,16 @@ function parseConfig(text) {
     return { config: null, problems }
   }
 
+  // A key this guard does not know is kept, because a later 1.x release may have added it
+  // (spec 15); one within two letters of a known key is a typo, which would silently drop a rule.
+  const unknown = {}
   const unknownKeys = (object, known, parent) => {
     for (const key of Object.keys(object)) {
       if (known.includes(key)) continue
       const path = [...parent, key]
       const guess = likelyTypo(key, known)
-      const hint = guess ? `; did you mean "${configKeyName([...parent, guess])}"?` : `; known keys here: ${known.join(', ')}`
-      report(path, `unknown key "${configKeyName(path)}"${hint}`)
+      if (guess) report(path, `unknown key "${configKeyName(path)}"; did you mean "${configKeyName([...parent, guess])}"?`)
+      else unknown[configKeyName(path)] = object[key]
     }
   }
   // An unknown version stops here: its other keys may mean something this guard does not know.
@@ -379,9 +382,19 @@ function parseConfig(text) {
     gates,
     ci,
     phases,
-    agent: { deny }
+    agent: { deny },
+    unknown
   }
   return { config, problems }
+}
+
+/** The notices for the keys a configuration keeps without knowing them, as { file, line, message }. */
+function unknownKeyNotices(config) {
+  return Object.keys(config.unknown ?? {}).map((key) => ({
+    file: CONFIG_FILE,
+    line: 0,
+    message: `"${key}" is not a key this guard knows; it is kept, since a newer ResaLedger may use it. Run npx resaledger update if the project uses a newer version`
+  }))
 }
 
 /**
@@ -402,7 +415,7 @@ function loadConfig(read) {
 
 /** The effective configuration as JSON text, without the compiled regular expressions. */
 function effectiveConfigJson(config) {
-  const { branchRegex, agent, ...rest } = config
+  const { branchRegex, agent, unknown, ...rest } = config
   const plain = { ...rest, agent: { deny: agent.deny.map(({ pattern, reason }) => ({ pattern, reason })) } }
   return JSON.stringify(plain, null, 2)
 }
@@ -421,22 +434,30 @@ function adoptionGit(root, args) {
   return { ok: result.status === 0, out: result.stdout.trim() }
 }
 
-/** The full id of the newest commit reachable from `to` that added .resaledger.json, or null. */
-function adoptionCommit(root, to) {
-  const { ok, out } = adoptionGit(root, ['log', '--diff-filter=A', '--format=%H', to, '--', CONFIG_FILE])
+/**
+ * The full id of the oldest commit that added .resaledger.json among `range` (git log
+ * arguments, such as [to] or [`${from}..${to}`]), or null. The oldest, so that a later commit
+ * that deletes the file and adds it again cannot move the start past itself.
+ */
+function adoptionOldest(root, range) {
+  const { ok, out } = adoptionGit(root, ['log', '--reverse', '--diff-filter=A', '--format=%H', ...range, '--', CONFIG_FILE])
   return ok && out !== '' ? out.split('\n')[0] : null
+}
+
+/** The full id of the oldest commit reachable from `to` that added .resaledger.json, or null. */
+function adoptionCommit(root, to) {
+  return adoptionOldest(root, [to])
 }
 
 /**
  * Where a range check that ends at `to` starts, given the start a caller chose (null for every
- * ancestor): that start, unless it is null or older than the commit that added .resaledger.json,
- * in which case that commit. A range from it checks only the commits made since adoption.
+ * ancestor). A start whose tree has .resaledger.json is kept: the project had adopted
+ * ResaLedger there, so every later commit is judged. Otherwise the start moves to the oldest
+ * commit after it that added the file, and the range checks only the commits made since.
  */
 function adoptionStart(root, from, to) {
-  const adopted = adoptionCommit(root, to)
-  if (adopted === null) return from
-  if (from === null || adoptionGit(root, ['merge-base', '--is-ancestor', from, adopted]).ok) return adopted
-  return from
+  if (from !== null && adoptionGit(root, ['cat-file', '-e', `${from}:${CONFIG_FILE}`]).ok) return from
+  return adoptionOldest(root, from === null ? [to] : [`${from}..${to}`]) ?? from
 }
 
 // --- markdown.mjs ---
@@ -1376,6 +1397,14 @@ function loadWorkspace(reader, config) {
   const tasks = parsed('tasks', parseTask)
   const decisions = parsed('decisions', parseDecision)
   const logs = parsed('log', parseLogEntry)
+  // A record in a subfolder is never read, so it would be lost without a word.
+  for (const folder of ['tasks', 'decisions', 'log']) {
+    const root = `${dir}/${folder}/`
+    for (const path of reader.list(`${dir}/${folder}`)) {
+      if (!WORKSPACE_MARKDOWN.test(path) || !path.slice(root.length).includes('/')) continue
+      problems.push({ file: path, line: 0, message: `a record belongs directly in ${root}, where it is read; move it to ${root}${path.slice(path.lastIndexOf('/') + 1)}` })
+    }
+  }
   const plans = new Map()
   for (const path of reader.list(`${dir}/plan`)) {
     if (WORKSPACE_MARKDOWN.test(path)) plans.set(path, planStatus(reader.read(path) ?? ''))
@@ -1520,6 +1549,7 @@ function checkCommand(args, rangeCheck = null) {
     process.exit(1)
   }
   console.log(`✔ records valid: ${workspace.tasks.length} tasks, ${workspace.decisions.length} decisions, ${workspace.logs.length} log entries`)
+  for (const { file, message } of unknownKeyNotices(config)) console.log(`! ${file}: ${message}`)
   if (range === null) return
   const lane = workspaceCurrentBranch(root)
   let rangeProblems
@@ -5820,7 +5850,22 @@ function configChanges(before, after) {
   ]
   const denyChanges = enforcementList('agent.deny', deny(before), deny(after))
   if (denyChanges.length === 0 && reasons(before) !== reasons(after)) denyChanges.push(enforcementChange('agent.deny', false, 'agent.deny: a reason changed'))
-  return [...changes, ...denyChanges]
+  return [...changes, ...denyChanges, ...unknownKeyChanges(before.unknown ?? {}, after.unknown ?? {})]
+}
+
+/**
+ * Keys the guard that judges does not know, such as one a later release added: listed, never
+ * judged, because their meaning is unknown here; a reviewer sees them.
+ */
+function unknownKeyChanges(before, after) {
+  const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort()
+  return keys.flatMap((key) => {
+    const was = JSON.stringify(before[key])
+    const now = JSON.stringify(after[key])
+    if (was === now) return []
+    const what = was === undefined ? `${key}: added ${now}, a key this guard does not know` : now === undefined ? `${key}: removed, a key this guard does not know` : `${key}: changed from ${was} to ${now}, a key this guard does not know`
+    return [enforcementChange(key, false, what)]
+  })
 }
 
 /** The newest released version whose text of a managed file is this one, or null. */
