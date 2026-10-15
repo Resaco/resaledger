@@ -1,7 +1,7 @@
 // The gates and their stamps: running the gate commands, the content-addressed stamp, its
 // idempotence and pruning, merges of stamps between branches, and the commands through the bundle.
 import assert from 'node:assert/strict'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { chmodSync, existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { parseConfig } from '../src/guard/config.mjs'
@@ -225,6 +225,85 @@ describe('verify', () => {
     const expected = stampPath(config(r), headFingerprint(r)).split('/').pop()
     assert.notEqual(expected, old)
     assert.deepEqual(stamps(r), [expected, 'notes.txt'])
+  })
+
+  test('prunes only regular files named like a stamp, and leaves other files and folders alone', () => {
+    const r = project()
+    verifyAndCommit(r)
+    const [old] = stamps(r)
+    r.write('ledger/verified/notes.json', '{ "mine": true }\n')
+    r.write('ledger/verified/dir.json/inner.txt', 'a folder named like JSON\n')
+    r.write('ledger/verified/ABCDEF0123456789.json', '{}\n')
+    r.write('src/app.js', 'export const answer = 44\n')
+    assert.equal(r.commit('feat: another answer').status, 0)
+    const verified = verify(r)
+    assert.equal(verified.status, 0, verified.out)
+    assert.match(verified.out, /removed 1 old stamp\b/)
+    const expected = stampPath(config(r), headFingerprint(r)).split('/').pop()
+    assert.notEqual(expected, old)
+    assert.deepEqual(stamps(r), [expected, 'ABCDEF0123456789.json', 'dir.json', 'notes.json'].sort())
+  })
+
+  test('an old stamp that cannot be removed is a clear refusal, not a crash', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, () => {
+    const r = project()
+    verifyAndCommit(r)
+    const [old] = stamps(r)
+    r.write('src/app.js', 'export const answer = 45\n')
+    assert.equal(r.commit('feat: a fifth answer').status, 0)
+    // The new stamp already exists as a file, so it can be written; the read-only folder keeps the old one.
+    const fresh = stampPath(config(r), headFingerprint(r))
+    r.write(fresh, 'not yet\n')
+    const folder = join(r.root, 'ledger', 'verified')
+    chmodSync(folder, 0o555)
+    let result
+    try {
+      result = verify(r)
+    } finally {
+      chmodSync(folder, 0o755)
+    }
+    assert.equal(result.status, 1, result.out)
+    assert.match(result.out, new RegExp(`resaledger: wrote ${fresh}, but could not remove the old stamp ledger/verified/${old} \\(EACCES\\)\\. Delete it yourself`))
+    assert.doesNotMatch(result.out, /at .*gates|Error:/)
+  })
+
+  test('code that git hides with skip-worktree or assume-unchanged is refused, with how to undo it', () => {
+    for (const flag of ['--skip-worktree', '--assume-unchanged']) {
+      const counter = join(temporary(), 'count')
+      const r = project({ commit: [], verify: [counting(counter)] })
+      r.git('update-index', flag, 'src/app.js')
+      r.write('src/app.js', 'export const answer = 0\n')
+      assert.equal(r.git('status', '--porcelain').out, '', flag)
+      const refused = verify(r)
+      assert.equal(refused.status, 1, `${flag}: ${refused.out}`)
+      assert.match(refused.out, /git hides working-tree changes to code: src\/app\.js is marked skip-worktree or assume-unchanged/, flag)
+      assert.match(refused.out, /git update-index --no-skip-worktree --no-assume-unchanged <path>/, flag)
+      assert.equal(runs(counter), 0, flag)
+      assert.deepEqual(stamps(r), [], flag)
+    }
+  })
+
+  test('a hidden record does not stop verify', () => {
+    const r = project()
+    r.git('update-index', '--skip-worktree', 'ledger/README.md')
+    const verified = verify(r)
+    assert.equal(verified.status, 0, verified.out)
+  })
+
+  test('a workspace file that code reads is code: changing it makes the stamp stale', () => {
+    const r = project({ commit: [], verify: ['node app.js'] })
+    r.write('ledger/evidence/config.js', 'module.exports = { ok: true }\n')
+    r.write('app.js', 'process.exit(require("./ledger/evidence/config.js").ok ? 0 : 1)\n')
+    assert.equal(r.commit('feat: read the configuration').status, 0)
+    verifyAndCommit(r)
+    r.write('ledger/evidence/config.js', 'module.exports = { ok: false }\n')
+    const refused = verify(r)
+    assert.equal(refused.status, 1, refused.out)
+    assert.match(refused.out, /uncommitted code: ledger\/evidence\/config\.js\./)
+    assert.equal(r.commit('docs: tweak').status, 0)
+    const failed = verify(r)
+    assert.equal(failed.status, 1, failed.out)
+    assert.doesNotMatch(failed.out, /already verified/)
+    assert.match(failed.out, /a gate failed, so no stamp was written/)
   })
 
   test('uncommitted code is refused and named: staged, unstaged and untracked', () => {
