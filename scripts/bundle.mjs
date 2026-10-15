@@ -1,7 +1,7 @@
 // Builds the guard: concatenates the modules in src/guard into one readable file,
 // dist/records.mjs, that runs with no dependencies.
 //
-//   node scripts/bundle.mjs [--src <dir>] [--out <file>] [--check]
+//   node scripts/bundle.mjs [--src <dir>] [--out <file>] [--released <file>] [--check]
 //
 // The modules follow a small convention so that plain concatenation is safe:
 // - Internal imports are named only: import { a, b } from './x.mjs'. No aliases, no
@@ -13,6 +13,9 @@
 // - Top-level declarations start in column 0; everything nested is indented.
 // - main.mjs comes last and may not be imported. An import cycle is an error.
 // - VERSION is defined by the bundler from package.json; modules use it and never declare it.
+// - RELEASED is defined by the bundler too: the hashes of the released guards, hooks and
+//   workflows from templates/released.json (or --released), without this version's guard, which
+//   cannot hold its own hash, and with this version's hooks. CI judges enforcement changes by it.
 //
 // --check builds into a temporary folder, validates the result and writes nothing else.
 import { spawnSync } from 'node:child_process'
@@ -20,9 +23,12 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { compareVersions, contentHash, normalizeManaged } from '../src/guard/managed.mjs'
 
 const PACKAGE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const RESERVED = ['VERSION']
+const RESERVED = ['VERSION', 'RELEASED']
+// The managed files whose released hashes the guard needs to judge a change in CI.
+const RELEASED_KEYS = /^(guard|hooks\/[\w-]+|workflow)$/
 const NAME = /^[A-Za-z_$][\w$]*$/
 const IMPORT = /^import\b([^'"]*?)\bfrom\s*(['"])([^'"]+)\2[ \t]*;?[ \t]*\r?\n?/gm
 const EXPORT = /^export\s+(?:async\s+function\b|function\b|const\b|class\b)/
@@ -38,11 +44,16 @@ function lineOf(source, index) {
 }
 
 function parseArgs(argv) {
-  const options = { src: join(PACKAGE, 'src', 'guard'), out: join(PACKAGE, 'dist', 'records.mjs'), check: false }
+  const options = {
+    src: join(PACKAGE, 'src', 'guard'),
+    out: join(PACKAGE, 'dist', 'records.mjs'),
+    released: join(PACKAGE, 'templates', 'released.json'),
+    check: false
+  }
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === '--check') options.check = true
-    else if (arg === '--src' || arg === '--out') {
+    else if (arg === '--src' || arg === '--out' || arg === '--released') {
       if (!argv[i + 1]) throw new BundleError(`${arg} needs a value`)
       options[arg.slice(2)] = resolve(argv[i + 1])
       i += 1
@@ -194,7 +205,37 @@ function uniqueNames(modules) {
   }
 }
 
-function render(modules, version) {
+/**
+ * The table the guard embeds as RELEASED: { key: { version: hash } } for the guard, the hooks
+ * and the workflow. This version's guard is left out, so a rebuild after release-hashes.mjs
+ * records it gives the same bytes; this version's hooks are added from the templates.
+ */
+function embeddedReleased(file, version) {
+  let table = {}
+  if (existsSync(file)) {
+    try {
+      table = JSON.parse(readFileSync(file, 'utf8'))
+    } catch (error) {
+      throw new BundleError(`${file} is not valid JSON (${error.message})`)
+    }
+  }
+  const hooks = join(PACKAGE, 'templates', 'hooks')
+  for (const name of readdirSync(hooks).sort()) {
+    const key = `hooks/${name}`
+    table[key] = { ...(table[key] ?? {}), [version]: contentHash(normalizeManaged(readFileSync(join(hooks, name), 'utf8'))) }
+  }
+  const result = {}
+  for (const key of Object.keys(table).sort()) {
+    if (!RELEASED_KEYS.test(key)) continue
+    const versions = Object.entries(table[key])
+      .filter(([release]) => key !== 'guard' || release !== version)
+      .sort(([a], [b]) => compareVersions(a, b))
+    if (versions.length > 0) result[key] = Object.fromEntries(versions)
+  }
+  return result
+}
+
+function render(modules, version, released) {
   const merged = new Map()
   for (const module of modules) {
     for (const { specifier, names } of module.node) {
@@ -213,7 +254,8 @@ function render(modules, version) {
     '// hooks and CI. Built from its source modules by scripts/bundle.mjs; do not edit it here.',
     ...imports,
     '',
-    `const VERSION = '${version}'`
+    `const VERSION = '${version}'`,
+    `const RELEASED = ${JSON.stringify(released)}`
   ]
   const sections = modules.map((module) => `// --- ${module.file} ---\n${module.body}`)
   return `${header.join('\n')}\n\n${sections.join('\n')}`
@@ -234,7 +276,7 @@ function bundle(options) {
   const sorted = order(modules)
   uniqueNames(sorted)
   const { version } = JSON.parse(readFileSync(join(PACKAGE, 'package.json'), 'utf8'))
-  const output = render(sorted, version)
+  const output = render(sorted, version, embeddedReleased(options.released, version))
 
   if (options.check) {
     const folder = mkdtempSync(join(tmpdir(), 'resaledger-bundle-'))

@@ -127,3 +127,21 @@ for (const { rule, modules, message } of BROKEN) {
     assert.match(built.out, message)
   })
 }
+
+test('the bundle embeds the released hashes, without its own guard, so a rebuild after a release is the same', () => {
+  const folder = temporary('resaledger-bundle-released-')
+  const without = join(folder, 'without.json')
+  const withOwn = join(folder, 'with.json')
+  writeFileSync(without, JSON.stringify({ guard: { '0.1.0': 'a'.repeat(64) }, 'agents-block': { '0.1.0': 'b'.repeat(64) } }))
+  writeFileSync(withOwn, JSON.stringify({ guard: { '0.1.0': 'a'.repeat(64), [version]: 'c'.repeat(64) }, 'agents-block': { '0.1.0': 'b'.repeat(64) } }))
+  const first = run(PACKAGE, process.execPath, [BUNDLER, '--out', join(folder, 'first.mjs'), '--released', without])
+  const second = run(PACKAGE, process.execPath, [BUNDLER, '--out', join(folder, 'second.mjs'), '--released', withOwn])
+  assert.equal(first.status, 0, first.out)
+  assert.equal(second.status, 0, second.out)
+  const text = readFileSync(join(folder, 'first.mjs'), 'utf8')
+  assert.equal(text, readFileSync(join(folder, 'second.mjs'), 'utf8'))
+  const released = JSON.parse(text.match(/^const RELEASED = (.*)$/m)[1])
+  assert.deepEqual(released.guard, { '0.1.0': 'a'.repeat(64) })
+  assert.equal(released['agents-block'], undefined, 'only the files CI judges are embedded')
+  assert.match(released['hooks/pre-commit'][version], /^[0-9a-f]{64}$/)
+})

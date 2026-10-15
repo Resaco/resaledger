@@ -4,11 +4,11 @@
 // package's own; a file changed by hand is shown and kept unless --force is given. The
 // README, the records, the configuration and the project's own text in AGENTS.md are never
 // touched. planUpdate() only reads; applyUpdate() writes.
-import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { detectAgents } from '../guard/agents.mjs'
 import { CONFIG_FILE, parseConfig } from '../guard/config.mjs'
+import { compareVersions, contentHash, normalizeManaged } from '../guard/managed.mjs'
 import { callMarker, detectHookManager, guardCall, HOOK_NAMES, integrateHookManager, renderHook } from './hooks.mjs'
 import { planAgentConfigs } from './init.mjs'
 import { LEGACY_CONFIG_FILE } from './legacy.mjs'
@@ -23,62 +23,14 @@ const TEMPLATES = new URL('../../templates/', import.meta.url)
 const GUARD_VERSION_LINE = /^\/\/ ResaLedger (\S+)$/m
 const LEFTHOOK_FILES = ['lefthook.yml', 'lefthook.yaml', '.lefthook.yml', '.lefthook.yaml']
 
-// Versions and hashes.
+// Versions and hashes. compareVersions, normalizeManaged and contentHash live in the guard, which
+// judges the same hashes in CI; they are exported here too for the package's own callers.
 
-function versionParts(version) {
-  const plain = String(version).split('+')[0]
-  const dash = plain.indexOf('-')
-  const core = (dash === -1 ? plain : plain.slice(0, dash)).split('.').map((part) => Number(part) || 0)
-  return { core, pre: dash === -1 ? [] : plain.slice(dash + 1).split('.') }
-}
-
-/** Compares two semantic versions: negative when a is older, 0 when equal, positive when newer. */
-export function compareVersions(a, b) {
-  const x = versionParts(a)
-  const y = versionParts(b)
-  for (let index = 0; index < 3; index++) {
-    const diff = (x.core[index] ?? 0) - (y.core[index] ?? 0)
-    if (diff !== 0) return diff
-  }
-  if (x.pre.length === 0 || y.pre.length === 0) return y.pre.length - x.pre.length
-  for (let index = 0; index < Math.max(x.pre.length, y.pre.length); index++) {
-    const p = x.pre[index]
-    const q = y.pre[index]
-    if (p === undefined) return -1
-    if (q === undefined) return 1
-    const numeric = /^\d+$/.test(p) && /^\d+$/.test(q)
-    if (numeric && Number(p) !== Number(q)) return Number(p) - Number(q)
-    if (!numeric && p !== q) {
-      if (/^\d+$/.test(p)) return -1
-      if (/^\d+$/.test(q)) return 1
-      return p < q ? -1 : 1
-    }
-  }
-  return 0
-}
+export { compareVersions, contentHash, normalizeManaged }
 
 /** The version in a guard's second line ("// ResaLedger 1.0.0"), or null. */
 export function guardVersion(text) {
   return text.split('\n', 3).join('\n').match(GUARD_VERSION_LINE)?.[1] ?? null
-}
-
-function escapeRegExp(text) {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-/**
- * A managed file's text as it is hashed: LF line ends, no trailing whitespace, and, when dir
- * is given, the workspace folder put back as {{dir}}, so that one hash serves every dir.
- */
-export function normalizeManaged(text, dir = null) {
-  const plain = text.replace(/\r\n?/g, '\n').trimEnd()
-  if (!dir) return plain
-  return plain.replace(new RegExp(`(?<![\\w./-])${escapeRegExp(dir)}/`, 'g'), '{{dir}}/')
-}
-
-/** The SHA-256 of a normalized text, in hex. */
-export function contentHash(text) {
-  return createHash('sha256').update(text).digest('hex')
 }
 
 /**
