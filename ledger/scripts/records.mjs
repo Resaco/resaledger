@@ -1944,8 +1944,6 @@ function idCollisions(added, others, config) {
 // worktree, 'worktree' for another local one and 'remote' for a remote-tracking branch.
 
 const LANES_MARKDOWN = /\.(md|markdown)$/i
-// The variables git sets for a hook that point at this worktree's repository and index.
-const LANES_LOCATION_VARIABLES = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_PREFIX', 'GIT_OBJECT_DIRECTORY']
 
 /** The current branch name, or null in a detached HEAD or outside a repository. */
 function currentLane() {
@@ -1996,17 +1994,30 @@ function lanesRealPath(path) {
 }
 
 /**
- * Runs read() without git's location variables, and restores them after. git sets
- * GIT_INDEX_FILE (and for some hooks GIT_DIR) for a hook; another worktree read with them
- * would list this worktree's index instead of that worktree's files.
+ * A reader of the task files in a worktree's <dir>/tasks folder, straight from disk: no git
+ * call, so it is fast, and git's hook variables (GIT_INDEX_FILE, GIT_DIR) cannot point it at
+ * this worktree's index. Only the files directly in that folder are listed.
  */
-function lanesWithoutLocation(read) {
-  const saved = new Map(LANES_LOCATION_VARIABLES.filter((name) => name in process.env).map((name) => [name, process.env[name]]))
-  for (const name of saved.keys()) delete process.env[name]
-  try {
-    return read()
-  } finally {
-    for (const [name, value] of saved) process.env[name] = value
+function lanesTasksReader(root, dir) {
+  const folder = `${dir}/tasks`
+  return {
+    list() {
+      try {
+        return readdirSync(join(root, folder), { withFileTypes: true })
+          .filter((entry) => entry.isFile())
+          .map((entry) => `${folder}/${entry.name}`)
+          .sort()
+      } catch {
+        return []
+      }
+    },
+    read(path) {
+      try {
+        return readFileSync(join(root, path), 'utf8')
+      } catch {
+        return null
+      }
+    }
   }
 }
 
@@ -2030,9 +2041,9 @@ function lanesWorktrees() {
 /**
  * The other worktrees of this repository as lanes: [{ branch, path, source: 'worktree', tasks,
  * lastCommit }]. Task files are read from each worktree's disk, so an uncommitted claim shows.
- * Bare and detached worktrees, the current one and worktrees whose folder is gone are skipped.
- * The lanes are sorted by branch name. Each worktree is read without git's location variables,
- * so this is safe inside a hook.
+ * Only each worktree's <dir>/tasks folder is read, from disk, so this is fast and safe inside a
+ * hook. Bare and detached worktrees, the current one and worktrees whose folder is gone are
+ * skipped. The lanes are sorted by branch name.
  * `branches` is localBranches(), passed in when the caller already has it.
  */
 function localLanes(config, branches = localBranches()) {
@@ -2043,12 +2054,7 @@ function localLanes(config, branches = localBranches()) {
     if (!existsSync(worktree.path)) continue
     const real = lanesRealPath(worktree.path)
     if (real === null || real === here) continue
-    let tasks = []
-    try {
-      tasks = lanesWithoutLocation(() => laneTasks(treeReader({ kind: 'worktree', root: worktree.path }), config.dir))
-    } catch {
-      // A worktree git cannot read is shown with no tasks rather than stopping work.
-    }
+    const tasks = laneTasks(lanesTasksReader(worktree.path, config.dir), config.dir)
     const lane = { branch: worktree.branch, path: worktree.path, source: 'worktree', tasks }
     if (branches.has(worktree.branch)) lane.lastCommit = branches.get(worktree.branch)
     lanes.push(lane)
@@ -3016,11 +3022,11 @@ function githooksBranchProblems(branch, config) {
 
 /**
  * The ownership problems of the staged tasks (spec 6.2), compared by id with HEAD: a task that
- * exists on the base branch was deleted or had its id renamed, or a task another lane holds was
- * changed without a takeover. During a merge, a task staged exactly as a merged commit has it
- * is that lane's own change and passes.
+ * exists on the base branch was deleted or had its id renamed, or a task another lane holds, in
+ * HEAD or in `holders` (the other local worktrees), was changed without a takeover. During a
+ * merge, a task staged exactly as a merged commit has it is that lane's own change and passes.
  */
-function githooksOwnershipProblems(root, branch, config, head, headTasks, stagedTasks, mergeHeads) {
+function githooksOwnershipProblems(root, branch, config, head, headTasks, stagedTasks, mergeHeads, holders) {
   let kept = new Set(headTasks.keys())
   const deleted = [...headTasks.keys()].some((id) => !stagedTasks.has(id))
   const base = deleted && branch !== config.base ? githooksCommit(config.base) : null
@@ -3034,7 +3040,20 @@ function githooksOwnershipProblems(root, branch, config, head, headTasks, staged
     if (mergeBase !== head) kept = new Set(taskRecordsById(treeReader({ kind: 'commit', rev: mergeBase, root }), config.dir).keys())
   }
   const accepted = mergeHeads.map((rev) => taskRecordsById(treeReader({ kind: 'commit', rev, root }), config.dir))
-  return ownershipProblems({ before: headTasks, after: stagedTasks, lane: branch, config, kept, accepted })
+  return ownershipProblems({ before: headTasks, after: stagedTasks, lane: branch, config, kept, holders, accepted })
+}
+
+/**
+ * The tasks each other local worktree holds, as one Map by id per worktree: its tasks on disk
+ * whose Lane is its own branch, so that a claim it has not committed yet counts (spec 6.2).
+ */
+function githooksWorktreeHolders(lanes) {
+  return lanes.map((lane) => new Map(lane.tasks.filter((task) => task.id && task.lane === lane.branch).map((task) => [task.id, { task }])))
+}
+
+/** Whether the staged tasks change or add a task compared with HEAD. */
+function githooksTasksChanged(headTasks, stagedTasks) {
+  return [...stagedTasks].some(([id, { text }]) => headTasks.get(id)?.text !== text)
 }
 
 /**
@@ -3080,7 +3099,7 @@ function githooksGitPath(root, name) {
  * locally visible branch has in another file. The other branches are the local branches and the
  * remote-tracking branches, except this lane's own, and the other worktrees as they are on disk.
  */
-function githooksIdProblems(root, branch, config, headTasks, stagedTasks) {
+function githooksIdProblems(root, branch, config, headTasks, stagedTasks, lanes) {
   const added = [...stagedTasks.values()].filter(({ task }) => !headTasks.has(task.id)).map(({ task }) => ({ id: task.id, file: task.file }))
   if (added.length === 0) return []
   let own = new Set()
@@ -3089,7 +3108,7 @@ function githooksIdProblems(root, branch, config, headTasks, stagedTasks) {
     own = new Set([`refs/heads/${branch}`, ...remotes.map((remote) => `refs/remotes/${remote}/${branch}`)])
   }
   const others = branchTaskFiles({ root, dir: config.dir, exclude: (ref) => own.has(ref.ref) })
-  for (const lane of localLanes(config)) {
+  for (const lane of lanes()) {
     others.push({ branch: lane.branch, worktree: true, files: new Map(lane.tasks.filter((task) => task.id).map((task) => [task.id, task.file])) })
   }
   return idCollisions(added, others, config)
@@ -3127,10 +3146,11 @@ function githooksWithRules(config, rules) {
  * The pre-commit hook, and pre-merge-commit, which git runs instead for a merge that commits
  * by itself. Judged on the staged content (the index git names in GIT_INDEX_FILE, which is a
  * temporary one for `git commit -- <paths>`): the configuration, the branch rules, the records,
- * task ownership against HEAD, new ids against the other local branches and worktrees, and
- * the commit gates when code is staged. The rules (githooksWithRules) are HEAD's committed
- * ones, so staging a looser configuration does not loosen the commit that adds it; the index's
- * hold only before the first commit, or when HEAD has no valid configuration yet.
+ * task ownership against HEAD and the other local worktrees' claims on disk, new ids against
+ * the other local branches and worktrees, and the commit gates when code is staged. The rules
+ * (githooksWithRules) are HEAD's committed ones, so staging a looser configuration does not
+ * loosen the commit that adds it; the index's hold only before the first commit, or when HEAD
+ * has no valid configuration yet.
  * hook is the hook git runs, which tells where the merged commits of a merge are found.
  * A refusal prints every problem and exits 1; a pass prints only the gate lines.
  */
@@ -3152,8 +3172,14 @@ function preCommit(hook = 'pre-commit') {
   problems.push(...checkWorkspace(loadWorkspace(reader, staged), reader, staged))
   const headTasks = head === null ? new Map() : taskRecordsById(treeReader({ kind: 'commit', rev: head, root }), config.dir)
   const stagedTasks = taskRecordsById(reader, config.dir)
-  if (branch !== null && head !== null) problems.push(...githooksOwnershipProblems(root, branch, config, head, headTasks, stagedTasks, githooksMergeHeads(root, hook)))
-  problems.push(...githooksIdProblems(root, branch, config, headTasks, stagedTasks))
+  // The other worktrees are read once, and only when a task changes: most commits change none.
+  let others = null
+  const lanes = () => (others ??= localLanes(config, new Map()))
+  if (branch !== null && head !== null) {
+    const holders = githooksTasksChanged(headTasks, stagedTasks) ? githooksWorktreeHolders(lanes()) : []
+    problems.push(...githooksOwnershipProblems(root, branch, config, head, headTasks, stagedTasks, githooksMergeHeads(root, hook), holders))
+  }
+  problems.push(...githooksIdProblems(root, branch, config, headTasks, stagedTasks, lanes))
   if (problems.length > 0) githooksRefuse(problems)
 
   if (config.gates.commit.length === 0 || !githooksStagedPaths().some((path) => isCode(path, config))) return
