@@ -9,7 +9,7 @@ import { copyFileSync, existsSync, lstatSync, mkdirSync, rmSync, readdirSync, re
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { GOAL_MARKER, goModuleName, initOptions, parseInitArgs, planInit, presetFromAnswer, projectName, tomlTableName } from '../src/cli/init.mjs'
-import { hasHooksEolRule, HOOKS_EOL_RULE, SETUP_BRANCH, withHooksEolRule } from '../src/cli/setup.mjs'
+import { agentsBlock, hasHooksEolRule, HOOKS_EOL_RULE, SETUP_BRANCH, withAgentsBlock, withHooksEolRule } from '../src/cli/setup.mjs'
 import { PACKAGE, repository, run, temporary } from './helpers.mjs'
 
 const CLI = join(PACKAGE, 'bin', 'resaledger.mjs')
@@ -212,6 +212,41 @@ describe('AGENTS.md and CLAUDE.md', () => {
     assert.doesNotMatch(agents, /old text/)
     assert.ok(agents.startsWith(`# Rules\n\n${BLOCK_START}`))
     assert.ok(agents.endsWith('<!-- resaledger:end -->\n\n## After\n'))
+  })
+
+  test('the block is created, added and updated in place, and the foreign text is kept each time', () => {
+    const block = agentsBlock('ledger')
+    // Created: a new AGENTS.md holds the block alone.
+    assert.equal(withAgentsBlock('', block), `${block}\n`)
+    // Added: after the project's text and a blank line, the text byte for byte.
+    const added = withAgentsBlock(OWN, block)
+    assert.equal(added, `${OWN}\n\n${block}\n`)
+    // Updated: an older block is replaced where it stands; the text around it stays.
+    const older = added.replace('Decisions go into', 'Decisions went into') + '\n## After\n\r\nKept.\n'
+    const updated = withAgentsBlock(older, block)
+    assert.equal(updated, `${OWN}\n\n${block}\n\n## After\n\r\nKept.\n`)
+    assert.equal(withAgentsBlock(updated, block), updated)
+  })
+
+  test('the block holds the protocol of spec 11', () => {
+    const block = agentsBlock('ledger')
+    assert.ok(block.split('\n').length <= 20, 'a few lines')
+    const steps = [
+      /records\.mjs work/, // run work first
+      /records\.mjs claim <id>/, // claim a task
+      /`Task: <id>` as the last line/, // a trailer on each working step
+      /Do not wait to be asked to commit/, // commit, whatever an agent's default prompt says
+      /never use `--no-verify`/,
+      /records\.mjs verify/,
+      /Status.*Evidence.*Handoff/,
+      /records\.mjs handoff/
+    ]
+    let at = 0
+    for (const step of steps) {
+      const found = step.exec(block.slice(at))
+      assert.ok(found, `${step} after the step before it`)
+      at += found.index
+    }
   })
 
   test('an existing CLAUDE.md imports AGENTS.md once', () => {

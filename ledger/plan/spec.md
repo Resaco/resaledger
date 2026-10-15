@@ -519,6 +519,16 @@ Gemini CLI, Cursor and Copilot read JSON on stdout, so for them session start wr
 
 **Skill and plugin.** The package ships one skill: setting up a workspace from a real repository (the README from what is true, the gates from the commands that exist, work already done recorded with its evidence) and keeping records the next agent can use. The repository doubles as a plugin marketplace in the Claude Code format (`.claude-plugin/marketplace.json`), which Claude Code, Codex and the Copilot CLI install from. The same `SKILL.md` works for agents that read `.agents/skills/`.
 
+The layout: the marketplace lists one plugin, `resaledger`, in `plugins/resaledger/`, with its manifest in `plugins/resaledger/.claude-plugin/plugin.json` and the skill in `plugins/resaledger/skills/resaledger/SKILL.md`. The marketplace's `metadata.version` and the manifest's `version` are the package's version, and a test keeps them equal. The skill is installed from the git repository, not from npm, so the npm package does not carry these files. Installing:
+
+```
+claude plugin marketplace add Resaco/resaledger && claude plugin install resaledger@resaledger
+codex plugin marketplace add Resaco/resaledger && codex plugin add resaledger@resaledger
+copilot plugin marketplace add Resaco/resaledger && copilot plugin install resaledger@resaledger
+```
+
+An agent without plugins takes the folder `plugins/resaledger/skills/resaledger/` as `.agents/skills/resaledger/` in its project; nothing else is needed.
+
 ## 12. Trust model
 
 | Layer | Stops | Does not stop |

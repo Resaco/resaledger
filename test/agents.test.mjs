@@ -740,13 +740,42 @@ describe('init and update write the agents\' configurations', () => {
     const result = r.node(CLI, 'init', '--yes')
     assert.equal(result.status, 0, result.out)
     const geminiAfter = validConfiguration('gemini', r.read('.gemini/settings.json'))
-    assert.deepEqual(geminiAfter.context, gemini.context)
+    assert.deepEqual(geminiAfter.context, { fileName: ['GEMINI.md', 'AGENTS.md'] })
     assert.deepEqual(geminiAfter.model, gemini.model)
     assert.deepEqual(geminiAfter.hooks.BeforeTool, [gemini.hooks.BeforeTool[0], agentHookEntries('gemini', 'ledger').BeforeTool])
     const cursorAfter = validConfiguration('cursor', r.read('.cursor/hooks.json'))
     assert.equal(cursorAfter.extra, true)
     assert.deepEqual(cursorAfter.hooks.afterFileEdit, cursor.hooks.afterFileEdit)
     assert.deepEqual(cursorAfter.hooks.stop, [{ command: './notify.sh' }, agentHookEntries('cursor', 'ledger').stop])
+  })
+
+  test('gemini: context.fileName gets AGENTS.md, keeping the names and keys already there', () => {
+    const contextOf = (settings) => JSON.parse(mergeAgentConfig('gemini', settings === null ? null : JSON.stringify(settings), 'ledger').text).context
+    // A new file reads AGENTS.md and still reads GEMINI.md, Gemini CLI's default.
+    assert.deepEqual(contextOf(null), { fileName: ['AGENTS.md', 'GEMINI.md'] })
+    assert.deepEqual(Object.keys(JSON.parse(mergeAgentConfig('gemini', null, 'ledger').text)), ['context', 'hooks'])
+    assert.deepEqual(contextOf({ model: { name: 'pro' } }), { fileName: ['AGENTS.md', 'GEMINI.md'] })
+    assert.deepEqual(contextOf({ context: { fileName: 'SHOP.md', includeDirectories: ['docs'] } }), { fileName: ['SHOP.md', 'AGENTS.md'], includeDirectories: ['docs'] })
+    assert.deepEqual(contextOf({ context: { fileName: 'AGENTS.md' } }), { fileName: 'AGENTS.md' })
+    assert.deepEqual(contextOf({ context: { fileName: ['SHOP.md', 'AGENTS.md', 'GEMINI.md'] } }), { fileName: ['SHOP.md', 'AGENTS.md', 'GEMINI.md'] })
+    // Already there: nothing changes.
+    const done = mergeAgentConfig('gemini', null, 'ledger').text
+    assert.equal(mergeAgentConfig('gemini', done, 'ledger').changed, false)
+    // A value the merge cannot read is reported, and the file is left alone.
+    assert.match(mergeAgentConfig('gemini', '{ "context": "AGENTS.md" }', 'ledger').error, /"context" value that is not an object/)
+    assert.match(mergeAgentConfig('gemini', '{ "context": { "fileName": [1] } }', 'ledger').error, /"context\.fileName" value/)
+  })
+
+  test('update adds AGENTS.md to the context of a Gemini CLI configuration written without it', () => {
+    const r = project({ 'GEMINI.md': '# Shop\n' })
+    assert.equal(r.node(CLI, 'init', '--yes').status, 0)
+    const settings = JSON.parse(r.read('.gemini/settings.json'))
+    assert.deepEqual(settings.context, { fileName: ['AGENTS.md', 'GEMINI.md'] })
+    delete settings.context
+    r.write('.gemini/settings.json', `${JSON.stringify(settings, null, 2)}\n`)
+    const result = r.node(CLI, 'update')
+    assert.equal(result.status, 0, result.out)
+    assert.deepEqual(JSON.parse(r.read('.gemini/settings.json')).context, { fileName: ['AGENTS.md', 'GEMINI.md'] })
   })
 })
 
