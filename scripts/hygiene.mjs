@@ -19,8 +19,12 @@ const AGENT_MEMORY = /\.claude[\\/](?:clients|projects|memory)(?![\w-])/g
 const EMAIL = /(?<![\w.%+-])[A-Za-z0-9._%+-]+@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})(?![\w-])/g
 const EXAMPLE_DOMAINS = ['example.com', 'example.org', 'example.net']
 
-function allowedEmail(domain) {
-  const host = domain.toLowerCase()
+// GitHub's own committer for merges made on github.com: public, and named by the CI check.
+const GITHUB_WEB_FLOW = 'noreply@github.com'
+
+function allowedEmail(address) {
+  if (address.toLowerCase() === GITHUB_WEB_FLOW) return true
+  const host = address.slice(address.indexOf('@') + 1).toLowerCase()
   if (host === 'users.noreply.github.com') return true
   return EXAMPLE_DOMAINS.some((reserved) => host === reserved || host.endsWith(`.${reserved}`))
 }
@@ -71,7 +75,7 @@ export function checkLine(line, deny = []) {
   }
   for (const found of line.matchAll(AGENT_MEMORY)) hits.push({ rule: 'agent-memory', match: found[0] })
   for (const found of line.matchAll(EMAIL)) {
-    if (!allowedEmail(found[1])) hits.push({ rule: 'email', match: found[0] })
+    if (!allowedEmail(found[0])) hits.push({ rule: 'email', match: found[0] })
   }
   for (const { entry, pattern } of deny) {
     if (line.match(pattern)) hits.push({ rule: 'deny-list', match: entry })
