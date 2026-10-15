@@ -3,6 +3,7 @@
 // writes the job summary, comments on the pull request (report.mjs) and sets the exit code.
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { adoptionStart } from './adoption.mjs'
 import { CONFIG_FILE, loadConfig } from './config.mjs'
 import { enforcementCheck } from './enforcement.mjs'
 import { runGates, stampPath, verifiedStamp } from './gates.mjs'
@@ -113,11 +114,16 @@ function ciRecordsCheck(root, commit, config) {
   }
 }
 
-/** The commits check of a range, with checkRange; `from` null checks nothing (a new branch). */
+/**
+ * The commits check of a range, with checkRange; `from` null checks nothing (a new branch). A
+ * start older than the commit that added .resaledger.json moves up to it, as in handoff and
+ * pre-push, so commits made before the project adopted ResaLedger are not judged.
+ */
 function ciCommitsCheck(root, from, to, config, lane, skipGitHubMerges, note) {
   if (from === null) return { name: 'commits', ok: true, skipped: true, problems: [], counts: { commits: 0 }, note }
-  const commits = Number(ciGit(root, ['rev-list', '--count', `${from}..${to}`]))
-  const problems = checkRange(from, to, { config, lane, skipGitHubMerges, root })
+  const start = adoptionStart(root, from, to)
+  const commits = Number(ciGit(root, ['rev-list', '--count', `${start}..${to}`]))
+  const problems = checkRange(start, to, { config, lane, skipGitHubMerges, root })
   return { name: 'commits', ok: problems.length === 0, problems, counts: { commits }, note }
 }
 

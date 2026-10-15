@@ -345,6 +345,26 @@ describe('ci on a pull request', () => {
     failed(ci(r, 'pull_request', pullRequest(r, 'adopt')), /"feat: change the app" changes code but names no task/)
   })
 
+  test('commits made before adoption are not judged, on a pull request and on a push; later ones are', () => {
+    const r = repository()
+    commit(r, { 'src/app.js': '1\n' }, 'feat: app')
+    const before = rev(r)
+    r.git('checkout', '-q', '-b', 'adopt')
+    // A commit made under an older ledger names a task that has no file here.
+    commit(r, { 'src/app.js': '2\n' }, 'feat: change the app', 'Task: A2')
+    commit(
+      r,
+      { '.resaledger.json': '{ "version": 2 }\n', 'ledger/README.md': README, ...task('S1', 'Adopt ResaLedger') },
+      'chore: adopt ResaLedger',
+      'Task: maintenance'
+    )
+    passed(ci(r, 'pull_request', pullRequest(r, 'adopt')))
+    passed(ci(r, 'push', { before, after: rev(r), ref: 'refs/heads/main' }))
+    commit(r, { 'src/app.js': '3\n' }, 'feat: sneak')
+    failed(ci(r, 'pull_request', pullRequest(r, 'adopt')), /"feat: sneak" changes code but names no task/)
+    failed(ci(r, 'push', { before, after: rev(r), ref: 'refs/heads/main' }), /"feat: sneak" changes code but names no task/)
+  })
+
   test('the --base, --head and --lane flags check a pull request without an event', () => {
     const r = setup({ tasks: [['S1', 'Bake bread'], ['S2', 'Buy flour']] })
     finishedLane(r)
