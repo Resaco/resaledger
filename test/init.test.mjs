@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import { copyFileSync, existsSync, lstatSync, mkdirSync, rmSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
-import { isGitLfsHook } from '../src/cli/hooks.mjs'
+import { isGitLfsHook, renderHook } from '../src/cli/hooks.mjs'
 import { GOAL_MARKER, goModuleName, initOptions, parseInitArgs, planInit, presetFromAnswer, projectName, tomlTableName } from '../src/cli/init.mjs'
 import { agentsBlock, hasHooksEolRule, HOOKS_EOL_RULE, SETUP_BRANCH, withAgentsBlock, withHooksEolRule } from '../src/cli/setup.mjs'
 import { PACKAGE, repository, run, temporary } from './helpers.mjs'
@@ -694,6 +694,53 @@ describe("Git LFS's own hooks in .githooks/", () => {
     assert.match(result.out, /✖ \.git\/info\/exclude:3: \.githooks\/pre-push ignores \.githooks\/pre-push, so init could not commit it; remove or change the rule/)
     assert.doesNotMatch(result.out, /uncommitted changes/)
     assert.deepEqual(snapshot(r.root), before)
+  })
+
+  test("a husky pre-push that runs Git LFS's pre-push is refused: it would read git's input before the guard", () => {
+    const r = project({ '.husky/pre-push': 'npm test\ngit lfs pre-push "$@"\n', 'package.json': '{ "name": "app", "scripts": { "prepare": "husky" } }\n' })
+    const before = snapshot(r.root)
+    const result = init(r)
+    assert.equal(result.status, 1, result.out)
+    assert.match(result.out, /✖ \.husky\/pre-push runs "git lfs pre-push", which would read git's input before the guard, so the guard would check nothing; remove that line: ResaLedger's guard runs Git LFS's pre-push itself/)
+    assert.deepEqual(snapshot(r.root), before)
+  })
+
+  test("a husky pre-push that only mentions Git LFS in a comment is not refused", () => {
+    const r = project({ '.husky/pre-push': '# git lfs pre-push "$@" runs in the guard now\nnpm test\n' })
+    const result = init(r)
+    assert.equal(result.status, 0, result.out)
+  })
+
+  test("a simple-git-hooks pre-push that runs Git LFS's pre-push is refused", () => {
+    const r = project({ 'package.json': '{ "name": "app", "simple-git-hooks": { "pre-push": "npm test && git lfs pre-push \\"$@\\"" } }\n' })
+    const result = init(r)
+    assert.equal(result.status, 1, result.out)
+    assert.match(result.out, /✖ package\.json: "simple-git-hooks" pre-push runs "git lfs pre-push", which would read git's input before the guard/)
+  })
+
+  test("lefthook and pre-commit: the snippet says to remove a Git LFS pre-push command", () => {
+    for (const file of ['lefthook.yml', '.pre-commit-config.yaml']) {
+      const r = project({ [file]: 'repos: []\n' })
+      const result = init(r)
+      assert.equal(result.status, 0, result.out)
+      assert.match(result.out, /If your pre-push already runs "git lfs pre-push", remove it: it would read git's input before the guard, and the guard runs Git LFS's pre-push itself\./, file)
+    }
+  })
+
+  test('a .githooks/ that git tracks under an ignored folder is not refused', () => {
+    const r = project()
+    r.write('.gitignore', '.githooks/\n')
+    r.write('.githooks/pre-push', lfsHook('pre-push'))
+    for (const name of ['pre-commit', 'pre-merge-commit', 'commit-msg']) r.write(`.githooks/${name}`, renderHook(name, 'ledger'))
+    assert.equal(r.git('add', '-f', '.githooks').status, 0)
+    assert.equal(r.commit('chore: hooks').status, 0)
+    const result = init(r)
+    assert.equal(result.status, 0, result.out)
+    assert.doesNotMatch(result.out, /ignores/)
+    assert.match(printedCommit(result.out), /git add -f --chmod=\+x \.githooks\/pre-push &&/)
+    const committed = r.run('sh', ['-c', printedCommit(result.out)])
+    assert.equal(committed.status, 0, committed.out)
+    assert.equal(r.git('status', '--porcelain').out, '')
   })
 
   test("a pre-push that is not Git LFS's is still refused", () => {

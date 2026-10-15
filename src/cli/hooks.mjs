@@ -42,6 +42,29 @@ export function isGitLfsHook(name, text) {
   return lines.length === 3 && lines[0] === '#!/bin/sh' && GIT_LFS_CHECK.test(lines[1]) && lines[2] === `git lfs ${name} "$@"`
 }
 
+// A command line that runs Git LFS's pre-push, outside a comment.
+const RUNS_GIT_LFS_PRE_PUSH = /^(?!\s*#).*\bgit(?: |-)lfs pre-push\b/m
+
+/**
+ * The file and place in it where the hook manager's pre-push already runs `git lfs pre-push`,
+ * or null. That command reads all of git's input before the guard's call, which then checks
+ * nothing. Only husky and simple-git-hooks are read; lefthook's and pre-commit's YAML is not.
+ */
+export function managerGitLfsPrePush(root, manager) {
+  if (manager === 'husky') {
+    const path = join(root, '.husky', 'pre-push')
+    const text = existsSync(path) ? readFileSync(path, 'utf8') : ''
+    return RUNS_GIT_LFS_PRE_PUSH.test(text) ? '.husky/pre-push' : null
+  }
+  if (manager === 'simple-git-hooks') {
+    const command = readJson(join(root, 'package.json'))?.['simple-git-hooks']?.['pre-push']
+    return typeof command === 'string' && RUNS_GIT_LFS_PRE_PUSH.test(command) ? 'package.json: "simple-git-hooks" pre-push' : null
+  }
+  return null
+}
+
+const GIT_LFS_SNIPPET_NOTE = 'If your pre-push already runs "git lfs pre-push", remove it: it would read git\'s input before the guard, and the guard runs Git LFS\'s pre-push itself.'
+
 /** The arguments each hook passes on to the guard, in sh syntax. */
 const HOOK_ARGUMENTS = { 'pre-commit': '', 'pre-merge-commit': '', 'commit-msg': ' "$1"', 'pre-push': ' "$@"' }
 
@@ -134,6 +157,8 @@ pre-push:
       run: node "${dir}/scripts/records.mjs" pre-push {1} {2}
       use_stdin: true
 
+${GIT_LFS_SNIPPET_NOTE}
+
 Then run "npx lefthook install".`
 }
 
@@ -169,6 +194,8 @@ function preCommitSnippet(dir) {
         pass_filenames: false
         always_run: true
         stages: [pre-push]
+
+${GIT_LFS_SNIPPET_NOTE}
 
 Then run "pre-commit install --hook-type pre-commit --hook-type pre-merge-commit --hook-type commit-msg --hook-type pre-push".`
 }
