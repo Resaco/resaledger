@@ -76,6 +76,6 @@ The release-candidate task prepares the release commit; the owner tags and pushe
    git push origin v1.0.0
    ```
 
-7. Watch the **release** workflow in the **Actions** tab. When it passes, check the package page on npmjs.com for the version and its provenance, and publish the release notes as a GitHub release for the tag.
+7. Watch the **release** workflow in the **Actions** tab. When it passes, check the package page on npmjs.com for the version and its provenance, and publish the release notes, `docs/releases/v<version>.md`, as a GitHub release for the tag.
 
 If the workflow fails before `npm publish`, nothing was published: fix the cause on `main`, delete the tag (`git tag -d v1.0.0` and `git push origin :refs/tags/v1.0.0`), and tag again. A version that reached npm is never published twice; fix forward with the next patch version.
