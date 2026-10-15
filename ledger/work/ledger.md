@@ -330,11 +330,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: Waits for its child tasks: T3.1 to T3.4 fix or answer every finding.
 
 ### T3.1 A range check that cannot be fooled
-- Status: doing
+- Status: done
 - Depends on: T3
 - Plan: [The review](../evidence/t3/review.md#findings), findings 1, 2, 3 and 7
-- Evidence: —
-- Notes: A worker fixes it on branch `t3-1-range`. Read commit bodies length-prefixed (`git cat-file --batch`), never by splitting formatted output; a merge that adds code neither side changed needs a trailer; a revert must invert the commit it names, and a release subject alone exempts nothing; `--amend` is judged against HEAD's parent.
+- Evidence: 709 of 709 on Node 24.18.0, 22.23.3 and 20.20.2 on the branch, and the full suite on `main` after the merge (see the log). [range.test.mjs](../../test/range.test.mjs) and [commitmsg.test.mjs](../../test/commitmsg.test.mjs) cover a 0x01 message and one that imitates the next commit, an evil merge next to a clean conflict resolution, fake reverts next to real ones, a fake release and an amend; the reviewer's scripts are refused on this branch.
+- Notes: Commits are read length-prefixed through `git cat-file --batch`, and a commit that cannot be read is refused, never passed. Spec section 5.9 now says when a merge or a revert is exempt; a release is not. `git commit --allow-empty` on top of a code commit now needs a `Task:` line, because commit-msg cannot tell it from `--amend`; a `prepare-commit-msg` hook would.
 
 ### T3.2 Hooks judged by the committed rules
 - Status: doing

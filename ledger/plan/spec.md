@@ -306,7 +306,9 @@ Task: S4
 
 - `Task: S4, S5`, or several `Task:` lines, name several tasks. `Task: maintenance` is for a change with no behaviour change: formatting, a dependency bump, a tooling fix.
 - Each named task must be `doing` or `done` in the commit's own tree, and held by this lane or claimed in the same commit.
-- Merge commits, commits made by `git revert` and release commits (`Release vX.Y.Z`) are exempt.
+- A merge commit is exempt when every code path it changes against a parent was also changed on another side, between the merge base and that other parent: a clean merge or a conflict resolution. Code changed only in the merge needs its own `Task:` line.
+- A commit made by `git revert` is exempt when its `This reverts commit <hash>.` line names an ancestor and its change is exactly the inverse of that commit's change, compared by patch id.
+- A release commit is not exempt: one that changes code carries a `Task:` line, for example `Task: maintenance`. The message alone never exempts a commit.
 - With `commitStyle: conventional` the header follows Conventional Commits. With `aiAttribution: forbid`, trailers that name a model or a vendor are rejected.
 
 ### 5.10 What counts as code
