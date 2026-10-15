@@ -49,3 +49,11 @@ Design:
 Acceptance:
 - Every task of phase P is done, with evidence.
 - The owner has the commands.
+
+### L5 The third release candidate
+
+Goal: `v1.0.0-rc.3` tagged locally with the Git LFS support of [P12](P-adoption-feedback.md#p12-the-pre-push-runs-git-lfss-pre-push) and [P13](P-adoption-feedback.md#p13-init-and-migrate-replace-git-lfss-own-pre-push), reviewed by a second model, and the owner's commands.
+
+Design: as [L4](#l4-the-second-release-candidate): merge the lanes, renew the guard, the changelog and release notes, the hashes, the tests on Node 20, 22 and 24, the history scan, `npm publish --dry-run`, the stamp, `handoff` and the tag. The release is staged on npm and the owner approves it.
+
+Acceptance: P12 and P13 are done with evidence, the review's findings are fixed or recorded, and the owner has the commands.

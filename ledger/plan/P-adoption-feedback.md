@@ -14,6 +14,8 @@ Every fix starts with a failing test that builds a real repository, as the other
 | guard | P4, P5, P9 | `src/guard/util.mjs`, `config.mjs`, `tasks.mjs`, `report.mjs`, `agents.mjs`, `handoff.mjs` |
 | installer | P6, P7, P8 | `src/cli/init.mjs`, `detect.mjs`, `bin/`, `src/guard/create.mjs`, `claim.mjs` |
 | main | P10, P11, L4 | documentation and the release |
+| lfs-guard | P12 | `src/guard/githooks.mjs` and the pre-push |
+| lfs-setup | P13 | `src/cli/init.mjs`, `migrate.mjs`, `setup.mjs`, the guides |
 
 ### P1 migrate renames the old configuration file in .gitattributes
 
@@ -139,3 +141,34 @@ Goal: [releasing.md](../../docs/releasing.md) describes publishing that waits fo
 Design: check npm's current documentation for staged publishing and how a publish from trusted publishing is approved; describe the setting the owner changes and how a release is approved. The owner changes the setting.
 
 Acceptance: the release guide's steps match npm's documentation, with the date it was read.
+
+### P12 The pre-push runs Git LFS's pre-push
+
+Goal: in a repository that uses Git LFS, a push through ResaLedger's hooks uploads the LFS objects, as Git LFS's own hook would ([decision](../decisions/2026-10-16-the-guard-runs-git-lfs-s-pre-push-and.md), item 1; [specification section 9](spec.md#9-what-runs-where)).
+
+Design:
+- The guard's `pre-push` command already reads the refs git gives on its input. After its own checks pass, when the repository uses Git LFS, it runs `git lfs pre-push <remote> <url>` with the same arguments and the same input, from the repository root, and exits with its exit code. Git LFS's output reaches the user unchanged.
+- A repository uses Git LFS when a tracked `.gitattributes` file, at the root or in a folder, names `filter=lfs`. Read them with `git ls-files` and the blobs at HEAD or the index; keep it cheap.
+- When `git-lfs` is not on the PATH, refuse the push with Git LFS's own advice, as its hook does.
+- A refused push runs nothing of Git LFS. A repository without Git LFS runs nothing new and pays at most one `git ls-files`.
+- The hook templates do not change.
+
+Acceptance:
+- A test with a stand-in `git-lfs` on the PATH (a script that records its arguments and input): a push in a repository with `filter=lfs` calls it once with the remote, the URL and the same refs; a push the guard refuses does not call it; a repository without `filter=lfs` does not call it; a failing stand-in fails the push.
+- Without `git-lfs` on the PATH, a push in an LFS repository is refused with the advice.
+- The format reference or the concepts guide says what pre-push does with Git LFS.
+
+### P13 init and migrate replace Git LFS's own pre-push
+
+Goal: `init` and `migrate` work in a repository where Git LFS wrote its hooks into `.githooks/`, and say what they did ([decision](../decisions/2026-10-16-the-guard-runs-git-lfs-s-pre-push-and.md), items 2 and 3; [specification sections 13 and 14](spec.md#13-installation-and-distribution)).
+
+Design:
+- Recognise Git LFS's hooks by their content: a shell script whose only commands are the `command -v git-lfs … || { …; exit 2; }` check and `git lfs <hook> "$@"`, for the hook of the same name. Accept the wording of current and older Git LFS releases; whitespace does not count.
+- `init` and `migrate` replace Git LFS's `pre-push`, tracked or not, and leave Git LFS's `post-checkout`, `post-commit` and `post-merge` alone. Any other foreign hook is refused as now.
+- `migrate`'s report lists the replaced hook and says that `git lfs update --force` brings it back after the undo command; `init` says that the guard runs Git LFS's `pre-push`.
+- Both refuse while `.git/info/exclude` (or another ignore rule) hides a hook they must commit, naming the file and line and saying to remove it.
+- The guides: a short section on Git LFS in the solo guide and the migration guide, with what `git lfs install` prints in a clone, that it is expected, that the filters are set, and that `git lfs update --manual` gives the other hooks for file locking.
+
+Acceptance:
+- Tests with the hook texts that Git LFS writes: `init` in a repository with all four Git LFS hooks in `.githooks/` replaces `pre-push` only; `migrate --dry-run` on a 0.x workspace with an untracked Git LFS `pre-push` plans its replacement and prints the restore command; an exclude rule that hides `.githooks/pre-push` is refused with its line; a foreign `pre-push` that is not Git LFS's is still refused.
+- The guides' commands run in the guides test.
