@@ -7,7 +7,7 @@ import { parseDecision } from './records.mjs'
 import { treeReader } from './workspace.mjs'
 
 const ENFORCEMENT_HOOKS = '.githooks/'
-const ENFORCEMENT_WORKFLOW = '.github/workflows/resaledger.yml'
+export const ENFORCEMENT_WORKFLOW = '.github/workflows/resaledger.yml'
 // The decision field that names the weakening changes a decision allows (spec 10).
 const ENFORCEMENT_FIELD = 'Weakens'
 
@@ -137,7 +137,8 @@ function fileChanges(beforeReader, afterReader, beforeDir, afterDir, released) {
     const name = path.slice(ENFORCEMENT_HOOKS.length)
     files.push({ id: `hooks/${name}`, key: `hooks/${name}`, path, before: beforeReader.read(path), after: afterReader.read(path), dir: afterDir })
   }
-  files.push({ id: 'workflow', key: 'workflow', path: ENFORCEMENT_WORKFLOW, before: beforeReader.read(ENFORCEMENT_WORKFLOW), after: afterReader.read(ENFORCEMENT_WORKFLOW), dir: afterDir })
+  // The workflow reads the folder from the configuration, so its text holds no folder name.
+  files.push({ id: 'workflow', key: 'workflow', path: ENFORCEMENT_WORKFLOW, before: beforeReader.read(ENFORCEMENT_WORKFLOW), after: afterReader.read(ENFORCEMENT_WORKFLOW), dir: null })
   return files.flatMap((file) => managedChange(file, released))
 }
 

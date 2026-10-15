@@ -1,0 +1,80 @@
+# ResaLedger checks the task ledger of every pull request and of every push to the base branch.
+# The guard and its rules come from the base commit, so a pull request cannot weaken the check
+# that judges it. "npx resaledger update" renews this file. A change to it by hand is listed in
+# the check and needs a decision; protect it with CODEOWNERS.
+name: resaledger
+
+on:
+  pull_request:
+  push:
+
+# Read-only by default. The job may also write one comment on its pull request.
+permissions:
+  contents: read
+
+jobs:
+  resaledger:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out the head with its full history
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check with the guard from the base
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          work="${RUNNER_TEMP}/resaledger"
+          mkdir -p "${work}"
+          # The rules come from the base of a pull request, or from the commit before a push.
+          if [ "${EVENT}" = pull_request ]; then rules="${BASE_SHA}"; head="${HEAD_SHA}"; else rules="${BEFORE_SHA}"; head="${GITHUB_SHA}"; fi
+          # A new branch, or a pull request that adds ResaLedger, is judged by its own rules.
+          if ! git cat-file -e "${rules}:.resaledger.json" 2>/dev/null; then rules="${head}"; fi
+          dir=$(git show "${rules}:.resaledger.json" | node -e '
+            let text = ""
+            process.stdin.on("data", (chunk) => { text += chunk }).on("end", () => {
+              const dir = JSON.parse(text).dir ?? "ledger"
+              if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/.test(dir)) process.exit(1)
+              console.log(dir)
+            })')
+          git show "${rules}:${dir}/scripts/records.mjs" > "${work}/records.mjs"
+
+          # The base's guard cannot know a newer release. When the head's guard names another
+          # version, that release is fetched from npm and counted as released, so an update to it
+          # passes without a decision. Without registry access, the update needs a decision.
+          release=""
+          if [ "${EVENT}" = pull_request ] && [ "${rules}" != "${head}" ]; then
+            version=$(git show "${head}:${dir}/scripts/records.mjs" 2>/dev/null | sed -n '2s|^// ResaLedger \([0-9][0-9A-Za-z.+-]*\)$|\1|p' || true)
+            current=$(sed -n '2s|^// ResaLedger \([0-9][0-9A-Za-z.+-]*\)$|\1|p' "${work}/records.mjs")
+            if [ -n "${version}" ] && [ "${version}" != "${current}" ]; then
+              if (cd "${work}" && npm pack --silent --ignore-scripts "resaledger@${version}" > pack.txt 2>/dev/null); then
+                mkdir -p "${work}/release"
+                tar -xzf "${work}/$(tail -n 1 "${work}/pack.txt")" -C "${work}/release"
+                release="${work}/release/package"
+              else
+                echo "::warning::ResaLedger ${version} could not be fetched from npm, so the update to it needs a decision"
+              fi
+            fi
+          fi
+
+          if [ -n "${release}" ]; then
+            node "${work}/records.mjs" ci --only-base-pushes --release "${release}"
+          else
+            node "${work}/records.mjs" ci --only-base-pushes
+          fi
