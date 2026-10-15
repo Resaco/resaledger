@@ -275,7 +275,7 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Depends on: M1, R5
 - Plan: [M-migration.md](../plan/M-migration.md#m2-converting-safely)
 - Evidence: —
-- Notes: A worker builds it on branch `m2-migrate` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Notes: The lead added the managed `AGENTS.md` block (`templates/agents-block.md`) and published `src/guard` in the package first (a1b2daa), because `migrate` writes the block and validates with the guard's modules. A worker builds the rest on branch `m2-migrate` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### M3 Verification on real workspaces
 - Status: todo

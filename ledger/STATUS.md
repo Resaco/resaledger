@@ -12,7 +12,7 @@ Building. The foundation (F) and the record format (R) are done; the guarantees 
 
 ## Last verified
 
-- `verify` passed on the current code (2026-10-15): the bundle check, and `npm test` with 296 of 296 tests.
+- `verify` passed on the current code (2026-10-15): the bundle check, and `npm test` with 323 of 323 tests, after the managed `AGENTS.md` block was added.
 
 ## Next step
 
