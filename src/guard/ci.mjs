@@ -9,8 +9,8 @@ import { enforcementCheck } from './enforcement.mjs'
 import { runGates, stampPath, verifiedStamp } from './gates.mjs'
 import { branchTaskFiles, idCollisions } from './ids.mjs'
 import { mergeReleased, packageReleased, releasedTable } from './managed.mjs'
-import { foreignLaneTasks, laneCopyProblems, ownershipProblems, taskRecordsById } from './ownership.mjs'
-import { checkRange, rangeObjects } from './range.mjs'
+import { doubleClaimProblems, foreignLaneTasks, heldTasks, laneCopyProblems, ownershipProblems, taskRecordsById } from './ownership.mjs'
+import { checkRange, laneBranches, rangeObjects } from './range.mjs'
 import { ciComment, ciErrorMarkdown, ciMarkdown, ciShort, ciText, writeSummary } from './report.mjs'
 import { parseTask } from './tasks.mjs'
 import { fail, repositoryRoot } from './util.mjs'
@@ -176,29 +176,6 @@ function ciRemotes(root) {
 }
 
 /**
- * The branch of each lane in the clone, from one `git for-each-ref`: a Map from lane to
- * { ref, branch, commit }. A remote-tracking branch (refs/remotes/<remote>/<lane>) comes before
- * a local one (refs/heads/<lane>); a lane with neither is left out.
- */
-function ciLaneBranches(root, lanes) {
-  const remotes = ciRemotes(root)
-  const refsOf = new Map(lanes.map((lane) => [lane, [...remotes.map((remote) => `refs/remotes/${remote}/${lane}`), `refs/heads/${lane}`]]))
-  const patterns = [...refsOf.values()].flat()
-  const commits = new Map()
-  const output = ciGit(root, ['for-each-ref', '--format=%(refname)%00%(objectname)%00%(objecttype)%00%(refname:short)', ...patterns])
-  for (const line of output.split('\n')) {
-    const [ref, commit, type, branch] = line.split('\0')
-    if (type === 'commit') commits.set(ref, { ref, branch, commit })
-  }
-  const branches = new Map()
-  for (const [lane, refs] of refsOf) {
-    const found = refs.find((ref) => commits.has(ref))
-    if (found) branches.set(lane, commits.get(found))
-  }
-  return branches
-}
-
-/**
  * The copies of tasks on the branches of the lanes they name (spec 6.2), read in one
  * `git cat-file --batch`. tasks is [{ id, task, holder }] from foreignLaneTasks. Returns a Map
  * from id to { branch, task, text }, task and text null when that branch has no such file; an
@@ -207,7 +184,7 @@ function ciLaneBranches(root, lanes) {
 function ciLaneCopies(root, tasks) {
   const copies = new Map()
   if (tasks.length === 0) return copies
-  const branches = ciLaneBranches(root, [...new Set(tasks.map(({ holder }) => holder))])
+  const branches = laneBranches(root, [...new Set(tasks.map(({ holder }) => holder))])
   const wanted = tasks.filter(({ holder }) => branches.has(holder)).map(({ id, task, holder }) => ({ id, branch: branches.get(holder), spec: `${branches.get(holder).commit}:${task.file}` }))
   const objects = rangeObjects(root, wanted.map(({ spec }) => spec))
   for (const { id, branch, spec } of wanted) {
@@ -219,19 +196,45 @@ function ciLaneCopies(root, tasks) {
   return copies
 }
 
+/** The refs of a pull request's own branch in the clone; none for a fork, whose branch name says nothing about this repository's. */
+function ciOwnRefs(root, lane, fork) {
+  const own = new Set()
+  if (fork || !lane) return own
+  own.add(`refs/heads/${lane}`)
+  for (const remote of ciRemotes(root)) own.add(`refs/remotes/${remote}/${lane}`)
+  return own
+}
+
+/**
+ * The copies of the tasks a pull request holds on the other open branches of the clone (those
+ * not merged into the base), from one `git for-each-ref --no-merged` and one
+ * `git cat-file --batch`: [{ id, branch, task }]. held is from heldTasks; the pull request's
+ * own branch, the head and the base are left out. No fetch: the workflow fetches every branch.
+ */
+function ciOpenCopies(root, held, context) {
+  const { base, head, own } = context
+  if (held.length === 0) return []
+  const output = ciGit(root, ['for-each-ref', `--no-merged=${base}`, '--format=%(objectname)%00%(objecttype)%00%(refname)%00%(refname:short)%00%(symref)', 'refs/heads/', 'refs/remotes/'])
+  const wanted = []
+  for (const line of output.split('\n')) {
+    const [commit, type, ref, branch, symref] = line.split('\0')
+    if (type !== 'commit' || symref !== '' || own.has(ref) || commit === head || commit === base) continue
+    for (const { id, task } of held) wanted.push({ id, branch, file: task.file, spec: `${commit}:${task.file}` })
+  }
+  const objects = rangeObjects(root, wanted.map(({ spec }) => spec))
+  return wanted.flatMap(({ id, branch, file, spec }) => {
+    const object = objects.get(spec)
+    return object?.type === 'blob' ? [{ id, branch, task: parseTask(file, object.data.toString('utf8')) }] : []
+  })
+}
+
 /**
  * The ids check of a pull request: ids the head adds (not at the merge base) against the base's
- * tip and every other branch in the clone, except the pull request's own branch.
+ * tip and every other branch in the clone, except the pull request's own branch (own, from ciOwnRefs).
  */
 function ciIdsCheck(root, config, context) {
-  const { mergeBaseTasks, headTasks, baseTasks, base, head, lane, fork } = context
+  const { mergeBaseTasks, headTasks, baseTasks, base, head, own } = context
   const added = [...headTasks.values()].filter(({ task }) => !mergeBaseTasks.has(task.id)).map(({ task }) => ({ id: task.id, file: task.file }))
-  const own = new Set()
-  // A fork's branch name says nothing about the branches of this repository.
-  if (!fork && lane) {
-    own.add(`refs/heads/${lane}`)
-    for (const remote of ciRemotes(root)) own.add(`refs/remotes/${remote}/${lane}`)
-  }
   const others = [{ branch: config.base, files: new Map([...baseTasks.values()].map(({ task }) => [task.id, task.file])) }]
   let branches = 0
   if (added.length > 0) {
@@ -329,10 +332,14 @@ function ciPullRequest(root, options) {
   const reported = new Set(ownership.map(({ file }) => file))
   const foreign = foreignLaneTasks({ before: mergeBaseTasks, after: headTasks, lane, accepted: [baseTasks] }).filter(({ task }) => !reported.has(task.file))
   ownership.push(...laneCopyProblems(foreign, ciLaneCopies(root, foreign), config))
+  // A task this lane holds that another open branch holds under another lane: a double claim.
+  const own = ciOwnRefs(root, lane, options.fork)
+  const held = lane ? heldTasks(headTasks, lane) : []
+  ownership.push(...doubleClaimProblems(held, ciOpenCopies(root, held, { base, head, own }), lane, config))
   ownership.push(...ciRemovedRecords(root, mergeBase, head, config))
   const changed = [...headTasks].filter(([id, { text }]) => mergeBaseTasks.get(id)?.text !== text).length
   checks.push({ name: 'ownership', ok: ownership.length === 0, problems: ownership, counts: { changed }, note: null })
-  checks.push(ciIdsCheck(root, config, { mergeBaseTasks, headTasks, baseTasks, base, head, lane, fork: options.fork }))
+  checks.push(ciIdsCheck(root, config, { mergeBaseTasks, headTasks, baseTasks, base, head, own }))
 
   const moved = ciMovedTasks(mergeBaseTasks, headTasks)
   checks.push({ name: 'moved', ok: true, problems: [], counts: { moved: moved.length }, note: null })

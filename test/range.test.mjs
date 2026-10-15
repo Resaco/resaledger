@@ -3,6 +3,7 @@
 // check --range through the bundle.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { parseConfig } from '../src/guard/config.mjs'
@@ -47,6 +48,22 @@ function setup(tasks = { S1: task('S1', 'todo'), S2: task('S2', 'todo') }) {
   const base = commit(r, files, 'chore: set up', 'Task: maintenance')
   r.git('checkout', '-q', '-b', 'lane-a')
   return { r, base }
+}
+
+/** The git commands a function runs, read from GIT_TRACE: each as its argument list. */
+function gitCalls(fn) {
+  const file = join(temporary('resaledger-trace-'), 'trace.txt')
+  process.env.GIT_TRACE = file
+  try {
+    fn()
+  } finally {
+    delete process.env.GIT_TRACE
+  }
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .map((line) => /trace: built-in: git (.*)$/.exec(line))
+    .filter(Boolean)
+    .map((match) => match[1].split(' '))
 }
 
 /** Runs the check from a revision to HEAD. */
@@ -184,6 +201,84 @@ describe('checkRange: the rules', () => {
     assert.equal(r.git('branch', '-m', 'wip', 'feat/storage').status, 0)
     commit(r, { 'src/b.js': '1\n' }, 'feat: b', 'Task: S1')
     assert.deepEqual(check(r, base, { lane: 'feat/storage' }), [])
+  })
+
+  test("the base passes after merging a lane twice: the lane's commits are on its branch", () => {
+    const { r, base } = setup()
+    r.git('checkout', '-q', '-b', 'lane-b', 'main')
+    commit(r, { 'ledger/tasks/S1.md': task('S1', 'doing', 'lane-b') }, 'chore: claim S1')
+    commit(r, { 'src/a.js': '1\n' }, 'feat: a', 'Task: S1')
+    r.git('checkout', '-q', 'main')
+    assert.equal(r.git('merge', '-q', '--no-ff', '-m', 'Merge lane-b', 'lane-b').status, 0)
+    const merged = head(r)
+    r.git('checkout', '-q', 'lane-b')
+    commit(r, { 'src/b.js': '1\n', 'ledger/tasks/S1.md': task('S1', 'done', 'lane-b') }, 'feat: b', 'Task: S1')
+    r.git('checkout', '-q', 'main')
+    assert.equal(r.git('merge', '-q', '--no-ff', '-m', 'Merge lane-b again', 'lane-b').status, 0)
+    assert.deepEqual(check(r, base, { lane: 'main' }), [])
+    // S1 was lane-b's before this range; its commit is lane-b's own, so it passes.
+    assert.deepEqual(check(r, merged, { lane: 'main' }), [])
+    // A fast-forward brings the lane's commits onto the first-parent chain: they pass too.
+    const start = head(r, 'lane-b~1')
+    r.git('branch', '-q', 'release', start)
+    r.git('checkout', '-q', 'release')
+    assert.equal(r.git('merge', '-q', '--ff-only', 'lane-b').status, 0)
+    assert.deepEqual(check(r, start, { lane: 'release', to: 'release' }), [])
+    // Without the lane's branch, the old rule decides: held before the range, so refused.
+    r.git('checkout', '-q', 'main')
+    r.git('branch', '-q', '-D', 'lane-b')
+    assert.match(check(r, merged, { lane: 'main' })[0].message, /^"feat: b" names task S1, which is held by lane "lane-b" before this range/)
+  })
+
+  test('a side branch cannot launder a commit that names another lane\'s task', () => {
+    const { r, base } = setup()
+    r.git('checkout', '-q', '-b', 'lane-b', 'main')
+    commit(r, { 'ledger/tasks/S1.md': task('S1', 'doing', 'lane-b') }, 'chore: claim S1')
+    // lane-a takes lane-b's claim in, then merges a side branch whose commit names S1.
+    r.git('checkout', '-q', 'lane-a')
+    assert.equal(r.git('merge', '-q', '--no-ff', '-m', 'Merge lane-b', 'lane-b').status, 0)
+    r.git('checkout', '-q', '-b', 'side')
+    commit(r, { 'src/a.js': '1\n' }, 'feat: a', 'Task: S1')
+    r.git('checkout', '-q', 'lane-a')
+    assert.equal(r.git('merge', '-q', '--no-ff', '-m', 'Merge side', 'side').status, 0)
+    assert.deepEqual(
+      check(r, base).map((problem) => problem.message),
+      ['"feat: a" names task S1, whose Lane is "lane-b", but the commit is not on that lane\'s branch "lane-b". Name a task this lane holds, or take it over with claim --take']
+    )
+  })
+
+  test("a stacked lane's code commit that names the holder's task is refused; the holder's own commit passes", () => {
+    const { r, base } = setup()
+    r.git('checkout', '-q', '-b', 'lane-b', 'main')
+    commit(r, { 'ledger/tasks/S1.md': task('S1', 'doing', 'lane-b') }, 'chore: claim S1')
+    commit(r, { 'src/a.js': '1\n' }, 'feat: a', 'Task: S1')
+    r.git('checkout', '-q', '-b', 'lane-c')
+    commit(r, { 'ledger/tasks/S2.md': task('S2', 'doing', 'lane-c') }, 'chore: claim S2')
+    commit(r, { 'src/b.js': '1\n' }, 'feat: b', 'Task: S2')
+    assert.deepEqual(check(r, base, { lane: 'lane-c' }), [])
+    commit(r, { 'src/c.js': '1\n' }, 'feat: c', 'Task: S1')
+    assert.deepEqual(
+      check(r, base, { lane: 'lane-c' }).map((problem) => problem.message),
+      ['"feat: c" names task S1, whose Lane is "lane-b", but the commit is not on that lane\'s branch "lane-b". Name a task this lane holds, or take it over with claim --take']
+    )
+    // A remote-tracking branch of the holder counts as well as the local one.
+    r.git('update-ref', 'refs/remotes/origin/lane-b', 'lane-c')
+    assert.deepEqual(check(r, base, { lane: 'lane-c' }), [])
+  })
+
+  test('a range that names no other lane\'s task reads no lane branch', () => {
+    const { r, base } = setup()
+    commit(r, { 'src/a.js': '1\n', 'ledger/tasks/S1.md': task('S1', 'doing', 'lane-a') }, 'feat: a', 'Task: S1')
+    const calls = gitCalls(() => check(r, base))
+    assert.equal(calls.filter((args) => args[0] === 'for-each-ref' || (args[0] === 'rev-list' && args.includes('--parents'))).length, 0)
+    r.git('checkout', '-q', '-b', 'lane-b', 'main')
+    commit(r, { 'ledger/tasks/S2.md': task('S2', 'doing', 'lane-b') }, 'chore: claim S2')
+    commit(r, { 'src/b.js': '1\n' }, 'feat: b', 'Task: S2')
+    r.git('checkout', '-q', 'lane-a')
+    assert.equal(r.git('merge', '-q', '--no-ff', '-m', 'Merge lane-b', 'lane-b').status, 0)
+    // Two git calls for the lane branches, however many commits name the other lane's task.
+    const lanes = gitCalls(() => assert.deepEqual(check(r, base), [])).filter((args) => args[0] === 'for-each-ref' || (args[0] === 'rev-list' && args.includes('--parents')))
+    assert.deepEqual(lanes.map((args) => args[0]), ['for-each-ref', 'rev-list'])
   })
 
   test('a task created inside the range passes, also when no range start is given', () => {
@@ -534,11 +629,11 @@ describe('check --range through the bundle', () => {
     assert.equal(failed.status, 1)
     assert.match(failed.out, new RegExp(`✖ ${short(r)}: "feat: b" changes code but names no task`))
 
-    // Another lane holds S1 at the range start; a detached HEAD has no lane, so only that rule is skipped.
+    // Another lane holds S1, and the commit is not on its branch; a detached HEAD has no lane, so only that rule is skipped.
     const claimed = head(r, 'HEAD~1')
     r.git('checkout', '-q', '-b', 'lane-b', claimed)
     commit(r, { 'src/c.js': '1\n' }, 'feat: c', 'Task: S1')
-    assert.match(r.node(guard, 'check', '--range', `${claimed}..HEAD`).out, /names task S1, which is held by lane "lane-a" before this range, not by "lane-b"/)
+    assert.match(r.node(guard, 'check', '--range', `${claimed}..HEAD`).out, /names task S1, whose Lane is "lane-a", but the commit is not on that lane's branch "lane-a"/)
     r.git('checkout', '-q', '--detach', 'HEAD')
     const detached = r.node(guard, 'check', '--range', `${claimed}..HEAD`)
     assert.equal(detached.status, 0, detached.out)
