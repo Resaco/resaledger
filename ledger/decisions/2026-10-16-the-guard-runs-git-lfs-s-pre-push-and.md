@@ -13,3 +13,5 @@ Decided, for 1.0.0-rc.3:
 3. **The guides say** that `git lfs install` in a clone reports that a `pre-push` exists and stops; that its filters are set all the same; and that Git LFS's other hooks, which only file locking needs, come from `git lfs update --manual`.
 
 Not chosen: a general extension point, such as a `.githooks/pre-push.local` that the managed hook calls. Every project with Git LFS would wire it by hand, Git LFS's installer would still collide with the managed hook, and CI would have to audit project-written hook code as enforcement. It can come in 1.x if another tool needs it.
+
+After [the review](../evidence/p/review-lfs.md), within this decision: Git LFS counts as in use when `filter=lfs` is in a `.gitattributes` file of the index or of a pushed commit, or in the repository's own attributes, since a branch can bring Git LFS before the checkout has it; and `init` refuses a hook manager's `pre-push` that already runs `git lfs pre-push`, which would read git's input before the guard.
