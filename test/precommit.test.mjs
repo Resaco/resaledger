@@ -235,7 +235,7 @@ test('the first commit in an empty repository passes', () => {
   install(r)
   task(r, 'S1', 'Bake bread', { status: 'doing', lane: 'someone' })
   r.git('config', 'core.hooksPath', '.githooks')
-  passed(r.commit('chore: start'))
+  passed(r.commit('chore: start', 'Task: maintenance'))
   assert.equal(r.git('rev-list', '--count', 'HEAD').out.trim(), '1')
 })
 
@@ -256,7 +256,7 @@ test('the commit gates run only when code is staged', () => {
   passed(r.commit('docs: S1'))
   assert.equal(existsSync(marker), false)
   r.write('src/app.js', 'console.log(1)\n')
-  const result = r.commit('feat: app')
+  const result = r.commit('feat: app', 'Task: maintenance')
   passed(result)
   assert.equal(readFileSync(marker, 'utf8'), 'x')
   assert.match(result.out, /✔ node -e .* \([\d.]+ s\)/)
