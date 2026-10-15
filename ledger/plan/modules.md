@@ -29,9 +29,9 @@ The guard is written as modules in `src/guard/` and bundled into one file ([F1](
 | `markdown.mjs` | R2 | `splitLines(text)` (CRLF-safe); `headings(text) → [{ level, text, anchor, line }]`; `findSection(text, anchor) → { heading, lines, line } \| null`; `relativeLinks(text) → [{ target, path, anchor, line }]`; `resolveLinkPath(fromFile, path)`; `parseFields(lines, start) → { fields, end }` where each field is `{ name, value, items, line }`; `isEmptyValue(value)` |
 | `tasks.mjs` | R3 | `TASK_ID`; `parseTask(path, text) → task`; `validateTask(task, context) → problems`; `validateTaskSet(tasks, context) → problems` (unique ids, dependencies, WIP per lane); `taskFileName(dir, id, title)`; `slugify(title)`; `TASK_FIELDS` |
 | `records.mjs` | R4 | `SETUP_MARKER`; `parseDecision`, `validateDecision`, `parseLogEntry`, `validateLogEntry`, `planStatus(text) → { value, date, by, line } \| null`, `validatePlanStatus(path, status)`, `parseReadme(path, text)` (its `sections` is a Map), `validateReadme` |
-| `workspace.mjs` | R5 | `treeReader(source)` with `source` `{ kind: 'worktree' }`, `{ kind: 'index' }` or `{ kind: 'commit', rev }`, returning `{ list(prefix), read(path), exists(path) }`; `loadWorkspace(reader, config) → workspace` (parse problems in `workspace.problems`); `checkWorkspace(workspace, reader, config) → problems`; `isCode(path, config)`; `fingerprint(source, config)` |
+| `workspace.mjs` | R5 | `treeReader(source)` with `source` `{ kind: 'worktree' }`, `{ kind: 'index' }` or `{ kind: 'commit', rev }` and an optional `root`, returning `{ list(prefix), read(path), exists(path) }`; `loadWorkspace(reader, config) → workspace` (parse problems in `workspace.problems`); `checkWorkspace(workspace, reader, config) → problems`; `isCode(path, config)`; `fingerprint(source, config)` (index or commit sources only); `checkCommand(args)`, which reads the configuration from the source it checks |
 | `gates.mjs` | V1 | `runGates(commands) → { passed, failure }`; `stampPath(fingerprint)`; `verifyCommand(options)`; `gatesCommand()` |
-| `range.mjs` | V2 | `taskTrailers(message) → ids`; `checkRange(from, to, context) → problems` |
+| `range.mjs` | V2 | `taskTrailers(message) → ids`; `checkRange(from, to, context) → problems`, with `context = { config, lane, skipGitHubMerges, root }` (`lane` null skips the lane rule) |
 | `handoff.mjs` | V3 | `handoffProblems(context) → problems`; `handoffCommand()` |
 | `githooks.mjs` | H1, H2, H3 | `preCommit()`, `commitMsg(file)`, `prePush(stdin)`, `hooksActive()`, `activateHooks()` |
 | `lanes.mjs` | W1, W2 | `currentLane()`; `localLanes()`; `remoteLanes(options)` |
@@ -53,7 +53,7 @@ The guard is written as modules in `src/guard/` and bundled into one file ([F1](
   tasks,          // parsed tasks, each with .file and its parse problems
   decisions,      // parsed decisions
   logs,           // parsed log entries
-  plans,          // Map of plan file path → status line value or null
+  plans,          // Map of plan file path → planStatus() object or null
   readme,         // parsed README, or null when missing
   problems        // parse problems found while loading
 }

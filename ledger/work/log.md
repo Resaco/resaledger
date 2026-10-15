@@ -33,3 +33,7 @@ R4 merged: decisions, log entries, plan status lines and the workspace README no
 ## 2026-10-15 · Task files, CI and the hygiene checks
 
 R3 and F2 merged. Task files parse and validate as the specification says, CI is set up for Node 20, 22 and 24 on three operating systems, and a hygiene test and a history scan keep private paths, addresses and names out of the repository. On review the lead made field names exact in every record type, extended the anchor check to every link in a task file, and taught slugs a few Latin letters that do not decompose. 162 tests pass.
+
+## 2026-10-15 · The record format is complete
+
+R5 merged, which completes phase R: the guard reads a workspace from the working tree, the index or any commit, `check` validates it in about half a second for 300 tasks, and the fingerprint of the code is the same from the index and from the commit and across line-ending styles. 213 tests pass on Node 20, 22 and 24. The commit range check (V2) started.
