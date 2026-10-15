@@ -1,6 +1,7 @@
 # C3 Output, workflow and templates
 
-- Status: todo
+- Status: doing
+- Lane: c3-ci-output
 - Depends on: C1
 - Plan: [C-ci.md](../plan/C-ci.md#c3-output-workflow-and-templates)
 - Evidence: —
