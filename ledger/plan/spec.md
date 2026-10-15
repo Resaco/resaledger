@@ -168,7 +168,7 @@ Every other key has a default. Keys marked † take their default from the prese
 | `agent.deny` | `[]` | Extra commands that agent hooks refuse, as `{ "pattern": "…", "reason": "…" }`. |
 | `agent.pushNeedsHandoff` | `false` | With `true`, agent hooks refuse an agent's `git push` while `handoff` fails, leaving out its check that the lane is pushed ([section 11](#11-agent-integrations)). |
 
-`records.mjs config` prints the effective configuration with every default filled in. A key close to a known one, within two letters of a known name of six letters or more or within one letter of a shorter one, is refused as a typo; any other unknown key is kept with a notice, since a later 1.x release may add keys ([section 15](#15-format-stability-and-updates)), and `ci` lists a change to it.
+`records.mjs config` prints the effective configuration with every default filled in. A key close to a known one, within two letters of a known name of six letters or more or within one letter of a shorter one, a swap of two neighbouring letters counting as one, is refused as a typo; any other unknown key is kept with a notice, since a later 1.x release may add keys ([section 15](#15-format-stability-and-updates)), and `ci` lists a change to it.
 
 ### 5.3 Task files
 
@@ -226,7 +226,7 @@ As built: one row per revision instead of a JSON column, because revisions are l
 | Issue | no | The issue the task came from, as a link or `#123`. |
 | Taken over from | no | Written by `claim --take`: the previous lane and commit. |
 
-Other fields are allowed and kept. A field name close to a known one, such as `Staus`, is reported as a likely typo: within two letters of a known name of six letters or more, or within one letter of a shorter one, so that a free field such as `Later` is not taken for `Lane`.
+Other fields are allowed and kept. A field name close to a known one, such as `Staus`, is reported as a likely typo: within two letters of a known name of six letters or more, or within one letter of a shorter one, a swap of two neighbouring letters counting as one, so that a free field such as `Later` is not taken for `Lane` while `Lnae` is.
 
 **Sections.** `## Plan` is optional: the goal and acceptance checks for a task with no separate plan. `## Handoff` is required while `doing`: the present state, rewritten each time rather than appended, at most 1,500 characters. `## Notes` holds anything else: findings, what was tried, how the result differs from the plan.
 
