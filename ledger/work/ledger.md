@@ -315,11 +315,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: —
 
 ### T3 Independent review of the guard
-- Status: todo
+- Status: doing
 - Depends on: V3, H2
 - Plan: [T-acceptance.md](../plan/T-acceptance.md#t3-independent-review-of-the-guard)
 - Evidence: —
-- Notes: —
+- Notes: A reviewer running Fable 5.1 reads R, V and H at a fixed commit; each finding becomes a child task of T3. Next: record the review, fix or answer every finding.
 
 ### T4 Independent review of the CI check
 - Status: todo

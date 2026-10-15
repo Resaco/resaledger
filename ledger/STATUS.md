@@ -8,7 +8,7 @@ Building. Done: the foundation (F), the record format (R), the git hooks (H), th
 
 ## Active work
 
-[T5.2](work/ledger.md#t52-a-faithful-conversion) and [T1](work/ledger.md#t1-the-parallel-lanes-acceptance-test), with workers. The How it works animation (G3) and the new README graphics (G4) wait for the owner.
+[T5.2](work/ledger.md#t52-a-faithful-conversion) and [T1](work/ledger.md#t1-the-parallel-lanes-acceptance-test), with workers; [T3](work/ledger.md#t3-independent-review-of-the-guard), with a reviewer. The How it works animation (G3) and the new README graphics (G4) wait for the owner.
 
 ## Last verified
 
