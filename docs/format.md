@@ -358,7 +358,7 @@ Opened, saved and reopened a project with three documents. The list shows all th
 - `fingerprint` is a SHA-1, in hex, over the sorted lines `<mode> <blob id> <path>` (each ending in a newline) of every tracked [code](#11-what-counts-as-code) file. It changes when code, the configuration, the guard or a hook changes, and not when a record changes.
 - `gates` is a SHA-256, in hex, over the fingerprint and the gate commands, commit gates first, joined by newlines. A stamp counts only for the gates configured now.
 - The text is JSON with two-space indentation and a final newline. It holds no time and no name, so two lanes that verify the same code write identical files.
-- `verify` writes nothing when the stamp for the current fingerprint exists; `--force` reruns. It deletes every other file in `verified/` whose name is 16 hex digits and `.json`.
+- `verify` writes nothing when the stamp for the current fingerprint exists; `--force` reruns. It deletes every other file in `verified/` whose name is 16 hex digits and `.json`. So a stamp lives only until the code changes: name it in Evidence in backticks rather than linking it, or the link breaks at the next `verify`.
 - `handoff` requires a stamp for the current fingerprint whenever `gates.verify` is not empty. A stamp is a claim, not a proof; CI reruns the gates unless `ci.runGates` is `false`.
 
 ## 9. The workspace README

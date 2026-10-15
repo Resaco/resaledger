@@ -6,7 +6,7 @@
 - Plan: [D-docs.md](../plan/D-docs.md#d1-the-format-reference)
 - Evidence:
   - `node --test test/format-doc.test.mjs`: 8 of 8; each of eight planted errors in docs/format.md (a bad status, an unknown task in a log entry, a wrong code answer, a todo task in a commit, a broken anchor, an undocumented key, a changed gate, a changed default) fails it
-  - `node ledger/scripts/records.mjs verify` (Node 20): `npm test` passed, all 955 tests, at a load average of 11; stamp [c63b6ed778f2c2f4.json](../verified/c63b6ed778f2c2f4.json)
+  - `node ledger/scripts/records.mjs verify` (Node 20): `npm test` passed, all 955 tests, at a load average of 11; stamp `c63b6ed778f2c2f4.json`, since replaced by a newer one
   - `node scripts/test.mjs` on Node 24, 22 and 20 at a load average of 30 to 75: 954, 954 and 953 of 955; the failures are only the timing budgets in test/ids.test.mjs (a commit with 50 other branches) and, on Node 20, test/work.test.mjs (`work --all` on 500 branches)
 
 ## Notes
