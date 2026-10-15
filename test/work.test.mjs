@@ -224,7 +224,7 @@ test('--json prints one object with every section and nothing else', () => {
   const result = work(r, '--json')
   assert.equal(result.status, 0, result.out)
   const state = JSON.parse(result.out)
-  assert.deepEqual(Object.keys(state), ['lane', 'preset', 'hooks', 'goal', 'inProgress', 'waitingForOwner', 'blocked', 'ready', 'lanes', 'progress', 'warnings', 'next'])
+  assert.deepEqual(Object.keys(state), ['lane', 'preset', 'hooks', 'goal', 'inProgress', 'waitingForOwner', 'blocked', 'ready', 'lanes', 'progress', 'verification', 'warnings', 'next'])
   assert.equal(state.lane, 'main')
   assert.equal(state.preset, 'solo')
   assert.deepEqual(state.hooks, { active: true, activated: true, foreign: null })
@@ -296,4 +296,25 @@ test('work finishes within the budget on 300 tasks', (t) => {
   assert.match(result.out, /300 done or dropped|of 300 done or dropped/)
   t.diagnostic(`work on 300 tasks: ${elapsed.toFixed(0)} ms, including node start-up`)
   assert.ok(elapsed < 3000, `work took ${elapsed} ms`)
+})
+
+test('the header says whether the gates passed on the code at HEAD', () => {
+  const r = workspace({ config: { gates: { verify: ['node -e "process.exit(0)"'] } } })
+  const before = work(r)
+  assert.equal(before.status, 0, before.out)
+  assert.match(before.out, /· hooks on · not verified\n/)
+  assert.match(before.out, /The gates have not passed on the code at HEAD: run node ledger\/scripts\/records\.mjs verify/)
+  assert.equal(workJson(r).verification.state, 'unverified')
+
+  const verified = r.node('ledger/scripts/records.mjs', 'verify')
+  assert.equal(verified.status, 0, verified.out)
+  const after = work(r)
+  assert.match(after.out, /· hooks on · verified\n/)
+  assert.doesNotMatch(after.out, /have not passed/)
+  assert.deepEqual(workJson(r).verification, { state: 'verified', gates: 1 })
+})
+
+test('with no gates the header says nothing about verification', () => {
+  const r = workspace()
+  assert.deepEqual(workJson(r).verification, { state: 'no-gates', gates: 0 })
 })

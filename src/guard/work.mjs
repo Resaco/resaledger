@@ -2,10 +2,11 @@
 // worktrees. It is the first context of every session, so it says what this lane holds,
 // what waits, what is ready and what to type next. It never fetches.
 import { loadConfig } from './config.mjs'
+import { verifiedStamp } from './gates.mjs'
 import { activateHooks, hooksActive } from './githooks.mjs'
 import { currentLane, localBranches, localLanes } from './lanes.mjs'
 import { fail, repositoryRoot } from './util.mjs'
-import { checkWorkspace, loadWorkspace, treeReader } from './workspace.mjs'
+import { checkWorkspace, fingerprint, loadWorkspace, treeReader } from './workspace.mjs'
 
 const WORK_READY_MAX = 5
 const WORK_HANDOFF_LINES = 3
@@ -131,9 +132,25 @@ function workSummary(task) {
   return { id: task.id, title: task.title ?? '', file: task.file }
 }
 
+/**
+ * Whether the gates passed on the code at HEAD: 'verified' when a stamp for it is in the
+ * working tree, 'unverified' when not, 'no-gates' or 'no-commits' when there is nothing to check.
+ */
+function workVerification(config, reader, root) {
+  const gates = config.gates.commit.length + config.gates.verify.length
+  if (gates === 0) return { state: 'no-gates', gates }
+  let code
+  try {
+    code = fingerprint({ kind: 'commit', rev: 'HEAD', root }, config)
+  } catch {
+    return { state: 'no-commits', gates }
+  }
+  return { state: verifiedStamp(reader, config, code) ? 'verified' : 'unverified', gates }
+}
+
 /** Computes everything work shows, as one plain object (the --json output). */
 function workState(options) {
-  const { config, workspace, problems, lane, hooks, others, branches, root } = options
+  const { config, workspace, problems, lane, hooks, others, branches, root, verification } = options
   const tasks = workspace.tasks.filter((task) => task.id)
   const thisLane = { branch: lane, path: root, source: 'this', tasks: workspace.tasks }
   if (lane !== null && branches.has(lane)) thisLane.lastCommit = branches.get(lane)
@@ -184,7 +201,7 @@ function workState(options) {
       total: progress.reduce((sum, entry) => sum + entry.total, 0),
       byPrefix: progress
     },
-    // The verification state (whether a stamp exists for the code at HEAD) goes here, after V1.
+    verification,
     warnings: {
       doubleClaims: workDoubleClaims(lanes),
       staleClaims: workStaleClaims(lanes, known),
@@ -203,7 +220,8 @@ function workText(state) {
   }
   const line = (task, extra) => `  ${task.id}  ${task.title}${extra ? ` — ${extra}` : ''}`
 
-  out.push(`ResaLedger · lane ${state.lane ?? '(detached HEAD)'} · ${state.preset} · hooks ${state.hooks.active ? 'on' : 'off'}`)
+  const verified = { verified: ' · verified', unverified: ' · not verified', 'no-commits': '', 'no-gates': '' }[state.verification.state]
+  out.push(`ResaLedger · lane ${state.lane ?? '(detached HEAD)'} · ${state.preset} · hooks ${state.hooks.active ? 'on' : 'off'}${verified}`)
   if (state.goal) out.push(`Goal: ${state.goal}`)
 
   const progressLines = state.inProgress.flatMap((task) => [line(task), ...task.handoff.map((text) => `      ${text}`)])
@@ -231,6 +249,8 @@ function workText(state) {
   if (more > 0) warnings.push(`  and ${more} more record problem${more === 1 ? '' : 's'}; run check for the list`)
   section('Warnings', warnings)
 
+  if (state.verification.state === 'unverified')
+    out.push('', `The gates have not passed on the code at HEAD: run ${state.next[1].replace(/handoff$/, 'verify')} once your code is committed.`)
   out.push('', `Next: ${state.next[0]} for the plan, then ${state.next[1]} before you stop.`)
   return `${out.join('\n')}\n`
 }
@@ -275,7 +295,8 @@ export function workCommand(args) {
   const workspace = loadWorkspace(reader, config)
   const problems = checkWorkspace(workspace, reader, config)
   const branches = localBranches()
-  const state = workState({ config, workspace, problems, lane: currentLane(), hooks, others: localLanes(config, branches), branches, root })
+  const verification = workVerification(config, reader, root)
+  const state = workState({ config, workspace, problems, lane: currentLane(), hooks, others: localLanes(config, branches), branches, root, verification })
 
   if (json) {
     process.stdout.write(`${JSON.stringify(state, null, 2)}\n`)
