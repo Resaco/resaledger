@@ -408,18 +408,18 @@ describe('ci and changes to enforcement', () => {
       const without = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
       failed(without, /✖ enforcement: 1 weakening change no decision names; 1 change, 1 weakening/)
       const escaped = id.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
-      assert.match(without.out, new RegExp(`\\n {2}✖ ${escaped}: .*this weakens enforcement, and no decision this pull request adds names it\\. Add one in ledger/decisions/ with the line "- Weakens: ${escaped}"`))
+      assert.match(without.out, new RegExp(`\\n {2}✖ ${escaped}[: ].*this weakens enforcement, and no decision this pull request adds names it\\. Add one in ledger/decisions/ with the line "- Weakens: ${escaped}"`))
 
       commit(r, decision(id), 'docs: decide', 'Task: maintenance')
       const decided = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
       passed(decided)
-      assert.match(decided.out, new RegExp(`✔ enforcement: 1 change, 1 weakening\\n {2}${escaped}: .* · weakening, decided in ledger/decisions/2026-10-15-allow-it\\.md by alice`))
+      assert.match(decided.out, new RegExp(`✔ enforcement: 1 change, 1 weakening\\n {2}${escaped}[: ].* · weakening, decided in ledger/decisions/2026-10-15-allow-it\\.md by alice`))
     })
   }
 
   test('removing a gate lists it with its command', () => {
     const r = change({ '.resaledger.json': json({ gates: { verify: [PASS] } }) }, { '.resaledger.json': json({}) })
-    failed(ci(r, 'pull_request', pullRequest(r, 'lane-a')), /✖ gates\.verify: gates\.verify: removed "node -e \\"process\.exit\(0\)\\""/)
+    failed(ci(r, 'pull_request', pullRequest(r, 'lane-a')), /✖ gates\.verify: removed "node -e \\"process\.exit\(0\)\\""/)
   })
 
   test('a decision that names a different change, or one already on the base, does not help', () => {
@@ -427,7 +427,7 @@ describe('ci and changes to enforcement', () => {
     commit(r, { '.resaledger.json': json({ wip: 3 }), ...decision('wip', 'old') }, 'chore: before', 'Task: maintenance')
     r.git('checkout', '-q', '-b', 'lane-a')
     commit(r, { '.resaledger.json': json({ wip: 5 }), ...decision('gates.verify, protected') }, 'chore: raise wip', 'Task: maintenance')
-    failed(ci(r, 'pull_request', pullRequest(r, 'lane-a')), /✖ wip: wip raised from 3 to 5: this weakens enforcement/)
+    failed(ci(r, 'pull_request', pullRequest(r, 'lane-a')), /✖ wip raised from 3 to 5: this weakens enforcement/)
   })
 
   test('one decision can name several changes, and each one it does not name still fails', () => {
@@ -436,7 +436,7 @@ describe('ci and changes to enforcement', () => {
     commit(r, { '.resaledger.json': json({ wip: 4, ci: { runGates: false } }) }, 'chore: stop the gates', 'Task: maintenance')
     const result = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
     failed(result, /✖ enforcement: 1 weakening change no decision names; 3 changes, 3 weakening/)
-    assert.match(result.out, /✖ ci\.runGates: ci\.runGates turned off/)
+    assert.match(result.out, /✖ ci\.runGates turned off/)
   })
 
   test('a pull request that only tightens passes and lists every change', () => {
@@ -448,17 +448,17 @@ describe('ci and changes to enforcement', () => {
     passed(result)
     assert.match(result.out, /✔ enforcement: 11 changes, 0 weakening/)
     for (const line of [
-      'preset: preset changed from "solo" to "team"',
-      'protected: protected: added "main"',
-      'requirePushed: requirePushed turned on',
-      'claimPush: claimPush turned on',
-      'branchPattern: branchPattern changed from none to "^lane-"',
-      'wip: wip lowered from 3 to 2',
-      'commitStyle: commitStyle changed from "free" to "conventional"',
-      'aiAttribution: aiAttribution changed from "allow" to "forbid"',
-      'codePaths: codePaths: added "tools"',
-      'gates.verify: gates.verify: added "node -e \\"process.exit(0)\\""',
-      'agent.deny: agent.deny: added "rm -rf"'
+      'preset changed from "solo" to "team"',
+      'protected: added "main"',
+      'requirePushed turned on',
+      'claimPush turned on',
+      'branchPattern changed from none to "^lane-"',
+      'wip lowered from 3 to 2',
+      'commitStyle changed from "free" to "conventional"',
+      'aiAttribution changed from "allow" to "forbid"',
+      'codePaths: added "tools"',
+      'gates.verify: added "node -e \\"process.exit(0)\\""',
+      'agent.deny: added "rm -rf"'
     ]) {
       assert.ok(result.out.includes(`\n  ${line}\n`), `missing "${line}" in:\n${result.out}`)
     }

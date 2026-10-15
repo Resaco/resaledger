@@ -169,7 +169,7 @@ describe('the job summary and the comment, rendered from fixtures', () => {
     assert.match(markdown, /No task changes its status\./)
     assert.match(markdown, /\*\*Commits:\*\* 2 checked, 1 problem/)
     assert.match(markdown, /\*\*Gates\*\* on `2222222`: `npm run lint` ✔ 3 s · `npm test && npm run e2e` ✖ \(exit 1\) \(rules from the base `1111111`\)/)
-    assert.match(markdown, /\*\*Enforcement:\*\*\n- gates\.commit: .*\n- ✖ wip: wip raised from 3 to 5: this weakens enforcement/)
+    assert.match(markdown, /\*\*Enforcement:\*\*\n- gates\.commit: .*\n- ✖ wip raised from 3 to 5: this weakens enforcement/)
     assert.match(markdown, /\*\*Problems:\*\*\n- ✖ commits: 1 problem; .*\n {2}- 4444444 "feat: bake" changes code but names no task/)
     assert.match(markdown, /<details><summary>Every check<\/summary>/)
   })

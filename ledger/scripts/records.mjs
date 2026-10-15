@@ -4,14 +4,14 @@
 // hooks and CI. Built from its source modules by scripts/bundle.mjs; do not edit it here.
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { closeSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, posix, relative, resolve } from 'node:path'
 import { isatty } from 'node:tty'
 import { fileURLToPath } from 'node:url'
 
 const VERSION = '1.0.0-dev.0'
-const RELEASED = {"hooks/commit-msg":{"1.0.0-dev.0":"aed52395adb1fd45357244e5d78ddc3c60b0e5fc558678b1f7464f42b740f667"},"hooks/pre-commit":{"1.0.0-dev.0":"26abf45bfc0570188dc7cd368e4a40269835b79bfcf72efb30d839017a5322e8"},"hooks/pre-merge-commit":{"1.0.0-dev.0":"f62d8a0d3dfd87e4816e311a095b8f93e9329955adf668077a0cc10ace224b7f"},"hooks/pre-push":{"1.0.0-dev.0":"68ac4461397ecad35218104129f87f02fce5964cbcc71f346dcac424282f553a"}}
+const RELEASED = {"hooks/commit-msg":{"1.0.0-dev.0":"aed52395adb1fd45357244e5d78ddc3c60b0e5fc558678b1f7464f42b740f667"},"hooks/pre-commit":{"1.0.0-dev.0":"26abf45bfc0570188dc7cd368e4a40269835b79bfcf72efb30d839017a5322e8"},"hooks/pre-merge-commit":{"1.0.0-dev.0":"f62d8a0d3dfd87e4816e311a095b8f93e9329955adf668077a0cc10ace224b7f"},"hooks/pre-push":{"1.0.0-dev.0":"68ac4461397ecad35218104129f87f02fce5964cbcc71f346dcac424282f553a"},"workflow":{"1.0.0-dev.0":"f246e24a513d77b0c92bf6d2c50a698deb38e8e1ded6f5aeea2e7fe635537119"}}
 
 // --- util.mjs ---
 // Small helpers that every part of the guard uses.
@@ -5608,7 +5608,7 @@ function changesCommand(args) {
 }
 
 // --- managed.mjs ---
-// The files ResaLedger manages, as hashes: the guard, the git hooks and the AGENTS.md block.
+// The files ResaLedger manages, as hashes: the guard, the git hooks, the workflow and the AGENTS.md block.
 // `resaledger update` uses these to tell a released file from one changed by hand, and so does
 // the CI check (spec 10) when it judges a change to the guard or a hook.
 
@@ -5677,6 +5677,61 @@ function releasedTable() {
     // A guard that cannot read itself knows only the earlier releases.
   }
   return table
+}
+
+/** Two released tables merged: { key: { version: hash } }, the second one's hashes added to the first's. */
+function mergeReleased(first, second) {
+  const table = Object.fromEntries(Object.entries(first).map(([key, versions]) => [key, { ...versions }]))
+  for (const [key, versions] of Object.entries(second)) table[key] = { ...(table[key] ?? {}), ...versions }
+  return table
+}
+
+/** The text of a file in a folder, or null. */
+function managedRead(folder, ...parts) {
+  try {
+    return readFileSync(join(folder, ...parts), 'utf8')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The released hashes of an unpacked resaledger package (ci --release): { version, table }. The
+ * table holds the package's guard, hooks and workflow under its own version, and the earlier
+ * releases its templates/released.json records. Throws with the reason when the folder is not
+ * such a package.
+ */
+function packageReleased(folder) {
+  let manifest = null
+  try {
+    manifest = JSON.parse(managedRead(folder, 'package.json') ?? 'null')
+  } catch {
+    // Reported below.
+  }
+  if (manifest?.name !== 'resaledger' || typeof manifest.version !== 'string') throw new Error(`${folder} is not a resaledger package: its package.json does not name resaledger and a version`)
+  const guard = managedRead(folder, 'dist', 'records.mjs')
+  if (guard === null) throw new Error(`${folder} is not a built resaledger package: dist/records.mjs is missing`)
+  const { version } = manifest
+  let recorded = {}
+  try {
+    recorded = JSON.parse(managedRead(folder, 'templates', 'released.json') ?? '{}')
+  } catch {
+    // A package without a readable table still names its own files.
+  }
+  const own = { guard: { [version]: contentHash(normalizeManaged(guard)) } }
+  const hooks = join(folder, 'templates', 'hooks')
+  for (const name of existsSync(hooks) ? readdirSync(hooks).sort() : []) {
+    const text = managedRead(hooks, name)
+    if (text !== null) own[`hooks/${name}`] = { [version]: contentHash(normalizeManaged(text)) }
+  }
+  const workflow = managedRead(folder, 'templates', 'workflow.yml')
+  if (workflow !== null) own.workflow = { [version]: contentHash(normalizeManaged(workflow)) }
+  const earlier = Object.fromEntries(
+    Object.entries(recorded ?? {})
+      .filter(([key, versions]) => /^(guard|hooks\/[\w-]+|workflow)$/.test(key) && versions && typeof versions === 'object')
+      .map(([key, versions]) => [key, Object.fromEntries(Object.entries(versions).filter(([, hash]) => typeof hash === 'string'))])
+  )
+  return { version, table: mergeReleased(earlier, own) }
 }
 
 // --- enforcement.mjs ---
@@ -5815,7 +5870,8 @@ function fileChanges(beforeReader, afterReader, beforeDir, afterDir, released) {
     const name = path.slice(ENFORCEMENT_HOOKS.length)
     files.push({ id: `hooks/${name}`, key: `hooks/${name}`, path, before: beforeReader.read(path), after: afterReader.read(path), dir: afterDir })
   }
-  files.push({ id: 'workflow', key: 'workflow', path: ENFORCEMENT_WORKFLOW, before: beforeReader.read(ENFORCEMENT_WORKFLOW), after: afterReader.read(ENFORCEMENT_WORKFLOW), dir: afterDir })
+  // The workflow reads the folder from the configuration, so its text holds no folder name.
+  files.push({ id: 'workflow', key: 'workflow', path: ENFORCEMENT_WORKFLOW, before: beforeReader.read(ENFORCEMENT_WORKFLOW), after: afterReader.read(ENFORCEMENT_WORKFLOW), dir: null })
   return files.flatMap((file) => managedChange(file, released))
 }
 
@@ -5879,10 +5935,290 @@ function enforcementCheck(root, { from, mergeBase, head, adds, released = releas
   return { check, changes }
 }
 
+// --- report.mjs ---
+// The output of the CI check (spec 10): plain text for the log, Markdown for the job summary and
+// the pull request comment, and the comment itself, posted once and then updated in place.
+
+// The hidden first line of ResaLedger's pull request comment, which finds it again on later runs.
+const CI_COMMENT_MARKER = '<!-- resaledger:ci -->'
+const CI_COMMENT_PAGES = 10
+const CI_COMMENT_TIMEOUT = 10000
+
+/** The first 7 characters of a commit id, for messages. */
+function ciShort(commit) {
+  return commit ? commit.slice(0, 7) : 'none'
+}
+
+/** A count and its noun: "1 task", "2 tasks". */
+function ciPlural(count, word, many = `${word}s`) {
+  return `${count} ${count === 1 ? word : many}`
+}
+
+/** The one-line summary of a check, after its ✔ or ✖. */
+function ciCheckLine(check, result) {
+  const problems = check.problems.length > 0 ? `${ciPlural(check.problems.length, 'problem')}; ` : ''
+  const note = check.note ? ` (${check.note})` : ''
+  const { counts } = check
+  switch (check.name) {
+    case 'records':
+      return `records: ${problems}${ciPlural(counts.tasks, 'task')}, ${ciPlural(counts.decisions, 'decision')}, ${ciPlural(counts.logs, 'log entry', 'log entries')}${note}`
+    case 'commits':
+      if (check.skipped) return `commits: not checked${note}`
+      return `commits: ${problems}${ciPlural(counts.commits, 'commit')} ${result.event === 'push' ? 'pushed' : 'from the merge base to the head'}${note}`
+    case 'ownership':
+      return `ownership: ${problems}${ciPlural(counts.changed, 'task')} changed${note}`
+    case 'ids':
+      return `ids: ${problems}${ciPlural(counts.added, 'new id')}, against ${ciPlural(counts.branches, 'branch', 'branches')}${note}`
+    case 'moved':
+      return `tasks moved: ${counts.moved}`
+    case 'enforcement': {
+      if (check.skipped) return `enforcement: not compared (${check.note})`
+      if (counts.changes === 0) return 'enforcement: unchanged'
+      const undecided = check.problems.length > 0 ? `${ciPlural(check.problems.length, 'weakening change')} no decision names; ` : ''
+      return `enforcement: ${undecided}${ciPlural(counts.changes, 'change')}, ${counts.weakening} weakening`
+    }
+    case 'gates': {
+      if (check.skipped) return `gates: none${note}`
+      const gates = result.gates
+      if (gates.mode === 'stamp') return `gates: ${problems}${gates.stamp ? `the head carries its stamp ${gates.stamp}` : 'no stamp for the head'} (ci.runGates is false)`
+      const timings = gates.passed.map(({ command, seconds }) => `${command} ✔ ${seconds} s`)
+      if (gates.failure) timings.push(`${gates.failure.command} ✖`)
+      return `gates on ${ciShort(gates.ranOn)}: ${timings.join(' · ')}${note}`
+    }
+    default:
+      return `${check.name}: ${problems}`.replace(/; $/, '')
+  }
+}
+
+/** A change's text led by its id, which a configuration change's text already starts with. */
+function ciChangeText(change, text) {
+  return text.startsWith(`${change.id} `) || text.startsWith(`${change.id}:`) ? text : `${change.id}: ${text}`
+}
+
+/** The line of one change to enforcement: its id, what changed, and why it passes or fails. */
+function ciChangeLine(change, check) {
+  if (change.kind === 'listed') return ciChangeText(change, change.what)
+  if (change.decidedBy) return `${ciChangeText(change, change.what)} · weakening, decided in ${change.decidedBy.file}${change.decidedBy.by ? ` by ${change.decidedBy.by}` : ''}`
+  const problem = check.problems.find(({ id }) => id === change.id)
+  return `✖ ${ciChangeText(change, problem ? problem.message : change.what)}`
+}
+
+/** A problem as one line: "file:line: message". */
+function ciProblemLine({ file, line, message }) {
+  return `${file ? `${file}${line ? `:${line}` : ''}: ` : ''}${message}`
+}
+
+/** Where the rules came from, as a sentence. */
+function ciRulesLine(result) {
+  const { rules, release } = result
+  const from = rules.adds
+    ? `This change adds ResaLedger, so it is judged by its own rules, from the ${rules.from} ${ciShort(rules.commit)}.`
+    : `Rules from the ${rules.from} ${ciShort(rules.commit)}.`
+  return release ? `${from} ResaLedger ${release.version} counts as released (--release).` : from
+}
+
+/** The status change of a moved task: "doing → done", or "new, todo" for a new task. */
+function ciMove(task) {
+  return task.from === null ? `new, ${task.to ?? 'no status'}` : `${task.from} → ${task.to ?? 'no status'}`
+}
+
+/** The CI result as plain text, for the log. */
+function ciText(result) {
+  const out = []
+  if (result.event === 'push') {
+    out.push(`ResaLedger ci: push${result.ref ? ` to ${result.ref}` : ''}, ${result.from ? `${ciShort(result.from)}..` : ''}${ciShort(result.head)}`)
+  } else {
+    out.push(
+      `ResaLedger ci: pull request from "${result.lane}"${result.fork ? ' (a fork)' : ''}, head ${ciShort(result.head)}, base ${ciShort(result.base)}, merge base ${ciShort(result.mergeBase)}`
+    )
+  }
+  if (result.skipped) {
+    out.push(`Not checked: ${result.skipped}.`)
+    return out.join('\n')
+  }
+  out.push(ciRulesLine(result))
+  for (const check of result.checks) {
+    out.push(`${check.ok ? '✔' : '✖'} ${ciCheckLine(check, result)}`)
+    if (check.name === 'enforcement') {
+      for (const change of result.enforcement) out.push(`  ${ciChangeLine(change, check)}`)
+      continue
+    }
+    for (const problem of check.problems) out.push(`  ${ciProblemLine(problem)}`)
+    if (check.name === 'moved') {
+      for (const task of result.moved) out.push(`  ${task.id} ${task.title}: ${ciMove(task)}${task.evidence ? ` · Evidence: ${task.evidence}` : ''}`)
+    }
+  }
+  return out.join('\n')
+}
+
+/** Text from the records, made safe for Markdown: one line, and no HTML tags or hidden comments. */
+function ciMarkdownText(text) {
+  return String(text).replace(/\s+/g, ' ').replace(/</g, '&lt;').trim()
+}
+
+/** A command as a Markdown code span, on one line. */
+function ciMarkdownCode(text) {
+  const plain = String(text).replace(/\s+/g, ' ').trim()
+  return plain.includes('`') ? `\`\` ${plain} \`\`` : `\`${plain}\``
+}
+
+/** The title of the Markdown output: what was checked, and the verdict. */
+function ciMarkdownTitle(result) {
+  const what = result.event === 'push' ? `push${result.ref ? ` to ${result.ref.replace(/^refs\/heads\//, '')}` : ''}` : 'this pull request'
+  const failed = result.checks.filter((check) => !check.ok).length
+  const verdict = result.skipped ? 'not checked' : failed === 0 ? '✔ passed' : `✖ ${ciPlural(failed, 'check')} failed`
+  return `### ResaLedger · ${ciMarkdownText(what)} · ${verdict}`
+}
+
+/** The commits line: how many were checked and whether they pass. */
+function ciCommitsSummary(result) {
+  const check = result.checks.find(({ name }) => name === 'commits')
+  if (!check) return null
+  if (check.skipped) return `**Commits:** not checked${check.note ? ` (${ciMarkdownText(check.note)})` : ''}`
+  const verdict = check.ok ? 'all pass' : ciPlural(check.problems.length, 'problem')
+  return `**Commits:** ${check.counts.commits} checked, ${verdict}`
+}
+
+/** The gates line: each command with its time, where it ran, and where the rules came from. */
+function ciGatesSummary(result) {
+  const { gates } = result
+  if (!gates) return null
+  const from = `(rules from the ${result.rules.from} \`${ciShort(result.rules.commit)}\`)`
+  if (gates.mode === 'none') return `**Gates:** none configured ${from}`
+  if (gates.mode === 'stamp') return `**Gates:** ${gates.stamp ? `the head carries its stamp ${ciMarkdownCode(gates.stamp)}` : '✖ no stamp for the head'}, as ci.runGates is false ${from}`
+  const timings = gates.passed.map(({ command, seconds }) => `${ciMarkdownCode(command)} ✔ ${seconds} s`)
+  if (gates.failure) timings.push(`${ciMarkdownCode(gates.failure.command)} ✖ (exit ${gates.failure.status})`)
+  return `**Gates** on \`${ciShort(gates.ranOn)}\`: ${timings.join(' · ')} ${from}`
+}
+
+/** The enforcement lines: "unchanged", or each change with its id. */
+function ciEnforcementSummary(result) {
+  if (result.enforcement === null) return []
+  const check = result.checks.find(({ name }) => name === 'enforcement')
+  if (check?.skipped) return [`**Enforcement:** not compared (${ciMarkdownText(check.note)})`]
+  if (result.enforcement.length === 0) return ['**Enforcement:** unchanged']
+  return ['**Enforcement:**', ...result.enforcement.map((change) => `- ${ciMarkdownText(ciChangeLine(change, check))}`)]
+}
+
+/**
+ * The CI result as Markdown, for the job summary and the pull request comment: the tasks the
+ * change moves with their evidence, the commits, the gates with their times and where the
+ * rules came from, the changes to enforcement, then the problems and every check.
+ */
+function ciMarkdown(result) {
+  const lines = [ciMarkdownTitle(result), '']
+  if (result.skipped) return [...lines, `Not checked: ${ciMarkdownText(result.skipped)}.`, ''].join('\n')
+  if (result.moved.length === 0) lines.push('No task changes its status.')
+  for (const task of result.moved) {
+    lines.push(`- **${ciMarkdownText(task.id)}** ${ciMarkdownText(task.title)} · ${ciMove(task)}`)
+    if (task.evidence) lines.push(`  Evidence: ${ciMarkdownText(task.evidence)}`)
+  }
+  lines.push('')
+  for (const line of [ciCommitsSummary(result), ciGatesSummary(result)]) if (line) lines.push(line, '')
+  const enforcement = ciEnforcementSummary(result)
+  if (enforcement.length > 0) lines.push(...enforcement, '')
+  if (result.rules.adds || result.release) lines.push(ciMarkdownText(ciRulesLine(result)), '')
+
+  const failed = result.checks.filter((check) => !check.ok && check.name !== 'enforcement')
+  if (failed.length > 0) {
+    lines.push('**Problems:**')
+    for (const check of failed) {
+      lines.push(`- ✖ ${ciMarkdownText(ciCheckLine(check, result))}`)
+      for (const problem of check.problems) lines.push(`  - ${ciMarkdownText(ciProblemLine(problem))}`)
+    }
+    lines.push('')
+  }
+  lines.push('<details><summary>Every check</summary>', '')
+  for (const check of result.checks) lines.push(`- ${check.ok ? '✔' : '✖'} ${ciMarkdownText(ciCheckLine(check, result))}`)
+  lines.push('', '</details>', '')
+  return lines.join('\n')
+}
+
+/** The Markdown of a check that could not run, such as in a shallow clone. */
+function ciErrorMarkdown(message) {
+  return ['### ResaLedger · ✖ the check could not run', '', ciMarkdownText(message), ''].join('\n')
+}
+
+/** Appends Markdown to the job summary when GITHUB_STEP_SUMMARY names a file; a failure prints one warning. */
+function writeSummary(env, markdown) {
+  const file = env.GITHUB_STEP_SUMMARY
+  if (!file) return false
+  try {
+    appendFileSync(file, `${markdown}\n`)
+    return true
+  } catch (error) {
+    console.error(`warning: ResaLedger could not write the job summary: ${error.message}`)
+    return false
+  }
+}
+
+/** One request to the GitHub REST API; throws with the method, the path and the status when it fails. */
+async function ciRequest(url, method, token, body) {
+  const response = await fetch(url, {
+    method,
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'resaledger',
+      'X-GitHub-Api-Version': '2022-11-28'
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(CI_COMMENT_TIMEOUT)
+  })
+  if (!response.ok) throw new Error(`${method} ${new URL(url).pathname} answered ${response.status}`)
+  return response.status === 204 ? null : response.json()
+}
+
+/**
+ * Posts ResaLedger's comment on a pull request, or updates it in place: lists the comments,
+ * finds the one that starts with the marker, and PATCHes it, else POSTs a new one. Returns
+ * 'created' or 'updated'; throws when the API fails.
+ */
+async function postComment({ api, repository, number, token, markdown }) {
+  const root = `${api.replace(/\/+$/, '')}/repos/${repository}`
+  const body = `${CI_COMMENT_MARKER}\n${markdown}`
+  let existing = null
+  for (let page = 1; page <= CI_COMMENT_PAGES && existing === null; page++) {
+    const comments = await ciRequest(`${root}/issues/${number}/comments?per_page=100&page=${page}`, 'GET', token)
+    if (!Array.isArray(comments)) throw new Error('the list of comments is not a list')
+    existing = comments.find((comment) => typeof comment.body === 'string' && comment.body.startsWith(CI_COMMENT_MARKER)) ?? null
+    if (comments.length < 100) break
+  }
+  if (existing) {
+    await ciRequest(`${root}/issues/comments/${existing.id}`, 'PATCH', token, { body })
+    return 'updated'
+  }
+  await ciRequest(`${root}/issues/${number}/comments`, 'POST', token, { body })
+  return 'created'
+}
+
+/**
+ * The comment of a CI run: on a pull request from this repository's event, with a token, posts
+ * or updates it. Never throws: a failure prints one warning line, and the check is unchanged.
+ */
+async function ciComment(env, options, markdown) {
+  if (options.event !== 'pull_request' || options.source !== 'github' || !options.number) return null
+  if (options.fork) {
+    console.log('No pull request comment: the pull request comes from a fork, whose token cannot write.')
+    return null
+  }
+  if (!env.GITHUB_TOKEN || !env.GITHUB_REPOSITORY) return null
+  try {
+    const api = env.GITHUB_API_URL || 'https://api.github.com'
+    const done = await postComment({ api, repository: env.GITHUB_REPOSITORY, number: options.number, token: env.GITHUB_TOKEN, markdown })
+    console.log(`Pull request comment ${done}.`)
+    return done
+  } catch (error) {
+    console.error(`warning: ResaLedger could not comment on the pull request: ${error.message}`)
+    return null
+  }
+}
+
 // --- ci.mjs ---
 // The CI check (spec 10): the hooks' rules where nobody can skip them, judged by the rules of the
-// branch a pull request merges into. ciResult returns the result as data, which the job summary
-// and the pull request comment render; ciCommand prints it as plain text and sets the exit code.
+// branch a pull request merges into. ciResult returns the result as data; ciCommand prints it,
+// writes the job summary, comments on the pull request (report.mjs) and sets the exit code.
 
 const CI_ZERO = /^0+$/
 const CI_PULL_REQUEST_EVENTS = ['pull_request', 'pull_request_target']
@@ -5907,11 +6243,6 @@ function ciCommit(root, rev) {
   } catch {
     return null
   }
-}
-
-/** The first 7 characters of a commit id, for messages. */
-function ciShort(commit) {
-  return commit ? commit.slice(0, 7) : 'none'
 }
 
 /**
@@ -6129,9 +6460,22 @@ function ciPullRequest(root, options) {
   // added ResaLedger has no configuration, so the base stands in for it.
   const mergeBaseConfig = loadConfig(treeReader({ kind: 'commit', rev: mergeBase, root })).config
   const from = mergeBaseConfig ? mergeBase : base
-  const enforcement = enforcementCheck(root, { from, mergeBase, head, adds: rules.adds })
+  const enforcement = enforcementCheck(root, { from, mergeBase, head, adds: rules.adds, released: options.released ?? releasedTable() })
   checks.push(enforcement.check)
   return { mergeBase, rules, checks, moved, gates, enforcement: enforcement.changes }
+}
+
+/**
+ * Why a push is not checked, or null. With --only-base-pushes, as the workflow runs it, only a
+ * push to the base branch or a protected branch is checked; a lane's commits are checked in
+ * its pull request.
+ */
+function ciSkippedPush(options, config) {
+  if (!options.onlyBasePushes || !options.ref) return null
+  const branches = [config.base, ...config.protected]
+  const branch = options.ref.replace(/^refs\/heads\//, '')
+  if (options.ref.startsWith('refs/heads/') && branches.includes(branch)) return null
+  return `a push to ${options.ref}, which is not the base branch or a protected branch (--only-base-pushes); its commits are checked in their pull request`
 }
 
 /** The checks of a push, in order, and its result. */
@@ -6147,6 +6491,8 @@ function ciPush(root, options) {
   }
   const rules = ciRules(root, { commit: before, from: 'before' }, { commit: after, from: 'after' })
   const { config } = rules
+  const skipped = ciSkippedPush(options, config)
+  if (skipped) return { from: null, rules, checks: [], moved: [], gates: null, enforcement: null, skipped }
   const checks = [ciRecordsCheck(root, after, config)]
   const note = newBranch ? 'a new branch: its commits are checked in their pull request' : null
   checks.push(ciCommitsCheck(root, from, after, config, null, true, note))
@@ -6157,11 +6503,25 @@ function ciPush(root, options) {
 }
 
 /**
- * The CI check as data. options is { event, source, base, head, lane, fork } for a pull request
- * or { event: 'push', source, before, after, ref } for a push, plus an optional root.
+ * The released table of ci --release: this guard's own table with the unpacked package's added,
+ * so that an update of the guard to that release passes without a decision. { version, table }.
+ */
+function ciRelease(folder) {
+  try {
+    const { version, table } = packageReleased(folder)
+    return { version, table: mergeReleased(releasedTable(), table) }
+  } catch (error) {
+    throw new CiError(`--release: ${error.message}`)
+  }
+}
+
+/**
+ * The CI check as data. options is { event, source, base, head, lane, fork, number } for a pull
+ * request or { event: 'push', source, before, after, ref } for a push, plus an optional root,
+ * release (an unpacked package's folder) and onlyBasePushes.
  *
  * Returns { event, source, base, head, lane, fork, ref, mergeBase, from, rules, checks, moved,
- * gates, enforcement, ok }:
+ * gates, enforcement, release, skipped, ok }:
  * - rules: { from: 'base' | 'head' | 'before' | 'after', commit, adds } (adds: the change adds
  *   ResaLedger and is judged by its own rules);
  * - checks: [{ name, ok, skipped?, problems, counts, note }] in the order they ran: records,
@@ -6172,7 +6532,9 @@ function ciPush(root, options) {
  *   stamp } for a pull request, null for a push;
  * - enforcement: for a pull request, the changes to enforcement from the merge base to the head,
  *   [{ id, kind: 'listed' | 'weakening', file, what, decidedBy: { file, by } | null }]; empty
- *   when nothing changed or when the change adds ResaLedger; null for a push.
+ *   when nothing changed or when the change adds ResaLedger; null for a push;
+ * - release: { version, folder } when options.release names an unpacked package, else null;
+ * - skipped: why a push is not checked (options.onlyBasePushes), else null; then checks is empty.
  * Throws a CiError when the check cannot run, such as for a missing commit.
  */
 function ciResult(options) {
@@ -6185,7 +6547,8 @@ function ciResult(options) {
     }
   }
   const pullRequest = options.event !== 'push'
-  const outcome = pullRequest ? ciPullRequest(root, options) : ciPush(root, options)
+  const release = options.release ? ciRelease(options.release) : null
+  const outcome = pullRequest ? ciPullRequest(root, { ...options, released: release?.table }) : ciPush(root, options)
   return {
     event: options.event,
     source: options.source ?? 'flags',
@@ -6202,29 +6565,44 @@ function ciResult(options) {
     moved: outcome.moved,
     gates: outcome.gates,
     enforcement: outcome.enforcement,
+    release: release ? { version: release.version, folder: options.release } : null,
+    skipped: outcome.skipped ?? null,
     ok: outcome.checks.every((check) => check.ok)
   }
 }
 
-/**
- * The options of ci from its arguments, or from the GitHub event when there are none.
- * --base and --head with --lane check a pull request from that lane; without --lane, they check
- * a push of the commits from --base to --head.
- */
-function ciOptions(args, env = process.env) {
-  const flags = {}
+const CI_USAGE = 'use --base <rev> --head <rev> [--lane <branch>], --release <folder> and --only-base-pushes'
+
+/** The flags of ci: { base, head, lane, release, onlyBasePushes }; throws on an unknown one. */
+function ciFlags(args) {
+  const flags = { onlyBasePushes: false }
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]
-    if (!['--base', '--head', '--lane'].includes(arg)) throw new CiError(`unknown option "${arg}" for ci; use --base <rev> --head <rev> [--lane <branch>]`)
+    if (arg === '--only-base-pushes') {
+      flags.onlyBasePushes = true
+      continue
+    }
+    if (!['--base', '--head', '--lane', '--release'].includes(arg)) throw new CiError(`unknown option "${arg}" for ci; ${CI_USAGE}`)
     const value = args[index + 1]
     if (!value || value.startsWith('--')) throw new CiError(`${arg} needs a value`)
     flags[arg.slice(2)] = value
     index += 1
   }
-  if (Object.keys(flags).length > 0) {
-    if (!flags.base || !flags.head) throw new CiError('ci needs both --base <rev> and --head <rev>, and --lane <branch> for a pull request')
-    if (flags.lane) return { event: 'pull_request', source: 'flags', base: flags.base, head: flags.head, lane: flags.lane, fork: false }
-    return { event: 'push', source: 'flags', before: flags.base, after: flags.head, ref: null }
+  return flags
+}
+
+/**
+ * The options of ci from its arguments, or from the GitHub event when --base and --head are not
+ * given. --base and --head with --lane check a pull request from that lane; without --lane, they
+ * check a push of the commits from --base to --head. --release and --only-base-pushes apply to both.
+ */
+function ciOptions(args, env = process.env) {
+  const { base, head, lane, release = null, onlyBasePushes } = ciFlags(args)
+  const extra = { release, onlyBasePushes }
+  if (base || head || lane) {
+    if (!base || !head) throw new CiError('ci needs both --base <rev> and --head <rev>, and --lane <branch> for a pull request')
+    if (lane) return { event: 'pull_request', source: 'flags', base, head, lane, fork: false, number: null, ...extra }
+    return { event: 'push', source: 'flags', before: base, after: head, ref: null, ...extra }
   }
 
   const name = env.GITHUB_EVENT_NAME
@@ -6241,93 +6619,37 @@ function ciOptions(args, env = process.env) {
     if (!pr?.base?.sha || !pr?.head?.sha || !pr?.head?.ref) throw new CiError(`the ${name} event has no pull_request.base.sha, head.sha and head.ref`)
     const baseRepo = pr.base.repo?.full_name ?? null
     const headRepo = pr.head.repo?.full_name ?? null
-    return { event: 'pull_request', source: 'github', base: pr.base.sha, head: pr.head.sha, lane: pr.head.ref, fork: headRepo === null || headRepo !== baseRepo }
+    const number = Number.isInteger(pr.number) ? pr.number : null
+    return { event: 'pull_request', source: 'github', base: pr.base.sha, head: pr.head.sha, lane: pr.head.ref, fork: headRepo === null || headRepo !== baseRepo, number, ...extra }
   }
   if (name === 'push') {
     if (!payload.after) throw new CiError('the push event has no "after" commit')
-    return { event: 'push', source: 'github', before: payload.before ?? null, after: payload.after, ref: payload.ref ?? null }
+    return { event: 'push', source: 'github', before: payload.before ?? null, after: payload.after, ref: payload.ref ?? null, ...extra }
   }
   throw new CiError(`the ${name} event is not one ci checks; run it on pull_request and push, or pass --base <rev> --head <rev> [--lane <branch>]`)
 }
 
-/** The one-line summary of a check, after its ✔ or ✖. */
-function ciCheckLine(check, result) {
-  const plural = (count, word, many = `${word}s`) => `${count} ${count === 1 ? word : many}`
-  const problems = check.problems.length > 0 ? `${plural(check.problems.length, 'problem')}; ` : ''
-  const note = check.note ? ` (${check.note})` : ''
-  const { counts } = check
-  switch (check.name) {
-    case 'records':
-      return `records: ${problems}${plural(counts.tasks, 'task')}, ${plural(counts.decisions, 'decision')}, ${plural(counts.logs, 'log entry', 'log entries')}${note}`
-    case 'commits':
-      if (check.skipped) return `commits: not checked${note}`
-      return `commits: ${problems}${plural(counts.commits, 'commit')} ${result.event === 'push' ? 'pushed' : 'from the merge base to the head'}${note}`
-    case 'ownership':
-      return `ownership: ${problems}${plural(counts.changed, 'task')} changed${note}`
-    case 'ids':
-      return `ids: ${problems}${plural(counts.added, 'new id')}, against ${plural(counts.branches, 'branch', 'branches')}${note}`
-    case 'moved':
-      return `tasks moved: ${counts.moved}`
-    case 'enforcement': {
-      if (check.skipped) return `enforcement: not compared (${check.note})`
-      if (counts.changes === 0) return 'enforcement: unchanged'
-      const undecided = check.problems.length > 0 ? `${plural(check.problems.length, 'weakening change')} no decision names; ` : ''
-      return `enforcement: ${undecided}${plural(counts.changes, 'change')}, ${counts.weakening} weakening`
-    }
-    case 'gates': {
-      if (check.skipped) return `gates: none${note}`
-      const gates = result.gates
-      if (gates.mode === 'stamp') return `gates: ${problems}${gates.stamp ? `the head carries its stamp ${gates.stamp}` : 'no stamp for the head'} (ci.runGates is false)`
-      const timings = gates.passed.map(({ command, seconds }) => `${command} ✔ ${seconds} s`)
-      if (gates.failure) timings.push(`${gates.failure.command} ✖`)
-      return `gates on ${ciShort(gates.ranOn)}: ${timings.join(' · ')}${note}`
-    }
-    default:
-      return `${check.name}: ${problems}`.replace(/; $/, '')
-  }
-}
-
-/** The line of one change to enforcement: its id, what changed, and why it passes or fails. */
-function ciChangeLine(change, check) {
-  if (change.kind === 'listed') return `${change.id}: ${change.what}`
-  if (change.decidedBy) return `${change.id}: ${change.what} · weakening, decided in ${change.decidedBy.file}${change.decidedBy.by ? ` by ${change.decidedBy.by}` : ''}`
-  const problem = check.problems.find(({ id }) => id === change.id)
-  return `✖ ${change.id}: ${problem ? problem.message : change.what}`
-}
-
-/** ci [--base <rev> --head <rev> [--lane <branch>]]: runs the CI check, prints it and exits 1 when a check fails. */
-function ciCommand(args) {
+/**
+ * ci [--base <rev> --head <rev> [--lane <branch>]] [--release <folder>] [--only-base-pushes]:
+ * runs the CI check and prints it; writes the job summary when GITHUB_STEP_SUMMARY is set, also
+ * when the check fails or cannot run; comments on the pull request when it can; exits 1 when a
+ * check fails.
+ */
+async function ciCommand(args, env = process.env) {
+  let options
   let result
   try {
-    result = ciResult(ciOptions(args))
+    options = ciOptions(args, env)
+    result = ciResult(options)
   } catch (error) {
-    if (error instanceof CiError) fail(error.message)
-    throw error
+    if (!(error instanceof CiError)) throw error
+    writeSummary(env, ciErrorMarkdown(error.message))
+    fail(error.message)
   }
-  const out = []
-  if (result.event === 'push') {
-    out.push(`ResaLedger ci: push${result.ref ? ` to ${result.ref}` : ''}, ${result.from ? `${ciShort(result.from)}..` : ''}${ciShort(result.head)}`)
-  } else {
-    out.push(
-      `ResaLedger ci: pull request from "${result.lane}"${result.fork ? ' (a fork)' : ''}, head ${ciShort(result.head)}, base ${ciShort(result.base)}, merge base ${ciShort(result.mergeBase)}`
-    )
-  }
-  if (result.rules.adds) out.push(`This change adds ResaLedger, so it is judged by its own rules, from the ${result.rules.from} ${ciShort(result.rules.commit)}.`)
-  else out.push(`Rules from the ${result.rules.from} ${ciShort(result.rules.commit)}.`)
-  for (const check of result.checks) {
-    out.push(`${check.ok ? '✔' : '✖'} ${ciCheckLine(check, result)}`)
-    if (check.name === 'enforcement') {
-      for (const change of result.enforcement) out.push(`  ${ciChangeLine(change, check)}`)
-      continue
-    }
-    for (const { file, line, message } of check.problems) out.push(`  ${file ? `${file}${line ? `:${line}` : ''}: ` : ''}${message}`)
-    if (check.name === 'moved') {
-      for (const task of result.moved) {
-        out.push(`  ${task.id} ${task.title}: ${task.from ?? 'new'} → ${task.to ?? 'no status'}${task.evidence ? ` · Evidence: ${task.evidence}` : ''}`)
-      }
-    }
-  }
-  console.log(out.join('\n'))
+  console.log(ciText(result))
+  const markdown = ciMarkdown(result)
+  writeSummary(env, markdown)
+  await ciComment(env, options, markdown)
   if (!result.ok) process.exit(1)
 }
 
@@ -7005,10 +7327,15 @@ Commands:
   check     validate the records in the working tree
             (--index: the staged files; --rev <rev>: a commit;
             --range <from>..<to>: also that every commit names its task)
-  ci [--base <rev> --head <rev> [--lane <branch>]]
+  ci [--base <rev> --head <rev> [--lane <branch>]] [--release <folder>]
+     [--only-base-pushes]
             the CI check of a pull request or a push, read from the GitHub
             event; with --lane, a pull request from that lane, and without
-            it, a push of the commits from --base to --head
+            it, a push of the commits from --base to --head. It writes the
+            job summary and comments on the pull request when it can.
+            --release counts an unpacked resaledger package as released;
+            --only-base-pushes checks only pushes to the base or a
+            protected branch
   config    print the effective configuration
   gates     list the commit gates and the verify gates
   handoff   the end-of-session check: records, hooks, a clean tree, the

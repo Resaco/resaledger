@@ -53,12 +53,17 @@ export function ciCheckLine(check, result) {
   }
 }
 
+/** A change's text led by its id, which a configuration change's text already starts with. */
+function ciChangeText(change, text) {
+  return text.startsWith(`${change.id} `) || text.startsWith(`${change.id}:`) ? text : `${change.id}: ${text}`
+}
+
 /** The line of one change to enforcement: its id, what changed, and why it passes or fails. */
 export function ciChangeLine(change, check) {
-  if (change.kind === 'listed') return `${change.id}: ${change.what}`
-  if (change.decidedBy) return `${change.id}: ${change.what} · weakening, decided in ${change.decidedBy.file}${change.decidedBy.by ? ` by ${change.decidedBy.by}` : ''}`
+  if (change.kind === 'listed') return ciChangeText(change, change.what)
+  if (change.decidedBy) return `${ciChangeText(change, change.what)} · weakening, decided in ${change.decidedBy.file}${change.decidedBy.by ? ` by ${change.decidedBy.by}` : ''}`
   const problem = check.problems.find(({ id }) => id === change.id)
-  return `✖ ${change.id}: ${problem ? problem.message : change.what}`
+  return `✖ ${ciChangeText(change, problem ? problem.message : change.what)}`
 }
 
 /** A problem as one line: "file:line: message". */
