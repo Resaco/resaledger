@@ -578,7 +578,7 @@ Distribution:
 
 | 0.x | 1.0 |
 | --- | --- |
-| `work/ledger.md`, one `### <id> <title>` per task | `tasks/<id>-<slug>.md` with the same fields. A `doing` task gets Lane (an existing `Lane:` field wins, else the current branch), and its Notes become its Handoff. Other fields are kept as they are. A `blocked` task gets Waiting for from the first "Waits for …" or "Blocked on …" phrase in its Notes, and `migrate` lists each one; with no such phrase, it is a 1.0 problem to fix. Lines under a task that are not its fields go, word for word, into its `## Notes`. |
+| `work/ledger.md`, one `### <id> <title>` per task | `tasks/<id>-<slug>.md` with the same fields. A `doing` task gets Lane: an existing `Lane:` field wins, else the one unmerged branch whose commits name the task in a `Task:` trailer, else the current branch; with more than one such branch it gets the current branch and a warning names them. Its Notes become its Handoff. Other fields are kept as they are. A `blocked` task gets Waiting for from the first "Waits for …" or "Blocked on …" phrase in its Notes, and `migrate` lists each one; with no such phrase, it is a 1.0 problem to fix. Lines under a task that are not its fields go, word for word, into its `## Notes`. |
 | The ledger's preamble and its `## <phase>` headings | Their text is kept word for word in the migration's log entry. |
 | `work/log.md`, one `## <date> · <title>` per entry | `log/<date>-<slug>.md` |
 | `DECISIONS.md`, one table row per decision | `decisions/<date>-<slug>.md`, with Decided by from the third column. Text before or after the table goes to the migration's log entry. |
@@ -605,7 +605,7 @@ Distribution:
 3. Validates the result with the 1.0 rules, and checks that every non-empty line of the old records appears in the new files, allowing for the known reshaping. Any loss stops it.
 4. Shows what it will do (`--dry-run` stops here), writes the files and runs `check`.
 5. Never commits. It prints the commit to make, on the branch `resaledger-setup` when the current branch is protected, as `init` does; `git restore .` undoes everything.
-6. Warns when it sees branches with record changes that are not merged: migrate when no lane is open.
+6. Warns about every branch that is not merged: its commits stay in the 0.x format. Migrate when no lane is open, or rebase each open lane onto the migrated base afterwards; the lane keeps its task as above.
 
 A 0.x `dir` that breaks the 1.0 rule for `dir` ([5.2](#52-configuration)) is refused: rename the folder first.
 

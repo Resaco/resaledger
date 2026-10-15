@@ -1047,23 +1047,61 @@ describe('unmerged branches', () => {
     assert.equal(result.status, 0, result.out)
     assert.match(result.out, /! the branch lane-b is not merged\. Its commit stays in the 0\.x format, and the 1\.0 range check judges each commit by its own tree/)
     assert.match(result.out, /rebase it onto this branch afterwards/)
+    // A2 is doing without a Lane, and only lane-b's commits name it, so it belongs to lane-b.
+    assert.match(result.out, /Lanes taken from the one unmerged branch whose commits name the task \(1\):\n {2}A2: Lane: lane-b/)
+    assert.match(r.read(`${DIR}/tasks/A2-another-task.md`), /^- Lane: lane-b$/m)
     r.git('add', '-A')
     assert.equal(r.git('commit', '-q', '--no-verify', '-m', 'chore: migrate to ResaLedger 1.0', '-m', 'Task: maintenance').status, 0)
     const migrated = r.git('rev-parse', 'HEAD').out.trim()
     const check = () => r.run(process.execPath, [`${DIR}/scripts/records.mjs`, 'check', '--range', `${migrated}..HEAD`])
+    // The base after a merge, as CI's push check judges it: on a detached HEAD, without the lane rule.
+    const checkBase = () => {
+      r.git('checkout', '-q', '--detach')
+      const checked = check()
+      r.git('checkout', '-q', 'main')
+      return checked
+    }
 
     assert.equal(r.git('merge', '-q', '--no-ff', '--no-verify', '-m', 'Merge lane-b', 'lane-b').status, 0)
-    const asIs = check()
+    const asIs = checkBase()
     assert.notEqual(asIs.status, 0, asIs.out)
     assert.match(asIs.out, /"feat: the oven" names task A2, which has no file in project\/tasks\/ in that commit/)
 
     r.git('reset', '-q', '--hard', migrated)
     r.git('checkout', '-q', 'lane-b')
     assert.equal(r.git('rebase', '-q', 'main').status, 0)
+    // On the rebased lane, its commits pass, and it rewrites its handoff through the hooks,
+    // which refuse a change to a task another lane holds.
+    const onLane = check()
+    assert.equal(onLane.status, 0, onLane.out)
+    const taskFile = `${DIR}/tasks/A2-another-task.md`
+    r.write(taskFile, r.read(taskFile).replace('Half done; the tree is clean.', 'The oven is in; next, the timer.'))
+    const rewritten = r.commit('docs: rewrite the handoff of A2', 'Task: A2')
+    assert.equal(rewritten.status, 0, rewritten.out)
+    const handoff = r.node(`${DIR}/scripts/records.mjs`, 'handoff')
+    assert.equal(handoff.status, 0, handoff.out)
     r.git('checkout', '-q', 'main')
     assert.equal(r.git('merge', '-q', '--no-ff', '--no-verify', '-m', 'Merge lane-b', 'lane-b').status, 0)
-    const rebased = check()
+    const rebased = checkBase()
     assert.equal(rebased.status, 0, rebased.out)
+  })
+
+  test('a task that the commits of two lanes name keeps the current branch as its lane, and the warning names both', () => {
+    const r = legacyRepository()
+    for (const lane of ['lane-c', 'lane-b']) {
+      r.git('checkout', '-q', '-b', lane, 'main')
+      r.write(`src/${lane}.js`, 'export const part = 1\n')
+      r.git('add', '-A')
+      assert.equal(r.git('commit', '-q', '--no-verify', '-m', `feat: ${lane}`, '-m', 'Task: A2').status, 0)
+    }
+    r.git('checkout', '-q', 'main')
+    const result = migrate(r, '--dry-run')
+    assert.equal(result.status, 0, result.out)
+    assert.doesNotMatch(result.out, /Lanes taken from/)
+    assert.match(result.out, /doing tasks without a Lane get Lane: main/)
+    assert.match(result.out, /! A2 is doing, and commits on more than one unmerged branch name it \(lane-b, lane-c\), so it gets Lane: main\./)
+    const plan = planMigration(r.root)
+    assert.match(plan.writes.get(`${DIR}/tasks/A2-another-task.md`), /^- Lane: main$/m)
   })
 })
 
