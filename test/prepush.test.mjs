@@ -297,14 +297,16 @@ describe('Git LFS', { skip: process.platform === 'win32' && 'the stand-in git-lf
   function standIn(code = 0) {
     const bin = temporary('resaledger-lfs-')
     const log = join(bin, 'calls.log')
+    const versions = join(bin, 'versions.log')
     const script = `#!/bin/sh
-if [ "$1" = version ]; then echo "git-lfs/0.0.0 (stand-in)"; exit 0; fi
+if [ "$1" = version ]; then echo version >> '${versions}'; echo "git-lfs/0.0.0 (stand-in)"; exit 0; fi
 { printf 'args:'; for arg in "$@"; do printf ' %s' "$arg"; done; printf '\\n'; cat; } >> '${log}'
 echo "stand-in git-lfs ran" >&2
 exit ${code}
 `
     writeFileSync(join(bin, 'git-lfs'), script, { mode: 0o755 })
-    return { bin, log, calls: () => (existsSync(log) ? readFileSync(log, 'utf8').split('args: ').slice(1) : []) }
+    const text = (file) => (existsSync(file) ? readFileSync(file, 'utf8') : '')
+    return { bin, log, calls: () => text(log).split('args: ').slice(1), versions: () => text(versions).split('\n').filter(Boolean) }
   }
 
   /** git push with the given PATH, through the hooks. */
@@ -352,6 +354,68 @@ exit ${code}
     const lfs = standIn()
     passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane'))
     assert.deepEqual(lfs.calls(), [])
+    assert.deepEqual(lfs.versions(), [])
+  })
+
+  test('a branch that adds filter=lfs, pushed while a branch without it is checked out, runs it', () => {
+    const r = lfsLane()
+    r.git('checkout', '-q', 'main')
+    const lfs = standIn()
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane'))
+    assert.equal(lfs.calls().length, 1)
+  })
+
+  test("the user's grep.patternType does not hide filter=lfs", () => {
+    const r = lfsLane()
+    r.git('config', 'grep.patternType', 'fixed')
+    const lfs = standIn()
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane'))
+    assert.equal(lfs.calls().length, 1)
+    // From a checkout without it, the pushed commit's tree is searched the same way.
+    r.git('checkout', '-q', 'main')
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane:copy'))
+    assert.equal(lfs.calls().length, 2)
+  })
+
+  test("a rule only in the repository's info/attributes counts", () => {
+    const r = workspace()
+    lane(r)
+    r.write('.git/info/attributes', '# the images\n*.psd filter=lfs diff=lfs merge=lfs -text\n')
+    const lfs = standIn()
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane'))
+    assert.equal(lfs.calls().length, 1)
+  })
+
+  test('a rule only in the file core.attributesFile names counts, with a leading ~', () => {
+    const r = workspace()
+    lane(r)
+    const home = temporary('resaledger-home-')
+    writeFileSync(join(home, 'attributes'), '*.psd filter=lfs diff=lfs merge=lfs -text\n')
+    r.git('config', 'core.attributesFile', '~/attributes')
+    const lfs = standIn()
+    const env = { ...ENV, HOME: home, PATH: `${lfs.bin}:${process.env.PATH}` }
+    const result = spawnSync('git', ['push', '-q', 'origin', 'lane'], { cwd: r.root, env, encoding: 'utf8' })
+    passed({ status: result.status, out: `${result.stdout}${result.stderr}` })
+    assert.equal(lfs.calls().length, 1)
+  })
+
+  test("a commented rule in the repository's own attributes does not count", () => {
+    const r = workspace()
+    lane(r)
+    r.write('.git/info/attributes', '# *.psd filter=lfs\n')
+    const lfs = standIn()
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane'))
+    assert.deepEqual(lfs.calls(), [])
+    assert.deepEqual(lfs.versions(), [])
+  })
+
+  test('with no refs on the input, nothing of Git LFS runs', () => {
+    // A hook manager that ran git lfs pre-push first leaves the guard an empty input.
+    const r = lfsLane()
+    const lfs = standIn()
+    passed(spawnHook(r, { PATH: `${lfs.bin}:${process.env.PATH}` }))
+    assert.deepEqual(lfs.calls(), [])
+    assert.deepEqual(lfs.versions(), [])
   })
 
   test('a failing git lfs pre-push fails the push, and its output reaches the user', () => {

@@ -2,6 +2,7 @@
 // in this clone, and turning them on.
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { adoptionStart } from './adoption.mjs'
 import { CONFIG_FILE, DEFAULTS, loadConfig } from './config.mjs'
@@ -648,20 +649,45 @@ export function prePush(input, args = []) {
       refuse(`${file}${line ? `:${line}` : ''}: ${message}`)
     }
   }
-  if (problems.length === 0 && githooksUsesLfs(root)) githooksLfsPrePush(root, input, lines, [remote, args[1] || process.env.PRE_COMMIT_REMOTE_URL || ''])
+  if (problems.length === 0 && lines.length > 0 && githooksUsesLfs(root, lines)) {
+    githooksLfsPrePush(root, input, lines, [remote, args[1] || process.env.PRE_COMMIT_REMOTE_URL || ''])
+  }
   if (problems.length === 0) return
   console.error('✖ This push is refused')
   for (const problem of problems) console.error(`  ${problem}`)
   process.exit(1)
 }
 
+// filter=lfs outside a comment; git grep gets -G so that grep.patternType cannot change it.
+const GITHOOKS_LFS_RULE = '^[^#]*filter=lfs'
+
 /**
- * Whether the repository uses Git LFS: a tracked .gitattributes file, at the root or in a
- * folder, names filter=lfs outside a comment. One git grep over the index's blobs.
+ * Whether Git LFS is in use for this push: filter=lfs outside a comment in the repository's
+ * own attributes (info/attributes and the file core.attributesFile names), or in a
+ * .gitattributes file, at the root or in a folder, of the index or of the tree of a pushed
+ * commit, since a branch can bring Git LFS before the checkout has it. Two small file reads,
+ * one git grep over the index and one per distinct pushed object id.
  */
-function githooksUsesLfs(root) {
-  const found = spawnSync('git', ['grep', '--cached', '-q', '-e', '^[^#]*filter=lfs', '--', ':(glob)**/.gitattributes'], { cwd: root, stdio: 'ignore', windowsHide: true })
-  return found.status === 0
+function githooksUsesLfs(root, lines) {
+  const rule = new RegExp(GITHOOKS_LFS_RULE)
+  const names = (file) => {
+    let text = ''
+    try {
+      text = readFileSync(isAbsolute(file) ? file : join(root, file), 'utf8')
+    } catch {}
+    return text.split(/\r?\n/).some((line) => rule.test(line))
+  }
+  const info = spawnSync('git', ['rev-parse', '--git-path', 'info/attributes'], { cwd: root, encoding: 'utf8', windowsHide: true })
+  if (info.status === 0 && names(info.stdout.trim())) return true
+  const named = spawnSync('git', ['config', '--get', 'core.attributesFile'], { cwd: root, encoding: 'utf8', windowsHide: true })
+  const file = named.status === 0 ? named.stdout.trim() : ''
+  if (file && names(file.replace(/^~(?=$|[/\\])/, () => homedir()))) return true
+  const grep = (...where) =>
+    spawnSync('git', ['grep', '-q', '-G', '-e', GITHOOKS_LFS_RULE, ...where, '--', ':(glob)**/.gitattributes'], { cwd: root, stdio: 'ignore', windowsHide: true }).status === 0
+  if (grep('--cached')) return true
+  const pushed = new Set(lines.map((line) => line[1]).filter((oid) => !GITHOOKS_ZERO_OID.test(oid)))
+  for (const oid of pushed) if (grep(oid)) return true
+  return false
 }
 
 /**
