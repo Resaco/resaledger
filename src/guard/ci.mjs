@@ -10,6 +10,7 @@ import { runGates, stampPath, verifiedStamp } from './gates.mjs'
 import { branchTaskFiles, idCollisions } from './ids.mjs'
 import { mergeReleased, packageReleased, releasedTable } from './managed.mjs'
 import { doubleClaimProblems, foreignLaneTasks, heldTasks, laneCopyProblems, ownershipProblems, taskRecordsById } from './ownership.mjs'
+import { isEmptyValue } from './markdown.mjs'
 import { checkRange, laneBranches, rangeObjects } from './range.mjs'
 import { ciComment, ciErrorMarkdown, ciMarkdown, ciShort, ciText, writeSummary } from './report.mjs'
 import { parseTask } from './tasks.mjs'
@@ -162,10 +163,10 @@ function ciRemovedRecords(root, mergeBase, head, beforeDir, afterDir) {
   return problems
 }
 
-/** The text of a task's Evidence field, or null. */
+/** The text of a task's Evidence field, or null; "—", as new writes it, is empty. */
 function ciEvidence(task) {
   if (!task.evidence) return null
-  const parts = [task.evidence.value, ...task.evidence.items].map((part) => (part ?? '').trim()).filter((part) => part !== '')
+  const parts = [task.evidence.value, ...task.evidence.items].map((part) => (part ?? '').trim()).filter((part) => !isEmptyValue(part))
   return parts.length > 0 ? parts.join('; ') : null
 }
 
