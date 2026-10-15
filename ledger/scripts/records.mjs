@@ -42,27 +42,36 @@ function repositoryRoot() {
   return git('rev-parse', '--show-toplevel').replace(/\\/g, '/')
 }
 
-/** The Levenshtein distance between two strings: insertions, deletions and substitutions. */
+/**
+ * The edit distance between two strings: insertions, deletions, substitutions and swaps of
+ * two neighbouring letters, each counting one (the optimal string alignment distance).
+ */
 function editDistance(a, b) {
-  let previous = Array.from({ length: b.length + 1 }, (_, index) => index)
+  const rows = [Array.from({ length: b.length + 1 }, (_, index) => index)]
   for (let i = 1; i <= a.length; i += 1) {
     const current = [i]
     for (let j = 1; j <= b.length; j += 1) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1
-      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost)
+      current[j] = Math.min(rows[i - 1][j] + 1, current[j - 1] + 1, rows[i - 1][j - 1] + cost)
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) current[j] = Math.min(current[j], rows[i - 2][j - 2] + 1)
     }
-    previous = current
+    rows.push(current)
   }
-  return previous[b.length]
+  return rows[a.length][b.length]
 }
 
-/** The known name closest to name within distance 2, ignoring case, or null. Ties go to the first. */
+/** How far a name may be from a known one and still be its typo: 2 for six letters or more, else 1 (spec 5.2, 5.3). */
+function typoLimit(known) {
+  return known.length >= 6 ? 2 : 1
+}
+
+/** The known name closest to name within its typo limit, ignoring case, or null. Ties go to the first. */
 function likelyTypo(name, known) {
   let best = null
-  let bestDistance = 3
+  let bestDistance = Infinity
   for (const candidate of known) {
     const distance = editDistance(name.toLowerCase(), candidate.toLowerCase())
-    if (distance < bestDistance) {
+    if (distance <= typoLimit(candidate) && distance < bestDistance) {
       best = candidate
       bestDistance = distance
     }
@@ -93,7 +102,7 @@ const DEFAULTS = Object.freeze({
   gates: Object.freeze({ commit: Object.freeze([]), verify: Object.freeze([]) }),
   ci: Object.freeze({ runGates: true }),
   phases: Object.freeze([]),
-  agent: Object.freeze({ deny: Object.freeze([]) })
+  agent: Object.freeze({ deny: Object.freeze([]), pushNeedsHandoff: false })
 })
 
 /** The keys each preset decides. `protected` is a function of the base branch. */
@@ -121,7 +130,7 @@ const CONFIG_KEYS = [
   'phases',
   'agent'
 ]
-const CONFIG_SECTION_KEYS = { gates: ['commit', 'verify'], ci: ['runGates'], agent: ['deny'] }
+const CONFIG_SECTION_KEYS = { gates: ['commit', 'verify'], ci: ['runGates'], agent: ['deny', 'pushNeedsHandoff'] }
 const DENY_RULE_KEYS = ['pattern', 'reason']
 const COMMIT_STYLES = ['free', 'conventional']
 const AI_ATTRIBUTIONS = ['allow', 'forbid']
@@ -205,7 +214,7 @@ function parseConfig(text) {
   }
 
   // A key this guard does not know is kept, because a later 1.x release may have added it
-  // (spec 15); one within two letters of a known key is a typo, which would silently drop a rule.
+  // (spec 15); one close to a known key is a typo (util's likelyTypo), which would silently drop a rule.
   const unknown = {}
   const unknownKeys = (object, known, parent) => {
     for (const key of Object.keys(object)) {
@@ -370,6 +379,8 @@ function parseConfig(text) {
     }
   }
 
+  const pushNeedsHandoff = boolean(agentSection, 'pushNeedsHandoff', DEFAULTS.agent.pushNeedsHandoff, ['agent', 'pushNeedsHandoff'])
+
   if (problems.length > 0) {
     problems.sort((a, b) => a.line - b.line)
     return { config: null, problems }
@@ -392,7 +403,7 @@ function parseConfig(text) {
     gates,
     ci,
     phases,
-    agent: { deny },
+    agent: { deny, pushNeedsHandoff },
     unknown
   }
   return { config, problems }
@@ -426,7 +437,7 @@ function loadConfig(read) {
 /** The effective configuration as JSON text, without the compiled regular expressions. */
 function effectiveConfigJson(config) {
   const { branchRegex, agent, unknown, ...rest } = config
-  const plain = { ...rest, agent: { deny: agent.deny.map(({ pattern, reason }) => ({ pattern, reason })) } }
+  const plain = { ...rest, agent: { deny: agent.deny.map(({ pattern, reason }) => ({ pattern, reason })), pushNeedsHandoff: agent.pushNeedsHandoff } }
   return JSON.stringify(plain, null, 2)
 }
 
@@ -1112,7 +1123,12 @@ function validateTask(task, context) {
   // Evidence.
   const evidenceText = task.evidence ? [task.evidence.value, ...task.evidence.items].filter((part) => !isEmptyValue(part)).join('\n') : ''
   if (task.status === 'done' && evidenceText === '') {
-    report(task.evidence ? task.evidence.line : statusLine, 'a done task needs evidence. Add "- Evidence:" with a command in backticks, a link or a URL, such as "`npm test`: 14 of 14"')
+    if (task.evidence) {
+      const placeholder = task.evidence.value.trim()
+      const how = placeholder === '' ? 'write after "- Evidence:"' : `replace "${placeholder}" after "- Evidence:" with`
+      report(task.evidence.line, `a done task needs evidence: ${how} a command in backticks, a link or a URL, such as "\`npm test\`: 14 of 14"`)
+    }
+    else report(statusLine, 'a done task needs evidence. Add "- Evidence:" with a command in backticks, a link or a URL, such as "`npm test`: 14 of 14"')
   } else if (evidenceText !== '' && !taskEvidenceIsConcrete(evidenceText)) {
     report(task.evidence.line, 'evidence needs a command in backticks, a link or a URL, not only words. Write, for example, "`npm test`: 14 of 14" or a link to a file under evidence/')
   }
@@ -3208,8 +3224,7 @@ function githooksHookActive(root, folder, name) {
  * ResaLedger hook, or a hook manager's hook is installed and its configuration calls the guard.
  * A clone set up before pre-merge-commit was shipped is not active until it is updated.
  */
-function hooksActive() {
-  const root = repositoryRoot()
+function hooksActive(root = repositoryRoot()) {
   let folder = git('-C', root, 'rev-parse', '--git-path', 'hooks')
   if (!isAbsolute(folder)) folder = join(root, folder)
   return GIT_HOOKS.every((name) => githooksHookActive(root, folder, name))
@@ -3968,7 +3983,7 @@ function handoffProblems(context) {
   problems.push(...checkWorkspace(workspace, reader, config))
   if (workspace.readme !== null) problems.push(...readmeMarkerProblems(workspace.readme))
 
-  if (!hooksActive()) problems.push({ file: '', line: 0, message: 'the git hooks are not active in this clone: run work or hooks --activate' })
+  if (!hooksActive(root)) problems.push({ file: '', line: 0, message: 'the git hooks are not active in this clone: run work or hooks --activate' })
 
   const dirty = handoffDirtyPaths(root)
   if (dirty.length > 0) {
@@ -4008,6 +4023,12 @@ function handoffProblems(context) {
   return problems
 }
 
+/** handoff's message when it fails: a headline and one line per problem. */
+function handoffReport(problems) {
+  const lines = problems.map(({ file, line, message }) => `  ${file ? `${file}${line ? `:${line}` : ''}: ` : ''}${message}`)
+  return ['✖ Not ready to hand off', ...lines].join('\n')
+}
+
 /** handoff: the end-of-session check. Prints one line when the session may end; otherwise each problem, and exits 1. */
 function handoffCommand(args = []) {
   for (const arg of args) fail(`unknown option "${arg}" for handoff; it takes no options`)
@@ -4019,8 +4040,7 @@ function handoffCommand(args = []) {
   }
   const { config, problems: configProblems } = loadConfig(treeReader({ kind: 'worktree', root }))
   if (!config) {
-    console.error('✖ Not ready to hand off')
-    for (const { file, line, message } of configProblems) console.error(`  ${file}${line ? `:${line}` : ''}: ${message}`)
+    console.error(handoffReport(configProblems))
     process.exit(1)
   }
   const lane = currentLane()
@@ -4031,8 +4051,7 @@ function handoffCommand(args = []) {
     fail(error.message)
   }
   if (problems.length > 0) {
-    console.error('✖ Not ready to hand off')
-    for (const { file, line, message } of problems) console.error(`  ${file ? `${file}${line ? `:${line}` : ''}: ` : ''}${message}`)
+    console.error(handoffReport(problems))
     process.exit(1)
   }
   const parts = ['records valid']
@@ -4731,33 +4750,59 @@ function agentsGitRefusal(args, context, cwd) {
     if (force || refspecs.some((refspec) => refspec.startsWith('+'))) {
       return 'a forced push rewrites history that others may have. Push normally; if the push is rejected, fetch, merge or rebase your own unpushed commits, and push again'
     }
-    const protectedBranches = context.config.protected
-    if (protectedBranches.length === 0) return null
-    if (options.includes('--all') || options.includes('--branches')) {
-      return `"git push --all" pushes every branch, including the protected ${protectedBranches.map((branch) => `"${branch}"`).join(', ')}. Push your lane branch by name`
-    }
-    const current = agentsBranchAt(context, folder)
-    const deleting = options.includes('-d') || options.includes('--delete')
-    const targets = []
-    if (refspecs.length === 0) {
-      if (current) targets.push(current)
-    }
-    for (const refspec of refspecs) {
-      const colon = refspec.indexOf(':')
-      const destination = colon === -1 ? refspec : refspec.slice(colon + 1) || refspec.slice(0, colon)
-      if (destination.includes('*')) {
-        targets.push(...protectedBranches)
-        continue
-      }
-      const branch = agentsPushBranch(destination, current)
-      if (branch) targets.push(branch)
-    }
-    const hit = targets.find((branch) => protectedBranches.includes(branch))
-    if (hit) {
-      return `"${hit}" is a protected branch, so nothing is ${deleting ? 'deleted from' : 'pushed to'} it. Push your lane branch and open a pull request`
-    }
+    const protectedRefusal = agentsProtectedPushRefusal(options, refspecs, context, folder)
+    if (protectedRefusal) return protectedRefusal
+    if (context.config.agent.pushNeedsHandoff) return agentsPushHandoffRefusal(context, folder)
   }
   return null
+}
+
+/** The refusal for a push that would reach a protected branch, or null. */
+function agentsProtectedPushRefusal(options, refspecs, context, folder) {
+  const protectedBranches = context.config.protected
+  if (protectedBranches.length === 0) return null
+  if (options.includes('--all') || options.includes('--branches')) {
+    return `"git push --all" pushes every branch, including the protected ${protectedBranches.map((branch) => `"${branch}"`).join(', ')}. Push your lane branch by name`
+  }
+  const current = agentsBranchAt(context, folder)
+  const deleting = options.includes('-d') || options.includes('--delete')
+  const targets = []
+  if (refspecs.length === 0) {
+    if (current) targets.push(current)
+  }
+  for (const refspec of refspecs) {
+    const colon = refspec.indexOf(':')
+    const destination = colon === -1 ? refspec : refspec.slice(colon + 1) || refspec.slice(0, colon)
+    if (destination.includes('*')) {
+      targets.push(...protectedBranches)
+      continue
+    }
+    const branch = agentsPushBranch(destination, current)
+    if (branch) targets.push(branch)
+  }
+  const hit = targets.find((branch) => protectedBranches.includes(branch))
+  if (hit) {
+    return `"${hit}" is a protected branch, so nothing is ${deleting ? 'deleted from' : 'pushed to'} it. Push your lane branch and open a pull request`
+  }
+  return null
+}
+
+/**
+ * With agent.pushNeedsHandoff (spec 11): the refusal for a push while handoff fails in the
+ * worktree the push runs in, or null. The check that the lane is pushed is left out, since the
+ * push does that; like handoff, it runs no gates. A folder outside this repository is not judged.
+ */
+function agentsPushHandoffRefusal(context, folder) {
+  const worktree = agentsWorktreeOf(context, folder)
+  if (!worktree) return null
+  const root = worktree.top
+  const { config, problems: configProblems } =
+    root === agentsRealPath(context.root) && context.loadedConfig ? { config: context.loadedConfig, problems: [] } : loadConfig(agentsCommittedFile(root))
+  const problems = config ? handoffProblems({ root, config: { ...config, requirePushed: false }, lane: worktree.branch }) : configProblems
+  if (problems.length === 0) return null
+  return `agent.pushNeedsHandoff is on, so an agent pushes only work that is handed over, and "${context.guard} handoff" does not pass here:
+${handoffReport(problems)}
+Fix these, run handoff, and push again`
 }
 
 /** The paths a command writes that the guard can see: redirections, tee and sed -i. */
@@ -5069,6 +5114,14 @@ Finish the work and run handoff, or tell the user exactly what is left. (This re
   console.error(`✖ ResaLedger: ${message}`)
 }
 
+/**
+ * A reader of the files committed at HEAD in a worktree: the rules come from there, so an agent
+ * cannot lift one by editing the configuration without committing it.
+ */
+function agentsCommittedFile(root) {
+  return (path) => agentsGit(root, ['show', `HEAD:${path}`])
+}
+
 /** The repository, its configuration and the session, for one hook call; null outside a repository. */
 function agentsContext(session, adapter) {
   const cwd = typeof session.cwd === 'string' && session.cwd !== '' && existsSync(session.cwd) ? resolve(session.cwd) : process.cwd()
@@ -5077,15 +5130,9 @@ function agentsContext(session, adapter) {
   const [top, common] = out.split('\n')
   const root = resolve(top)
   process.chdir(root)
-  const loaded = loadConfig((path) => {
-    try {
-      return readFileSync(resolve(root, path), 'utf8')
-    } catch {
-      return null
-    }
-  })
+  const loaded = loadConfig(agentsCommittedFile(root))
   const config = loaded.config
-  const effective = config ?? { dir: DEFAULTS.dir, protected: [], agent: { deny: [] } }
+  const effective = config ?? { dir: DEFAULTS.dir, protected: [], agent: { deny: [], pushNeedsHandoff: false } }
   const key = typeof session.id === 'string' ? session.id.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) : ''
   return {
     root,
@@ -6131,7 +6178,8 @@ function configChanges(before, after) {
   ]
   const denyChanges = enforcementList('agent.deny', deny(before), deny(after))
   if (denyChanges.length === 0 && reasons(before) !== reasons(after)) denyChanges.push(enforcementChange('agent.deny', false, 'agent.deny: a reason changed'))
-  return [...changes, ...denyChanges, ...unknownKeyChanges(before.unknown ?? {}, after.unknown ?? {})]
+  const pushChanges = enforcementSwitch('agent.pushNeedsHandoff', before.agent.pushNeedsHandoff, after.agent.pushNeedsHandoff)
+  return [...changes, ...denyChanges, ...pushChanges, ...unknownKeyChanges(before.unknown ?? {}, after.unknown ?? {})]
 }
 
 /**
@@ -6456,9 +6504,19 @@ function ciClosingRun(text, from, length) {
   return -1
 }
 
-/** Plain text outside code spans, escaped: backslashes, Markdown's inline punctuation and `<`. */
+/**
+ * Plain text outside code spans, escaped: backslashes, Markdown's inline punctuation and `<`.
+ * Mentions (@name), issue references (#12, owner/repo#12, GH-12) get a word joiner (U+2060)
+ * after the @, the # or GH: it is invisible, but GitHub then neither notifies anyone nor leaves
+ * a reference in another issue. A backslash or an HTML entity would not stop either.
+ */
 function ciMarkdownEscape(text) {
-  return text.replace(/[\\`*_[\]~]/g, '\\$&').replace(/</g, '&lt;')
+  return text
+    .replace(/[\\`*_[\]~]/g, '\\$&')
+    .replace(/</g, '&lt;')
+    .replace(/(^|[^\w])@(?=\w)/g, '$1@\u2060')
+    .replace(/#(?=\d)/g, '#\u2060')
+    .replace(/\bGH(?=-\d)/gi, '$&\u2060')
 }
 
 /** A command as a Markdown code span, on one line. */
@@ -6770,10 +6828,10 @@ function ciRemovedRecords(root, mergeBase, head, beforeDir, afterDir) {
   return problems
 }
 
-/** The text of a task's Evidence field, or null. */
+/** The text of a task's Evidence field, or null; "—", as new writes it, is empty. */
 function ciEvidence(task) {
   if (!task.evidence) return null
-  const parts = [task.evidence.value, ...task.evidence.items].map((part) => (part ?? '').trim()).filter((part) => part !== '')
+  const parts = [task.evidence.value, ...task.evidence.items].map((part) => (part ?? '').trim()).filter((part) => !isEmptyValue(part))
   return parts.length > 0 ? parts.join('; ') : null
 }
 
@@ -7498,7 +7556,7 @@ function claimCommand(args) {
   else if (push) how.push('committed')
   console.log(`✔ ${id} claimed ${how.join(', ')}`)
   if (unpushed !== null) console.log(`! ${unpushed}`)
-  else if (!push) console.log(`The claim is visible to the local worktrees now, and to others once the branch is pushed.`)
+  else if (!push) console.log(`The claim is visible to the local worktrees now${remote === null ? '' : ', and to others once the branch is pushed'}.`)
   const cd = mode === 'worktree' ? `cd ${options.worktree}, then ` : ''
   console.log(`Next: ${cd}${guard} task ${id} for the plan, then start work; run ${guard} handoff before you stop.`)
 }
@@ -7774,7 +7832,8 @@ function newCommand(args) {
   } else id = nextTaskId(options.prefix ?? 'T', known)
 
   const path = taskFileName(config.dir, id, title)
-  const fields = ['- Status: todo']
+  // Evidence is written empty, so that finishing the task shows where its evidence goes.
+  const fields = ['- Status: todo', `- Evidence: ${CREATE_PLACEHOLDER}`]
   if (options.issue !== null) fields.push(`- Issue: #${options.issue}`)
   createWrite(root, path, `# ${id} ${title}\n\n${fields.join('\n')}\n`)
   console.log(`✔ created ${path}`)
