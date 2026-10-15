@@ -1,6 +1,6 @@
 // The package itself: its manifest, its license and the shape of the built guard.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { PACKAGE, run, temporary } from './helpers.mjs'
@@ -37,4 +37,25 @@ test('the package command prints the version', () => {
   const ran = run(PACKAGE, process.execPath, [join(PACKAGE, 'bin', 'resaledger.mjs'), '--version'])
   assert.equal(ran.status, 0, ran.out)
   assert.equal(ran.out.trim(), manifest.version)
+})
+
+/** Every file under a path in the package, as POSIX paths relative to the package. */
+function filesUnder(path) {
+  const full = join(PACKAGE, path)
+  if (!existsSync(full)) return []
+  if (!statSync(full).isDirectory()) return [path]
+  return readdirSync(full).filter((name) => name !== '.DS_Store').flatMap((name) => filesUnder(`${path}/${name}`))
+}
+
+test('npm pack publishes exactly the files in "files", the built guard, package.json and README.md', () => {
+  // --ignore-scripts: prepack would rebuild dist/records.mjs while other test files read it.
+  // scripts/test.mjs has built it already.
+  const packed = run(PACKAGE, process.platform === 'win32' ? 'npm.cmd' : 'npm', ['pack', '--dry-run', '--json', '--ignore-scripts'])
+  assert.equal(packed.status, 0, packed.out)
+  const listed = JSON.parse(packed.out.slice(packed.out.indexOf('['))) [0].files.map((file) => file.path).sort()
+  const intended = [...new Set([...manifest.files.flatMap(filesUnder), 'dist/records.mjs', 'package.json', 'README.md'])].sort()
+  assert.deepEqual(listed, intended)
+  assert.ok(listed.includes('dist/records.mjs'))
+  assert.ok(listed.includes('templates/released.json'))
+  for (const path of listed) assert.doesNotMatch(path, /^(?:test|ledger|docs|scripts)\//, `${path} must not be published`)
 })
