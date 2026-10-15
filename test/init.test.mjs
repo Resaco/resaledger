@@ -691,7 +691,7 @@ describe("Git LFS's own hooks in .githooks/", () => {
     const before = snapshot(r.root)
     const result = init(r)
     assert.equal(result.status, 1, result.out)
-    assert.match(result.out, /✖ \.git\/info\/exclude:3: \.githooks\/pre-push ignores \.githooks\/pre-push, so init could not commit it; remove the rule/)
+    assert.match(result.out, /✖ \.git\/info\/exclude:3: \.githooks\/pre-push ignores \.githooks\/pre-push, so init could not commit it; remove or change the rule/)
     assert.doesNotMatch(result.out, /uncommitted changes/)
     assert.deepEqual(snapshot(r.root), before)
   })

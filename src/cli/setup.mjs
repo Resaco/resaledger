@@ -176,5 +176,5 @@ export function setupCommitSteps(branch, config, commit, what = 'the setup') {
 
 /** The line that says a Git LFS hook at path is replaced, and that the guard runs Git LFS's pre-push (spec 9). */
 export function gitLfsNote(path) {
-  return `✔ ${path} was Git LFS's own hook; ResaLedger's pre-push replaces it, and the guard runs "git lfs pre-push" after its own checks wherever a tracked ${GITATTRIBUTES_FILE} names filter=lfs`
+  return `✔ ${path} was Git LFS's own hook; ResaLedger's pre-push replaces it, and the guard runs "git lfs pre-push" after its own checks wherever a tracked ${GITATTRIBUTES_FILE} names filter=lfs.`
 }

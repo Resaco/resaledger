@@ -10,7 +10,7 @@ import { CONFIG_FILE, isSafeFolderPath, parseConfig, SAFE_FOLDER_RULE } from '..
 import { readCommits, taskTrailers } from '../guard/range.mjs'
 import { slugify, taskFileName } from '../guard/tasks.mjs'
 import { checkWorkspace, loadWorkspace } from '../guard/workspace.mjs'
-import { HOOK_NAMES, renderHook } from './hooks.mjs'
+import { GIT_LFS_HOOKS, HOOK_NAMES, isGitLfsHook, renderHook } from './hooks.mjs'
 import {
   editedLegacyTemplateSection,
   INVALID_UTF8,
@@ -43,6 +43,12 @@ const WAITING_PHRASE = /(?:^|[.;]\s+)(?:waits? (?:for|on)|waiting (?:for|on)|blo
 // The hooks are staged as executable, so a migration committed on Windows still runs on Linux and macOS.
 export const COMMIT_COMMAND =
   'git add -A && git add --chmod=+x .githooks/pre-commit .githooks/pre-merge-commit .githooks/commit-msg .githooks/pre-push && git commit -m "chore: migrate to ResaLedger 1.0" -m "Task: maintenance"'
+
+/** The commit command, leaving out the untracked files in left, such as Git LFS's other hooks. */
+export function commitCommand(left = []) {
+  if (left.length === 0) return COMMIT_COMMAND
+  return COMMIT_COMMAND.replace('git add -A', `git add -A -- :/ ${left.map((path) => `':(exclude)${path}'`).join(' ')}`)
+}
 // Root pathspecs, so that the undo is whole when it is run from a subfolder.
 export const UNDO_COMMAND = 'git restore -- :/ && git clean -fd -- :/'
 
@@ -540,7 +546,7 @@ export function planMigration(root, options = {}) {
     renames: [],
     executable: new Set(),
     logEntry: null,
-    report: { created: [], changed: [], deleted: [], renamed: [], warnings: [], links: [], waiting: [], laneGiven: [], laneFromBranch: [], lane: null, unmappedKeys: [], attributes: [], agentHooks: null, counts: {} },
+    report: { created: [], changed: [], deleted: [], renamed: [], warnings: [], links: [], waiting: [], laneGiven: [], laneFromBranch: [], lane: null, unmappedKeys: [], attributes: [], agentHooks: null, gitLfs: [], commitCommand: COMMIT_COMMAND, counts: {} },
     problems: [],
     refusals: []
   }
@@ -557,8 +563,17 @@ export function planMigration(root, options = {}) {
     refuse(`git status failed: ${status.stderr.trim()}`)
     return plan
   }
-  if (status.stdout.trim()) {
-    const lines = status.stdout.trimEnd().split('\n')
+  // Git LFS's own hooks may lie untracked in .githooks/: its pre-push is replaced, the others are left out of the commit.
+  const isUntrackedLfs = (line) => {
+    const name = line.startsWith(`?? ${HOOKS_FOLDER}/`) ? line.slice(`?? ${HOOKS_FOLDER}/`.length) : null
+    return GIT_LFS_HOOKS.includes(name) && isGitLfsHook(name, readFileSync(join(root, HOOKS_FOLDER, name), 'utf8'))
+  }
+  const statusLines = status.stdout.split('\n').filter(Boolean)
+  const untrackedLfs = statusLines.filter(isUntrackedLfs).map((line) => line.slice(3))
+  const left = untrackedLfs.filter((path) => !HOOK_NAMES.includes(path.slice(HOOKS_FOLDER.length + 1)))
+  plan.report.commitCommand = commitCommand(left)
+  if (statusLines.length > untrackedLfs.length) {
+    const lines = statusLines.filter((line) => !isUntrackedLfs(line))
     refuse('the working tree has uncommitted changes; commit or stash them first, so the migration is one reviewable change', lines.slice(0, 20).join('\n') + (lines.length > 20 ? `\n… and ${lines.length - 20} more` : ''))
   }
   const legacy = readLegacyWorkspace(root)
@@ -577,6 +592,11 @@ export function planMigration(root, options = {}) {
       const path = `${HOOKS_FOLDER}/${name}`
       if (!existsSync(join(root, path))) continue
       const text = readFileSync(join(root, path), 'utf8').replace(/\r\n?/g, '\n')
+      // The guard runs Git LFS's pre-push (spec 9), so the 1.0 hook replaces it.
+      if (isGitLfsHook(name, text)) {
+        plan.report.gitLfs.push(path)
+        continue
+      }
       const known = (LEGACY_HOOKS[name] ?? []).map((template) => template.replaceAll('{{dir}}', dir))
       if (known.some((template) => template.trimEnd() === text.trimEnd()) || renderHook(name, dir).trimEnd() === text.trimEnd()) continue
       if (options.force) plan.report.warnings.push(`${path} was changed by hand; --force replaces it with the 1.0 hook`)
@@ -1055,7 +1075,7 @@ function unsafePaths(root, plan, tracked) {
     if (stat.isSymbolicLink())
       refuse(`${path} is a symbolic link, so migrate would ${verb} the file it points to, which git does not track at this path; replace the link with the file itself and commit`)
     else if (!stat.isFile()) refuse(`${path} is not a regular file, so migrate cannot ${verb} it`)
-    else if (!tracked.has(path)) refuse(`${path} is not tracked by git, so the undo command could not bring it back after migrate would ${verb} it; commit it or move it away`)
+    else if (!tracked.has(path) && !plan.report.gitLfs.includes(path)) refuse(`${path} is not tracked by git, so the undo command could not bring it back after migrate would ${verb} it; commit it or move it away`)
   }
   for (const [folder, path] of linkedFolders)
     refuse(`${folder} is a symbolic link, so ${path} and the other files migrate writes there would land wherever it points, outside what git tracks; replace the link with the folder itself and commit`)
@@ -1078,7 +1098,7 @@ function unsafePaths(root, plan, tracked) {
   for (const [rule, matched] of rules) {
     const more = matched.length > 1 ? ` and ${matched.length - 1} more` : ''
     const removes = matched.some((path) => removed.has(path))
-    refuse(`${rule} ignores ${matched[0]}${more}, so the files migrate ${removes ? 'writes or deletes' : 'writes'} there would never be committed; change the rule`)
+    refuse(`${rule} ignores ${matched[0]}${more}, so the files migrate ${removes ? 'writes or deletes' : 'writes'} there would never be committed; remove or change the rule`)
   }
   return refusals
 }

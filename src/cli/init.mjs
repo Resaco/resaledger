@@ -179,7 +179,7 @@ function dirtyFiles(root, paths, replaceable = []) {
  * A refusal for each ignore rule (.gitignore, info/exclude, the global excludes file) that
  * matches one of paths, naming its file and line: the files init must commit there could not be.
  */
-export function ignoredRefusals(root, paths, what = 'init') {
+export function ignoredRefusals(root, paths) {
   if (paths.length === 0) return []
   const result = spawnSync('git', ['check-ignore', '--verbose', '--no-index', '--stdin', '-z'], { cwd: root, encoding: 'utf8', input: `${paths.join('\0')}\0` })
   if (result.status !== 0 && result.status !== 1) return [`git check-ignore failed: ${result.stderr.trim()}`]
@@ -188,7 +188,7 @@ export function ignoredRefusals(root, paths, what = 'init') {
   for (let index = 0; index + 3 < fields.length; index += 4) {
     const [source, line, pattern, path] = fields.slice(index, index + 4)
     if (!pattern || pattern.startsWith('!')) continue
-    refusals.push(`${source}:${line}: ${pattern} ignores ${path}, so ${what} could not commit it; remove the rule`)
+    refusals.push(`${source}:${line}: ${pattern} ignores ${path}, so init could not commit it; remove or change the rule`)
   }
   return refusals
 }
