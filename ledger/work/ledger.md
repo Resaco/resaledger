@@ -232,11 +232,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: The input formats come from the agents' documentation; Codex loads project hooks only for a trusted project. Known gaps, listed in the module header: `cp`, `mv`, `perl -i`, other editor tools and variables that disable other hook managers. Open: `update` adds the configuration back for an agent whose folder exists even when a project removed it on purpose; A2 decides with the other agents.
 
 ### A1.1 The end-of-turn reminder under concurrent calls
-- Status: doing
+- Status: done
 - Depends on: A1
 - Plan: [A-agents.md](../plan/A-agents.md#a1-the-agent-hook-core-claude-code-and-codex)
-- Evidence: —
-- Notes: A worker fixes it on branch `a1-1-reminder`. CI on Linux with Node 20 (run 38681500663) failed "fires once when two configurations call it at the same time" in agents.test.mjs: three simultaneous stop hooks all stayed quiet, where exactly one should remind. Find the race in the session state (the start record or the change check), fix it, and make the test prove it repeatedly.
+- Evidence: 725 of 725 on Node 24.18.0, 22.23.3 and 20.20.2 on the branch, and the full suite on `main` after the merge (see the log). [agents.test.mjs](../../test/agents.test.mjs) runs 8 sessions of 6 concurrent stop hooks, half with late input, and each reminds exactly once; with input 300 ms late, a forced push and a push to protected `main` are still refused. The old `readStdin` fails all three.
+- Notes: The cause was not the session state: reading stdin before the caller wrote it returned nothing, so every hook allowed, pre-tool refusals and pre-push's ref list included. `readStdin` now waits for the input, and session starts are written atomically and never replaced.
 
 ### A2 Cursor, Gemini CLI and GitHub Copilot
 - Status: todo
