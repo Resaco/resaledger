@@ -8,7 +8,7 @@ import { AGENT_NAMES, agentConfigFile, agentConfigSnippet, detectAgents, mergeAg
 import { CONFIG_FILE, CONFIG_VERSION, DEFAULTS, isSafeFolderPath, parseConfig, SAFE_FOLDER_RULE } from '../guard/config.mjs'
 import { ENFORCEMENT_WORKFLOW } from '../guard/enforcement.mjs'
 import { SETUP_MARKER } from '../guard/records.mjs'
-import { detectHookManager, HOOK_NAMES, integrateHookManager, renderHook } from './hooks.mjs'
+import { detectHookManager, HOOK_NAMES, integrateHookManager, isGitLfsHook, renderHook } from './hooks.mjs'
 import { LEGACY_CONFIG_FILE } from './legacy.mjs'
 import { agentsBlock, BUILT_GUARD, claudeFile, detectBase, GITATTRIBUTES_FILE, hasAgentsImport, HOOKS_FOLDER, realRelative, turnOnHooks, withAgentsBlock, withHooksEolRule } from './setup.mjs'
 
@@ -160,12 +160,37 @@ function initGit(root, args) {
   return spawnSync('git', args, { cwd: root, encoding: 'utf8' })
 }
 
-/** The files among paths with uncommitted changes, untracked files included, as git status shows them. */
-function dirtyFiles(root, paths) {
+/**
+ * The files among paths with uncommitted changes, untracked files included, as git status shows
+ * them. An untracked file in replaceable is left out: init replaces it, and nothing is lost.
+ */
+function dirtyFiles(root, paths, replaceable = []) {
   if (paths.length === 0) return []
   const status = initGit(root, ['status', '--porcelain', '--untracked-files=all', '--', ...paths])
   if (status.status !== 0) return [`(git status failed: ${status.stderr.trim()})`]
-  return status.stdout.split('\n').filter(Boolean).map((line) => line.slice(3))
+  return status.stdout
+    .split('\n')
+    .filter(Boolean)
+    .filter((line) => !(line.startsWith('?? ') && replaceable.includes(line.slice(3))))
+    .map((line) => line.slice(3))
+}
+
+/**
+ * A refusal for each ignore rule (.gitignore, info/exclude, the global excludes file) that
+ * matches one of paths, naming its file and line: the files init must commit there could not be.
+ */
+export function ignoredRefusals(root, paths) {
+  if (paths.length === 0) return []
+  const result = spawnSync('git', ['check-ignore', '--verbose', '--no-index', '--stdin', '-z'], { cwd: root, encoding: 'utf8', input: `${paths.join('\0')}\0` })
+  if (result.status !== 0 && result.status !== 1) return [`git check-ignore failed: ${result.stderr.trim()}`]
+  const fields = result.stdout.split('\0')
+  const refusals = []
+  for (let index = 0; index + 3 < fields.length; index += 4) {
+    const [source, line, pattern, path] = fields.slice(index, index + 4)
+    if (!pattern || pattern.startsWith('!')) continue
+    refusals.push(`${source}:${line}: ${pattern} ignores ${path}, so init could not commit it; remove or change the rule`)
+  }
+  return refusals
 }
 
 // What each agent does with the project's hooks before they run (spec 11), for init's output.
@@ -208,9 +233,9 @@ export function planAgentConfigs(root, agents, dir, writes) {
  * gates, commitStyle }; agents null finds the agents in use, gates is { commit, verify } (none
  * when absent) and commitStyle "conventional" or "free" (the default, not written). Returns { refusals,
  * writes (path → text), executable, created, changed, managerFiles, manager, instructions, warnings, dir,
- * preset, config, goalMarker, agents, codeowners }. The team preset adds the CI workflow, a pull request
- * template when the project has none, and codeowners, the CODEOWNERS lines to print. Nothing may be
- * written when refusals is not empty.
+ * preset, config, goalMarker, agents, codeowners, gitLfs }, gitLfs holding the Git LFS hooks it replaces.
+ * The team preset adds the CI workflow, a pull request template when the project has none, and
+ * codeowners, the CODEOWNERS lines to print. Nothing may be written when refusals is not empty.
  */
 export function planInit(root, options = {}) {
   const plan = {
@@ -228,7 +253,8 @@ export function planInit(root, options = {}) {
     config: null,
     goalMarker: !options.goal,
     agents: [],
-    codeowners: null
+    codeowners: null,
+    gitLfs: []
   }
   const refuse = (message) => plan.refusals.push(message)
 
@@ -268,13 +294,16 @@ export function planInit(root, options = {}) {
       const path = `${HOOKS_FOLDER}/${name}`
       const text = renderHook(name, dir)
       const current = readText(root, path)
-      if (current !== null && current.replace(/\r\n?/g, '\n') !== text) {
+      // The guard runs Git LFS's pre-push (spec 9), so ResaLedger's replaces it.
+      if (current !== null && isGitLfsHook(name, current)) plan.gitLfs.push(path)
+      else if (current !== null && current.replace(/\r\n?/g, '\n') !== text) {
         refuse(`${path} exists and is not ResaLedger's hook, so init would replace it; move its commands into a hook manager or elsewhere first`)
       }
       plan.writes.set(path, text)
       plan.executable.add(path)
     }
     plan.writes.set(GITATTRIBUTES_FILE, withHooksEolRule(readText(root, GITATTRIBUTES_FILE)))
+    for (const message of ignoredRefusals(root, HOOK_NAMES.map((name) => `${HOOKS_FOLDER}/${name}`))) refuse(message)
   }
   touched.push(...plan.managerFiles)
 
@@ -331,7 +360,7 @@ export function planInit(root, options = {}) {
 
   // 6. Uncommitted changes in a file init changes.
   for (const path of plan.writes.keys()) if (existsSync(join(root, path))) touched.push(path)
-  const dirty = dirtyFiles(root, [...new Set(touched)])
+  const dirty = dirtyFiles(root, [...new Set(touched)], plan.gitLfs)
   if (dirty.length > 0) refuse(`these files have uncommitted changes, and init would change them: ${dirty.join(', ')}. Commit or stash them first`)
 
   // 7. What changes.

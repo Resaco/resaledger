@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 import { copyFileSync, existsSync, lstatSync, mkdirSync, rmSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
+import { isGitLfsHook } from '../src/cli/hooks.mjs'
 import { GOAL_MARKER, goModuleName, initOptions, parseInitArgs, planInit, presetFromAnswer, projectName, tomlTableName } from '../src/cli/init.mjs'
 import { agentsBlock, hasHooksEolRule, HOOKS_EOL_RULE, SETUP_BRANCH, withAgentsBlock, withHooksEolRule } from '../src/cli/setup.mjs'
 import { PACKAGE, repository, run, temporary } from './helpers.mjs'
@@ -626,5 +627,79 @@ describe('the setup commit in the team preset', () => {
     assert.equal(committed.status, 0, committed.out)
     assert.equal(r.git('symbolic-ref', '--short', 'HEAD').out.trim(), 'chore/setup')
     assert.equal(r.git('status', '--porcelain').out, '')
+  })
+})
+
+// The hooks that `git lfs install` writes (Git LFS 3.x), and the wording of older releases.
+const lfsHook = (name) => `#!/bin/sh
+command -v git-lfs >/dev/null 2>&1 || { printf >&2 "\\n%s\\n\\n" "This repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting the '${name}' file in the hooks directory (set by 'core.hookspath'; usually '.git/hooks')."; exit 2; }
+git lfs ${name} "$@"
+`
+const olderLfsHook = (name) => `#!/bin/sh
+command -v git-lfs >/dev/null 2>&1 || { echo >&2 "\\nThis repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting .git/hooks/${name}.\\n"; exit 2; }
+git lfs ${name} "$@"
+`
+const LFS_HOOKS = ['pre-push', 'post-checkout', 'post-commit', 'post-merge']
+const lfsFiles = () => Object.fromEntries(LFS_HOOKS.map((name) => [`.githooks/${name}`, lfsHook(name)]))
+
+describe("Git LFS's own hooks in .githooks/", () => {
+  test('isGitLfsHook knows the hooks of current and older releases, and nothing else', () => {
+    for (const name of LFS_HOOKS) {
+      assert.equal(isGitLfsHook(name, lfsHook(name)), true, name)
+      assert.equal(isGitLfsHook(name, olderLfsHook(name)), true, name)
+    }
+    // Whitespace and line ends do not count.
+    assert.equal(isGitLfsHook('pre-push', `\n${lfsHook('pre-push').replaceAll('\n', '\r\n').replaceAll(' || ', '  ||\t')}\n\n`), true)
+    // The hook of another name, another command or one more line is not Git LFS's.
+    assert.equal(isGitLfsHook('pre-push', lfsHook('post-merge')), false)
+    assert.equal(isGitLfsHook('pre-push', `${lfsHook('pre-push')}make lint\n`), false)
+    assert.equal(isGitLfsHook('pre-push', lfsHook('pre-push').replace('exit 2', 'exit 0')), false)
+    assert.equal(isGitLfsHook('pre-push', '#!/bin/sh\ngit lfs pre-push "$@"\n'), false)
+    assert.equal(isGitLfsHook('pre-push', lfsHook('pre-push').replace('; exit 2; }', '; exit 2; }; rm -rf ~')), false)
+  })
+
+  test("init replaces Git LFS's pre-push only, says so, and the commit takes it", () => {
+    const r = project(lfsFiles())
+    const result = init(r)
+    assert.equal(result.status, 0, result.out)
+    assert.match(r.read('.githooks/pre-push'), /records\.mjs' pre-push/)
+    for (const name of LFS_HOOKS.slice(1)) assert.equal(r.read(`.githooks/${name}`), lfsHook(name))
+    assert.match(result.out, /Changed \(\d+\):[\s\S]*\n {2}\.githooks\/pre-push\n/)
+    assert.match(result.out, /\.githooks\/pre-push was Git LFS's own hook; ResaLedger's pre-push replaces it, and the guard runs "git lfs pre-push" after its own checks/)
+    const committed = r.run('sh', ['-c', printedCommit(result.out)])
+    assert.equal(committed.status, 0, committed.out)
+    assert.equal(r.git('status', '--porcelain').out, '')
+  })
+
+  test('untracked Git LFS hooks: pre-push is replaced and the others stay out of the commit', () => {
+    const r = project()
+    for (const [path, text] of Object.entries(lfsFiles())) r.write(path, text)
+    const result = init(r)
+    assert.equal(result.status, 0, result.out)
+    assert.match(r.read('.githooks/pre-push'), /records\.mjs' pre-push/)
+    assert.match(result.out, /\.githooks\/pre-push was Git LFS's own hook/)
+    assert.doesNotMatch(printedCommit(result.out), /post-/)
+    const committed = r.run('sh', ['-c', printedCommit(result.out)])
+    assert.equal(committed.status, 0, committed.out)
+    assert.equal(r.git('status', '--porcelain').out, '?? .githooks/post-checkout\n?? .githooks/post-commit\n?? .githooks/post-merge\n')
+  })
+
+  test('a rule in .git/info/exclude that hides a hook init must commit is refused with its line', () => {
+    const r = project()
+    r.write('.git/info/exclude', '# git ls-files --others --exclude-from=.git/info/exclude\n*.swp\n.githooks/pre-push\n')
+    r.write('.githooks/pre-push', lfsHook('pre-push'))
+    const before = snapshot(r.root)
+    const result = init(r)
+    assert.equal(result.status, 1, result.out)
+    assert.match(result.out, /✖ \.git\/info\/exclude:3: \.githooks\/pre-push ignores \.githooks\/pre-push, so init could not commit it; remove or change the rule/)
+    assert.doesNotMatch(result.out, /uncommitted changes/)
+    assert.deepEqual(snapshot(r.root), before)
+  })
+
+  test("a pre-push that is not Git LFS's is still refused", () => {
+    const r = project({ '.githooks/pre-push': `${lfsHook('pre-push')}make lint\n` })
+    const result = init(r)
+    assert.equal(result.status, 1)
+    assert.match(result.out, /\.githooks\/pre-push exists and is not ResaLedger's hook/)
   })
 })

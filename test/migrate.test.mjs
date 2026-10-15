@@ -961,7 +961,7 @@ describe('the LF rule for the hooks and a protected base', () => {
 describe('data safety at the edges of git', () => {
   test('a .gitignore rule that matches a folder migrate writes into is refused, naming the rule', () => {
     const r = legacyRepository({ files: { '.gitignore': '# build output\nnode_modules/\nlog/\n' } })
-    assertRefused(r, [], /\.gitignore:3: log\/ ignores project\/log\/2026-03-04-session-1-2\.md and 2 more, so the files migrate writes there would never be committed; change the rule/)
+    assertRefused(r, [], /\.gitignore:3: log\/ ignores project\/log\/2026-03-04-session-1-2\.md and 2 more, so the files migrate writes there would never be committed; remove or change the rule/)
   })
 
   test("a rule in the user's global excludes file is refused too", () => {
@@ -1260,5 +1260,78 @@ describe("this repository's own 0.x workspace", () => {
     const committed = run(root, 'git', ['commit', '-q', '-m', 'chore: migrate to ResaLedger 1.0', '-m', 'Task: maintenance'])
     assert.equal(committed.status, 0, committed.out)
     assert.equal(run(root, 'git', ['status', '--porcelain']).out, '')
+  })
+})
+
+// The hooks that `git lfs install` writes into core.hooksPath (Git LFS 3.x).
+const lfsHook = (name) => `#!/bin/sh
+command -v git-lfs >/dev/null 2>&1 || { printf >&2 "\\n%s\\n\\n" "This repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting the '${name}' file in the hooks directory (set by 'core.hookspath'; usually '.git/hooks')."; exit 2; }
+git lfs ${name} "$@"
+`
+const LFS_HOOKS = ['pre-push', 'post-checkout', 'post-commit', 'post-merge']
+
+describe("Git LFS's own hooks in .githooks/", () => {
+  /** A 0.x workspace whose .githooks/ holds Git LFS's four hooks, untracked, in place of the 0.x pre-push. */
+  const untrackedLfs = () => {
+    const r = legacyRepository({ files: { '.githooks/pre-push': null } })
+    for (const name of LFS_HOOKS) r.write(`.githooks/${name}`, lfsHook(name))
+    return r
+  }
+
+  test("--dry-run plans to replace an untracked Git LFS pre-push and prints the command that brings it back", () => {
+    const r = untrackedLfs()
+    const before = snapshot(r.root)
+    const result = migrate(r, '--dry-run')
+    assert.equal(result.status, 0, result.out)
+    assert.match(result.out, /Change \(\d+\):[\s\S]*\n {2}\.githooks\/pre-push\n/)
+    assert.match(result.out, /✔ \.githooks\/pre-push was Git LFS's own hook; ResaLedger's pre-push replaces it, and the guard runs "git lfs pre-push"/)
+    assert.match(result.out, /After the undo command, "git lfs update --force" brings Git LFS's hooks back\./)
+    assert.doesNotMatch(result.out, /post-/)
+    assert.deepEqual(snapshot(r.root), before)
+  })
+
+  test("the migration replaces Git LFS's pre-push and leaves its other hooks out of the commit", () => {
+    const r = untrackedLfs()
+    const result = migrate(r)
+    assert.equal(result.status, 0, result.out)
+    assert.match(r.read('.githooks/pre-push'), /# resaledger: pre-push hook/)
+    for (const name of LFS_HOOKS.slice(1)) assert.equal(r.read(`.githooks/${name}`), lfsHook(name))
+    const commit = result.out.split('\n').map((line) => line.trim()).find((line) => line.startsWith('git add -A'))
+    assert.ok(commit, result.out)
+    const committed = r.run('sh', ['-c', commit])
+    assert.equal(committed.status, 0, committed.out)
+    assert.equal(r.git('status', '--porcelain').out, '?? .githooks/post-checkout\n?? .githooks/post-commit\n?? .githooks/post-merge\n')
+    assert.match(r.git('ls-files', '-s', '.githooks/pre-push').out, /^100755 /)
+  })
+
+  test("the undo command removes the replaced hook, and the report says how to bring Git LFS's hooks back", () => {
+    const r = untrackedLfs()
+    const result = migrate(r)
+    assert.equal(result.status, 0, result.out)
+    assert.match(result.out, /To undo everything instead:\n {2}git restore -- :\/ && git clean -fd -- :\/ && git config --unset core\.hooksPath\nThen "git lfs update --force" brings Git LFS's hooks back\./)
+    assert.equal(r.run('sh', ['-c', `${UNDO_COMMAND} && git config --unset core.hooksPath`]).status, 0)
+    assert.equal(r.git('status', '--porcelain', '--untracked-files=all').out, '')
+  })
+
+  test("a tracked Git LFS pre-push is replaced without --force, and the report names it", () => {
+    const r = legacyRepository({ files: Object.fromEntries(LFS_HOOKS.map((name) => [`.githooks/${name}`, lfsHook(name)])) })
+    const result = migrate(r, '--dry-run')
+    assert.equal(result.status, 0, result.out)
+    assert.doesNotMatch(result.out, /changed by hand/)
+    assert.match(result.out, /✔ \.githooks\/pre-push was Git LFS's own hook/)
+    assert.match(result.out, /"git lfs update --force"/)
+  })
+
+  test('a rule in .git/info/exclude that hides .githooks/pre-push is refused with its line, and the hook is not called untracked', () => {
+    const r = legacyRepository({ files: { '.githooks/pre-push': null } })
+    r.write('.git/info/exclude', '# local\n*.swp\n.githooks/pre-push\n')
+    r.write('.githooks/pre-push', lfsHook('pre-push'))
+    const refused = assertRefused(r, ['--dry-run', '--force'], /\.git\/info\/exclude:3: \.githooks\/pre-push ignores \.githooks\/pre-push, so the files migrate writes there would never be committed; remove or change the rule/)
+    assert.doesNotMatch(refused.out, /is not tracked by git/)
+  })
+
+  test("a pre-push that is not Git LFS's is still refused as changed by hand", () => {
+    const r = legacyRepository({ files: { '.githooks/pre-push': `${lfsHook('pre-push')}make lint\n` } })
+    assertRefused(r, [], /\.githooks\/pre-push differs from the hook agent-ledger 0\.x wrote, so it was changed by hand/)
   })
 })

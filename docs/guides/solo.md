@@ -386,6 +386,28 @@ Some refusals come from your own setup:
 - `--no-verify` skips the git hooks. Do not use it. `handoff` catches unpushed commits made with it, and the agent hooks refuse it for agents ([agents](agents.md)).
 - A fresh clone has the hooks off until `work` turns them on. Run `work` first.
 
+## Git LFS
+
+In a repository that uses Git LFS, where a tracked `.gitattributes` names `filter=lfs`, the guard's `pre-push` runs Git LFS's `pre-push` after its own checks pass, so a push uploads the LFS objects and a refused push uploads none. When Git LFS had written its hooks into `.githooks/`, `init` replaced its `pre-push` and left its other hooks alone.
+
+In a fresh clone, `git lfs install` finds the guard's `pre-push` and stops:
+
+<!-- not run: needs Git LFS -->
+
+```bash
+git lfs install
+```
+
+```text
+Hook already exists: pre-push
+…
+To resolve this, either:
+  1: run `git lfs update --manual` for instructions on how to merge hooks.
+  2: run `git lfs update --force` to overwrite your hook.
+```
+
+This is expected, and Git LFS has set its filters all the same, so LFS files check out and commit as they should. Do not run `git lfs update --force`: it would replace the guard's hook. Git LFS's other hooks, `post-checkout`, `post-commit` and `post-merge`, are needed only for file locking. `git lfs update --manual` prints them; put those three into their files in `.githooks/` and make them executable, and leave `pre-push` as it is.
+
 ## Add CI later
 
 A solo project can check every pull request and every push to `main` in GitHub Actions:

@@ -12,8 +12,9 @@ import { recordCounts } from '../guard/util.mjs'
 import { detectCommitStyle, detectGates } from './detect.mjs'
 import { agentTrustLines, applyInit, commitCommand, initOptions, parseAgentsValue, parseInitArgs, planInit, presetFromAnswer } from './init.mjs'
 import { LEGACY_CONFIG_FILE } from './legacy.mjs'
-import { agentHooksAdvice, applyMigration, COMMIT_COMMAND, planMigration, UNDO_COMMAND } from './migrate.mjs'
-import { currentBranch, ensureGuard, GITATTRIBUTES_FILE, hooksNote, setupCommitSteps, turnOnHooks } from './setup.mjs'
+import { agentHooksAdvice, applyMigration, planMigration, UNDO_COMMAND } from './migrate.mjs'
+import { GIT_LFS_RESTORE } from './hooks.mjs'
+import { currentBranch, ensureGuard, GITATTRIBUTES_FILE, gitLfsNote, hooksNote, setupCommitSteps, turnOnHooks } from './setup.mjs'
 import { applyUpdate, planUpdate, UPDATE_COMMIT_MESSAGE } from './update.mjs'
 
 const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
@@ -125,6 +126,8 @@ export function migrateCommand(args) {
   if (report.laneGiven.length > 0)
     console.log(`\ndoing tasks without a Lane get Lane: ${report.lane}; run migrate on the branch the work continues on, or take them over with claim --take afterwards.`)
   list('Warnings', report.warnings.map((warning) => `! ${warning}`))
+  const restoreLfs = report.gitLfs.length > 0 ? `\nThen "${GIT_LFS_RESTORE}" brings Git LFS's hooks back.` : ''
+  for (const path of report.gitLfs) console.log(`\n${gitLfsNote(path)}\nAfter the undo command, "${GIT_LFS_RESTORE}" brings Git LFS's hooks back.`)
   if (plan.problems.length > 0) {
     console.error(`\nProblems with the 1.0 rules in the result (${plan.problems.length}):`)
     plan.problems.forEach(printProblem)
@@ -180,13 +183,14 @@ export function migrateCommand(args) {
       `\nBefore you commit, fix the ${plan.problems.length} problems listed above: the pre-commit hook refuses the commit until they are fixed. See them again with: node ${dir}/scripts/records.mjs check`
     )
   const migrated = parseConfig(plan.writes.get(CONFIG_FILE)).config
-  const steps = migrated ? setupCommitSteps(currentBranch(root), migrated, COMMIT_COMMAND, 'the migration') : [`Commit the migration:\n       ${COMMIT_COMMAND}`]
+  const commit = report.commitCommand
+  const steps = migrated ? setupCommitSteps(currentBranch(root), migrated, commit, 'the migration') : [`Commit the migration:\n       ${commit}`]
   console.log(`
 Review the change, then:
 ${steps.map((step, index) => `  ${index + 1}. ${step}`).join('\n')}
 Then run "node ${dir}/scripts/records.mjs verify" to write the first stamp.
 To undo everything instead:
-  ${UNDO_COMMAND}${undoHooks}`)
+  ${UNDO_COMMAND}${undoHooks}${restoreLfs}`)
   if (report.agentHooks) console.log(`\n${agentHooksAdvice(report.agentHooks)}`)
   if (failed) process.exit(1)
 }
@@ -271,6 +275,7 @@ export async function initCommand(args) {
   list('Created', result.created)
   list('Changed', result.changed)
   list('Warnings', plan.warnings.map((warning) => `! ${warning}`))
+  for (const path of plan.gitLfs) console.log(`\n${gitLfsNote(path)}`)
   if (plan.agents.length > 0) console.log(`\nAgent hooks for: ${plan.agents.join(', ')}.\n${agentTrustLines(plan.agents).join('\n')}`)
   console.log(`\n${hooksNote(result.hooks, dir)}`)
   if (result.instructions) console.log(`\n${result.instructions}`)
