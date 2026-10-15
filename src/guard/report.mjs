@@ -154,9 +154,19 @@ function ciClosingRun(text, from, length) {
   return -1
 }
 
-/** Plain text outside code spans, escaped: backslashes, Markdown's inline punctuation and `<`. */
+/**
+ * Plain text outside code spans, escaped: backslashes, Markdown's inline punctuation and `<`.
+ * Mentions (@name), issue references (#12, owner/repo#12, GH-12) get a word joiner (U+2060)
+ * after the @, the # or GH: it is invisible, but GitHub then neither notifies anyone nor leaves
+ * a reference in another issue. A backslash or an HTML entity would not stop either.
+ */
 function ciMarkdownEscape(text) {
-  return text.replace(/[\\`*_[\]~]/g, '\\$&').replace(/</g, '&lt;')
+  return text
+    .replace(/[\\`*_[\]~]/g, '\\$&')
+    .replace(/</g, '&lt;')
+    .replace(/(^|[^\w])@(?=\w)/g, '$1@\u2060')
+    .replace(/#(?=\d)/g, '#\u2060')
+    .replace(/\bGH(?=-\d)/gi, '$&\u2060')
 }
 
 /** A command as a Markdown code span, on one line. */

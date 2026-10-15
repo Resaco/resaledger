@@ -90,7 +90,8 @@ function configChanges(before, after) {
   ]
   const denyChanges = enforcementList('agent.deny', deny(before), deny(after))
   if (denyChanges.length === 0 && reasons(before) !== reasons(after)) denyChanges.push(enforcementChange('agent.deny', false, 'agent.deny: a reason changed'))
-  return [...changes, ...denyChanges, ...unknownKeyChanges(before.unknown ?? {}, after.unknown ?? {})]
+  const pushChanges = enforcementSwitch('agent.pushNeedsHandoff', before.agent.pushNeedsHandoff, after.agent.pushNeedsHandoff)
+  return [...changes, ...denyChanges, ...pushChanges, ...unknownKeyChanges(before.unknown ?? {}, after.unknown ?? {})]
 }
 
 /**

@@ -21,7 +21,7 @@ export const DEFAULTS = Object.freeze({
   gates: Object.freeze({ commit: Object.freeze([]), verify: Object.freeze([]) }),
   ci: Object.freeze({ runGates: true }),
   phases: Object.freeze([]),
-  agent: Object.freeze({ deny: Object.freeze([]) })
+  agent: Object.freeze({ deny: Object.freeze([]), pushNeedsHandoff: false })
 })
 
 /** The keys each preset decides. `protected` is a function of the base branch. */
@@ -49,7 +49,7 @@ const CONFIG_KEYS = [
   'phases',
   'agent'
 ]
-const CONFIG_SECTION_KEYS = { gates: ['commit', 'verify'], ci: ['runGates'], agent: ['deny'] }
+const CONFIG_SECTION_KEYS = { gates: ['commit', 'verify'], ci: ['runGates'], agent: ['deny', 'pushNeedsHandoff'] }
 const DENY_RULE_KEYS = ['pattern', 'reason']
 const COMMIT_STYLES = ['free', 'conventional']
 const AI_ATTRIBUTIONS = ['allow', 'forbid']
@@ -133,7 +133,7 @@ export function parseConfig(text) {
   }
 
   // A key this guard does not know is kept, because a later 1.x release may have added it
-  // (spec 15); one within two letters of a known key is a typo, which would silently drop a rule.
+  // (spec 15); one close to a known key is a typo (util's likelyTypo), which would silently drop a rule.
   const unknown = {}
   const unknownKeys = (object, known, parent) => {
     for (const key of Object.keys(object)) {
@@ -298,6 +298,8 @@ export function parseConfig(text) {
     }
   }
 
+  const pushNeedsHandoff = boolean(agentSection, 'pushNeedsHandoff', DEFAULTS.agent.pushNeedsHandoff, ['agent', 'pushNeedsHandoff'])
+
   if (problems.length > 0) {
     problems.sort((a, b) => a.line - b.line)
     return { config: null, problems }
@@ -320,7 +322,7 @@ export function parseConfig(text) {
     gates,
     ci,
     phases,
-    agent: { deny },
+    agent: { deny, pushNeedsHandoff },
     unknown
   }
   return { config, problems }
@@ -354,6 +356,6 @@ export function loadConfig(read) {
 /** The effective configuration as JSON text, without the compiled regular expressions. */
 export function effectiveConfigJson(config) {
   const { branchRegex, agent, unknown, ...rest } = config
-  const plain = { ...rest, agent: { deny: agent.deny.map(({ pattern, reason }) => ({ pattern, reason })) } }
+  const plain = { ...rest, agent: { deny: agent.deny.map(({ pattern, reason }) => ({ pattern, reason })), pushNeedsHandoff: agent.pushNeedsHandoff } }
   return JSON.stringify(plain, null, 2)
 }

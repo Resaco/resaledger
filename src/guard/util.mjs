@@ -27,27 +27,36 @@ export function repositoryRoot() {
   return git('rev-parse', '--show-toplevel').replace(/\\/g, '/')
 }
 
-/** The Levenshtein distance between two strings: insertions, deletions and substitutions. */
+/**
+ * The edit distance between two strings: insertions, deletions, substitutions and swaps of
+ * two neighbouring letters, each counting one (the optimal string alignment distance).
+ */
 export function editDistance(a, b) {
-  let previous = Array.from({ length: b.length + 1 }, (_, index) => index)
+  const rows = [Array.from({ length: b.length + 1 }, (_, index) => index)]
   for (let i = 1; i <= a.length; i += 1) {
     const current = [i]
     for (let j = 1; j <= b.length; j += 1) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1
-      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost)
+      current[j] = Math.min(rows[i - 1][j] + 1, current[j - 1] + 1, rows[i - 1][j - 1] + cost)
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) current[j] = Math.min(current[j], rows[i - 2][j - 2] + 1)
     }
-    previous = current
+    rows.push(current)
   }
-  return previous[b.length]
+  return rows[a.length][b.length]
 }
 
-/** The known name closest to name within distance 2, ignoring case, or null. Ties go to the first. */
+/** How far a name may be from a known one and still be its typo: 2 for six letters or more, else 1 (spec 5.2, 5.3). */
+function typoLimit(known) {
+  return known.length >= 6 ? 2 : 1
+}
+
+/** The known name closest to name within its typo limit, ignoring case, or null. Ties go to the first. */
 export function likelyTypo(name, known) {
   let best = null
-  let bestDistance = 3
+  let bestDistance = Infinity
   for (const candidate of known) {
     const distance = editDistance(name.toLowerCase(), candidate.toLowerCase())
-    if (distance < bestDistance) {
+    if (distance <= typoLimit(candidate) && distance < bestDistance) {
       best = candidate
       bestDistance = distance
     }

@@ -63,8 +63,7 @@ function githooksHookActive(root, folder, name) {
  * ResaLedger hook, or a hook manager's hook is installed and its configuration calls the guard.
  * A clone set up before pre-merge-commit was shipped is not active until it is updated.
  */
-export function hooksActive() {
-  const root = repositoryRoot()
+export function hooksActive(root = repositoryRoot()) {
   let folder = git('-C', root, 'rev-parse', '--git-path', 'hooks')
   if (!isAbsolute(folder)) folder = join(root, folder)
   return GIT_HOOKS.every((name) => githooksHookActive(root, folder, name))

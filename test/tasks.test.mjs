@@ -375,6 +375,15 @@ describe('validateTask: fields', () => {
     assert.match(problems[1].message, /no status/)
   })
 
+  test('keeps a free field two letters from a short known name, such as Later and Lane', () => {
+    passes(FILE, taskText('S4 Store projects', ['Status: todo', 'Later: after the release']))
+  })
+
+  test('reports Lnae and Pln as likely typos of the short names Lane and Plan', () => {
+    fails(FILE, taskText('S4 Store projects', ['Status: todo', 'Lnae: s4']), /"Lnae" looks like a typo\. Write "- Lane:"/)
+    fails(FILE, taskText('S4 Store projects', ['Status: todo', 'Pln: none']), /"Pln" looks like a typo\. Write "- Plan:"/)
+  })
+
   test('reports a known field in the wrong case as a typo', () => {
     fails(FILE, taskText('S4 Store projects', ['Status: todo', 'depends on: S1']), /"depends on" looks like a typo\. Write "- Depends on:"/)
   })

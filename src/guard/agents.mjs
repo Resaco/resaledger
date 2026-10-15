@@ -20,7 +20,7 @@ import { relative, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { DEFAULTS, loadConfig } from './config.mjs'
-import { handoffProblems } from './handoff.mjs'
+import { handoffProblems, handoffReport } from './handoff.mjs'
 import { activateHooks } from './githooks.mjs'
 import { currentLane } from './lanes.mjs'
 
@@ -692,33 +692,59 @@ function agentsGitRefusal(args, context, cwd) {
     if (force || refspecs.some((refspec) => refspec.startsWith('+'))) {
       return 'a forced push rewrites history that others may have. Push normally; if the push is rejected, fetch, merge or rebase your own unpushed commits, and push again'
     }
-    const protectedBranches = context.config.protected
-    if (protectedBranches.length === 0) return null
-    if (options.includes('--all') || options.includes('--branches')) {
-      return `"git push --all" pushes every branch, including the protected ${protectedBranches.map((branch) => `"${branch}"`).join(', ')}. Push your lane branch by name`
-    }
-    const current = agentsBranchAt(context, folder)
-    const deleting = options.includes('-d') || options.includes('--delete')
-    const targets = []
-    if (refspecs.length === 0) {
-      if (current) targets.push(current)
-    }
-    for (const refspec of refspecs) {
-      const colon = refspec.indexOf(':')
-      const destination = colon === -1 ? refspec : refspec.slice(colon + 1) || refspec.slice(0, colon)
-      if (destination.includes('*')) {
-        targets.push(...protectedBranches)
-        continue
-      }
-      const branch = agentsPushBranch(destination, current)
-      if (branch) targets.push(branch)
-    }
-    const hit = targets.find((branch) => protectedBranches.includes(branch))
-    if (hit) {
-      return `"${hit}" is a protected branch, so nothing is ${deleting ? 'deleted from' : 'pushed to'} it. Push your lane branch and open a pull request`
-    }
+    const protectedRefusal = agentsProtectedPushRefusal(options, refspecs, context, folder)
+    if (protectedRefusal) return protectedRefusal
+    if (context.config.agent.pushNeedsHandoff) return agentsPushHandoffRefusal(context, folder)
   }
   return null
+}
+
+/** The refusal for a push that would reach a protected branch, or null. */
+function agentsProtectedPushRefusal(options, refspecs, context, folder) {
+  const protectedBranches = context.config.protected
+  if (protectedBranches.length === 0) return null
+  if (options.includes('--all') || options.includes('--branches')) {
+    return `"git push --all" pushes every branch, including the protected ${protectedBranches.map((branch) => `"${branch}"`).join(', ')}. Push your lane branch by name`
+  }
+  const current = agentsBranchAt(context, folder)
+  const deleting = options.includes('-d') || options.includes('--delete')
+  const targets = []
+  if (refspecs.length === 0) {
+    if (current) targets.push(current)
+  }
+  for (const refspec of refspecs) {
+    const colon = refspec.indexOf(':')
+    const destination = colon === -1 ? refspec : refspec.slice(colon + 1) || refspec.slice(0, colon)
+    if (destination.includes('*')) {
+      targets.push(...protectedBranches)
+      continue
+    }
+    const branch = agentsPushBranch(destination, current)
+    if (branch) targets.push(branch)
+  }
+  const hit = targets.find((branch) => protectedBranches.includes(branch))
+  if (hit) {
+    return `"${hit}" is a protected branch, so nothing is ${deleting ? 'deleted from' : 'pushed to'} it. Push your lane branch and open a pull request`
+  }
+  return null
+}
+
+/**
+ * With agent.pushNeedsHandoff (spec 11): the refusal for a push while handoff fails in the
+ * worktree the push runs in, or null. The check that the lane is pushed is left out, since the
+ * push does that; like handoff, it runs no gates. A folder outside this repository is not judged.
+ */
+function agentsPushHandoffRefusal(context, folder) {
+  const worktree = agentsWorktreeOf(context, folder)
+  if (!worktree) return null
+  const root = worktree.top
+  const { config, problems: configProblems } =
+    root === agentsRealPath(context.root) && context.loadedConfig ? { config: context.loadedConfig, problems: [] } : loadConfig(agentsCommittedFile(root))
+  const problems = config ? handoffProblems({ root, config: { ...config, requirePushed: false }, lane: worktree.branch }) : configProblems
+  if (problems.length === 0) return null
+  return `agent.pushNeedsHandoff is on, so an agent pushes only work that is handed over, and "${context.guard} handoff" does not pass here:
+${handoffReport(problems)}
+Fix these, run handoff, and push again`
 }
 
 /** The paths a command writes that the guard can see: redirections, tee and sed -i. */
@@ -1030,6 +1056,14 @@ Finish the work and run handoff, or tell the user exactly what is left. (This re
   console.error(`✖ ResaLedger: ${message}`)
 }
 
+/**
+ * A reader of the files committed at HEAD in a worktree: the rules come from there, so an agent
+ * cannot lift one by editing the configuration without committing it.
+ */
+function agentsCommittedFile(root) {
+  return (path) => agentsGit(root, ['show', `HEAD:${path}`])
+}
+
 /** The repository, its configuration and the session, for one hook call; null outside a repository. */
 function agentsContext(session, adapter) {
   const cwd = typeof session.cwd === 'string' && session.cwd !== '' && existsSync(session.cwd) ? resolve(session.cwd) : process.cwd()
@@ -1038,15 +1072,9 @@ function agentsContext(session, adapter) {
   const [top, common] = out.split('\n')
   const root = resolve(top)
   process.chdir(root)
-  const loaded = loadConfig((path) => {
-    try {
-      return readFileSync(resolve(root, path), 'utf8')
-    } catch {
-      return null
-    }
-  })
+  const loaded = loadConfig(agentsCommittedFile(root))
   const config = loaded.config
-  const effective = config ?? { dir: DEFAULTS.dir, protected: [], agent: { deny: [] } }
+  const effective = config ?? { dir: DEFAULTS.dir, protected: [], agent: { deny: [], pushNeedsHandoff: false } }
   const key = typeof session.id === 'string' ? session.id.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) : ''
   return {
     root,
