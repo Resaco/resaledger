@@ -192,17 +192,20 @@ function fileChanges(beforeReader, afterReader, beforeDir, afterDir, released) {
 
 /**
  * The decisions a pull request adds (in the head, not at the merge base), with the ids each
- * names on its "- Weakens:" line: [{ file, by, ids }].
+ * names on its "- Weakens:" line: [{ file, by, ids }]. Each tree is read in its own folder
+ * (mergeBaseDir, dir), so a decision that moves along with the workspace is not added.
  */
-function addedDecisions(mergeBaseReader, headReader, dir) {
-  const folder = `${dir}/decisions`
+function addedDecisions(mergeBaseReader, headReader, mergeBaseDir, dir) {
   // Directly in decisions/, as the records check reads them; a deeper file is no decision.
-  const direct = (reader) => reader.list(folder).filter((file) => /\.md$/i.test(file) && !file.slice(folder.length + 1).includes('/'))
+  const direct = (reader, root) => {
+    const folder = `${root}/decisions`
+    return reader.list(folder).filter((file) => /\.md$/i.test(file) && !file.slice(folder.length + 1).includes('/'))
+  }
   // A decision the merge base has under any name, renamed or copied, is not added by this change.
   const text = (reader, file) => (reader.read(file) ?? '').replace(/\r\n?/g, '\n').trim()
-  const known = new Set(direct(mergeBaseReader).map((file) => text(mergeBaseReader, file)))
+  const known = new Set(direct(mergeBaseReader, mergeBaseDir).map((file) => text(mergeBaseReader, file)))
   const decisions = []
-  for (const file of direct(headReader)) {
+  for (const file of direct(headReader, dir)) {
     if (mergeBaseReader.read(file) !== null || known.has(text(headReader, file))) continue
     const decision = parseDecision(file, headReader.read(file) ?? '')
     const field = (name) => decision.fields.find((item) => item.name === name)
@@ -237,7 +240,8 @@ export function enforcementCheck(root, { from, mergeBase, head, adds, released =
   const dir = after.config?.dir ?? before.dir
   found.push(...fileChanges(beforeReader, headReader, before.dir, dir, released))
 
-  const decisions = addedDecisions(mergeBaseReader, headReader, dir)
+  const mergeBaseDir = (mergeBaseReader === beforeReader ? before : loadConfig(mergeBaseReader).config)?.dir ?? before.dir
+  const decisions = addedDecisions(mergeBaseReader, headReader, mergeBaseDir, dir)
   const changes = found.map((change) => {
     const decision = change.kind === 'weakening' ? decisions.find(({ ids }) => ids.has(change.id)) : undefined
     return { ...change, decidedBy: decision ? { file: decision.file, by: decision.by } : null }

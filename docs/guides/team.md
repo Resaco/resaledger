@@ -343,6 +343,15 @@ Only a decision that the pull request adds counts, and only one directly in `led
 
 A loosened rule takes effect once it is on `main`, because CI judges every pull request by the rules of `main`. So a pull request that raises `wip` cannot also claim the fourth task: merge the decision first, then claim.
 
+## Moving the workspace folder
+
+To keep the records somewhere else, such as `docs/ledger/`, move them in a pull request of their own:
+
+1. Move the folder with `git mv ledger docs/ledger`, and set `"dir": "docs/ledger"` in `.resaledger.json`.
+2. Run `npx resaledger update --force`. The git hooks and the `AGENTS.md` block still name the old folder, so a plain `update` keeps them as changed by hand; `--force` rewrites them for the new one.
+3. Add a decision in the new folder with the line `- Weakens: dir`. CI judges the pull request by the rules of `main`, reads the records of each side in its own folder and compares tasks by id, so the move passes with the decision and fails on enforcement without it. A task, decision or log entry left behind counts as deleted.
+4. Commit with `Task: maintenance`. Commits that name a task wait until the move is on `main`: until then, CI looks for each commit's tasks in the old folder.
+
 ## Updating the guard
 
 `npx resaledger update` renews the guard, the git hooks, the workflow and the `AGENTS.md` block when they are a released version. A file changed by hand is shown and kept. On a protected `main`, run it on a lane branch:
