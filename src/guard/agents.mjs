@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { relative, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { DEFAULTS, loadConfig } from './config.mjs'
 import { handoffProblems } from './handoff.mjs'
 import { currentLane } from './lanes.mjs'
@@ -710,21 +710,38 @@ function agentsSnapshot(root) {
   return { head, state: hash }
 }
 
-/** Records where the session started, unless it is recorded already. */
+/**
+ * Records where the session started, unless it is recorded already. The record is written to a
+ * temporary file and then linked into place, so a concurrent reader sees either no record or a
+ * whole one, and a record once in place is never replaced: concurrent calls never reset it.
+ */
 function agentsRecordStart(context) {
   const file = agentsSessionFile(context, 'start')
   if (!file || existsSync(file)) return
+  const temporary = `${file}.${process.pid}.tmp`
   try {
     mkdirSync(context.stateDir, { recursive: true })
-    writeFileSync(file, `${JSON.stringify(agentsSnapshot(context.root))}\n`, { flag: 'wx' })
-  } catch {}
+    writeFileSync(temporary, `${JSON.stringify(agentsSnapshot(context.root))}\n`)
+    try {
+      linkSync(temporary, file)
+    } catch (error) {
+      // A file system without hard links: a rename is atomic too, but replaces, so only when still absent.
+      if (error.code !== 'EEXIST' && !existsSync(file)) renameSync(temporary, file)
+    }
+  } catch {
+  } finally {
+    try {
+      unlinkSync(temporary)
+    } catch {}
+  }
 }
 
-/** Removes the state of sessions older than AGENTS_SESSION_DAYS. */
+/** Removes the state of other sessions older than AGENTS_SESSION_DAYS; the current one's stays. */
 function agentsPruneSessions(context) {
   if (!context.stateDir || !existsSync(context.stateDir)) return
   const limit = Date.now() - AGENTS_SESSION_DAYS * 24 * 60 * 60 * 1000
   for (const name of readdirSync(context.stateDir)) {
+    if (name.startsWith(`${context.sessionKey}.`)) continue
     const path = resolve(context.stateDir, name)
     try {
       if (statSync(path).mtimeMs < limit) unlinkSync(path)
@@ -754,7 +771,8 @@ function agentsStop(context) {
   try {
     start = JSON.parse(readFileSync(startFile, 'utf8'))
   } catch {
-    // No record of the start: the session's changes are unknown, so it starts now.
+    // No record of the start: the session's changes are unknown, so it starts now. Records are
+    // whole or absent, and agentsRecordStart never replaces one, so this cannot reset a start.
     agentsRecordStart(context)
     return
   }

@@ -73,6 +73,21 @@ function hook(r, agent, event, input, cwd = r.root) {
 /** A Bash call from Claude Code with this command. */
 const bash = (r, command, session = 'shell') => hook(r, 'claude', 'pre-tool', fixture('claude-pre-tool-bash', r.root, { session_id: session, tool_input: { command } }))
 
+/**
+ * Starts the repository's guard with these arguments and writes input to its stdin only after
+ * delay milliseconds, as an agent or git may; resolves to { status, out }.
+ */
+function late(r, args, input, delay) {
+  return new Promise((done) => {
+    const child = spawn(process.execPath, [join(r.root, 'ledger', 'scripts', 'records.mjs'), ...args], { cwd: r.root, env: ENV })
+    let out = ''
+    child.stdout.on('data', (data) => (out += data))
+    child.stderr.on('data', (data) => (out += data))
+    child.on('close', (status) => done({ status, out }))
+    setTimeout(() => child.stdin.end(input), delay)
+  })
+}
+
 function refused(result, pattern) {
   assert.equal(result.status, 2, result.out)
   assert.match(result.out, /✖ ResaLedger: /)
@@ -294,18 +309,19 @@ describe('the end-of-turn reminder', () => {
     allowed(hook(r, 'codex', 'stop', fixture('codex-stop', r.root, { session_id: 'once' })))
   })
 
-  test('fires once when two configurations call it at the same time', async () => {
+  test('fires once when several configurations call it at the same time, every time', async () => {
+    // Each round runs a new session against the same changed tree: six stop hooks start at once,
+    // and their input arrives a little after they start, as an agent may write it.
     const r = workspace()
-    allowed(hook(r, 'claude', 'session-start', fixture('claude-session-start', r.root, { session_id: 'twice' })))
-    r.write('src/app.js', 'console.log("changed")\n')
-    const call = (agent) =>
-      new Promise((done) => {
-        const child = spawn(process.execPath, [join(r.root, 'ledger', 'scripts', 'records.mjs'), 'hook', agent, 'stop'], { cwd: r.root, env: ENV })
-        child.on('close', (status) => done(status))
-        child.stdin.end(fixture(`${agent}-stop`, r.root, { session_id: 'twice' }))
-      })
-    const statuses = await Promise.all([call('claude'), call('codex'), call('claude')])
-    assert.deepEqual(statuses.sort(), [0, 0, 2])
+    for (let round = 0; round < 8; round++) {
+      const session = `race-${round}`
+      // Every third session's start is never seen, so its first hook call records it.
+      if (round % 3 === 2) allowed(bash(r, 'npm test', session))
+      else allowed(hook(r, 'claude', 'session-start', fixture('claude-session-start', r.root, { session_id: session })))
+      r.write('src/app.js', `console.log("changed ${round}")\n`)
+      const statuses = await Promise.all(['claude', 'codex', 'claude', 'codex', 'claude', 'codex'].map((agent, index) => late(r, ['hook', agent, 'stop'], fixture(`${agent}-stop`, r.root, { session_id: session }), index % 2 ? 30 : 0)))
+      assert.deepEqual(statuses.map(({ status }) => status).sort(), [0, 0, 0, 0, 0, 2], `round ${round}: ${statuses.map(({ out }) => out).join('\n')}`)
+    }
   })
 
   test('stays quiet when the session changed nothing, though handoff fails', () => {
@@ -341,6 +357,28 @@ describe('the end-of-turn reminder', () => {
     allowed(hook(r, 'claude', 'session-start', fixture('claude-session-start', r.root, { session_id: 'a/../b c' })))
     assert.ok(existsSync(join(r.root, '.git', 'resaledger', 'sessions', 'a_.._b_c.start')))
     assert.equal(r.git('status', '--porcelain').out, '')
+  })
+})
+
+describe('input that arrives after the guard starts', () => {
+  const r = workspace({ preset: 'team' })
+  test('a pre-tool refusal still refuses', async () => {
+    const result = await late(r, ['hook', 'claude', 'pre-tool'], fixture('claude-pre-tool-bash', r.root, { tool_input: { command: 'git push --force' } }), 300)
+    refused(result, /forced push/)
+  })
+  test('pre-push still refuses a push to a protected branch', async () => {
+    const head = r.git('rev-parse', 'HEAD').out.trim()
+    const result = await late(r, ['pre-push', 'origin', 'url'], `refs/heads/main ${head} refs/heads/main ${'0'.repeat(40)}\n`, 300)
+    assert.equal(result.status, 1, result.out)
+    assert.match(result.out, /"main" is a protected branch/)
+  })
+  test('no stdin and an empty pipe are read as no input, at once', async () => {
+    const guard = join(r.root, 'ledger', 'scripts', 'records.mjs')
+    const started = Date.now()
+    const none = spawnSync(process.execPath, [guard, 'hook', 'claude', 'pre-tool'], { cwd: r.root, env: ENV, stdio: ['ignore', 'pipe', 'pipe'] })
+    assert.equal(none.status, 0)
+    allowed(await late(r, ['hook', 'claude', 'pre-tool'], '', 0))
+    assert.ok(Date.now() - started < 5000)
   })
 })
 

@@ -1,7 +1,8 @@
 // The command line of the guard. This module runs last in the bundle.
 // VERSION is defined by scripts/bundle.mjs from package.json.
-import { readFileSync } from 'node:fs'
+import { readFileSync, readSync } from 'node:fs'
 import { join } from 'node:path'
+import { isatty } from 'node:tty'
 import { hookCommand } from './agents.mjs'
 import { ciCommand } from './ci.mjs'
 import { claimCommand } from './claim.mjs'
@@ -102,15 +103,37 @@ function configCommand() {
   console.log(effectiveConfigJson(config))
 }
 
-/** All of stdin as text, or '' when there is nothing to read. */
+/**
+ * All of stdin as text, up to its end; '' for a terminal. The caller (an agent, or git for
+ * pre-push) may write after this process starts, and a pipe can be non-blocking, so a read
+ * that finds nothing yet (EAGAIN) waits and tries again instead of taking the input as empty.
+ * That wait ends after STDIN_WAIT_MS with what was read; a blocking pipe that never closes is
+ * left to the caller's own hook timeout, as any read would be. process.stdin is never touched:
+ * opening it makes the pipe non-blocking.
+ */
+const STDIN_WAIT_MS = 10 * 1000
 function readStdin() {
-  if (process.stdin.isTTY) return ''
-  try {
-    return readFileSync(0, 'utf8')
-  } catch (error) {
-    if (error.code === 'EOF' || error.code === 'EAGAIN') return ''
-    throw error
+  if (isatty(0)) return ''
+  const chunks = []
+  const buffer = Buffer.alloc(64 * 1024)
+  const pause = new Int32Array(new SharedArrayBuffer(4))
+  const deadline = Date.now() + STDIN_WAIT_MS
+  for (;;) {
+    let count
+    try {
+      count = readSync(0, buffer, 0, buffer.length, null)
+    } catch (error) {
+      if (error.code === 'EAGAIN' && Date.now() < deadline) {
+        Atomics.wait(pause, 0, 0, 5)
+        continue
+      }
+      if (['EAGAIN', 'EOF', 'EBADF'].includes(error.code)) break
+      throw error
+    }
+    if (count === 0) break
+    chunks.push(Buffer.from(buffer.subarray(0, count)))
   }
+  return Buffer.concat(chunks).toString('utf8')
 }
 
 function hooksCommand(args) {
