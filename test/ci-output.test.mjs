@@ -179,11 +179,11 @@ describe('the job summary and the comment, rendered from fixtures', () => {
     const joiner = '\u2060'
     const result = fixture('pull-request')
     result.moved[0].title = "Fix @alice's #12 and `@bob`"
-    result.moved[0].evidence = 'team/shop#7, GH-9 and @org/reviewers; mail me at dev@example.invalid'
+    result.moved[0].evidence = 'team/shop#7, GH-9 and @org/reviewers; built in a dev@home setup'
     const markdown = ciMarkdown(result)
     const line = markdown.split('\n').find((text) => text.startsWith('- **S4**'))
     assert.equal(line, `- **S4** Fix @${joiner}alice's #${joiner}12 and \`@bob\` · doing → done`)
-    assert.match(markdown, new RegExp(`\n {2}Evidence: team/shop#${joiner}7, GH${joiner}-9 and @${joiner}org/reviewers; mail me at dev@example\\.invalid\n`))
+    assert.match(markdown, new RegExp(`\n {2}Evidence: team/shop#${joiner}7, GH${joiner}-9 and @${joiner}org/reviewers; built in a dev@home setup\n`))
     assert.doesNotMatch(markdown.replace(/`[^`]*`/g, ''), /(^|[^\w])@\w|#\d|GH-\d/)
   })
 
