@@ -13,7 +13,7 @@ On a pull request, `ci`:
 - refuses a change to a task another lane holds, and a deleted task that someone holds;
 - refuses a task id that also exists, as a different task, on the base or in another open branch;
 - wants evidence on every task that becomes `done`;
-- runs the gates on the head, with the base's commands, or with `ci.runGates: false` in the configuration, wants a stamp for the head's code instead;
+- runs the gates on the head, with the base's commands and without `GITHUB_TOKEN` or GitHub's `ACTIONS_*` variables in their environment, or with `ci.runGates: false` in the configuration, wants a stamp for the head's code instead;
 - lists every change to the enforcement files and fails a weakening one unless the pull request adds a decision that names it ([the team guide](team.md#a-deliberate-loosening-needs-a-decision)).
 
 On a push to the base, it validates the records and checks the new commits. It leaves out merge commits and the commits GitHub makes when it merges a pull request, which were checked in the pull request, so squash merges work.
@@ -34,10 +34,11 @@ What the workflow does:
 
 1. **It runs on every pull request and every push.** A workflow file cannot name the base branch that only `.resaledger.json` knows, so it passes `--only-base-pushes`: a push to a lane branch is noted and not checked, because its commits are checked in their pull request.
 2. **It checks out the head with its whole history** (`fetch-depth: 0`), without keeping the token in the clone.
-3. **It takes the rules from the base.** It reads `dir` from the base commit's `.resaledger.json`, takes that commit's guard, `<dir>/scripts/records.mjs`, and runs it in the head's checkout. For a push, the commit before the push stands in for the base. The first pull request that adds ResaLedger has no base rules, so it is judged by its own, and the output says so.
+3. **It takes the rules from the base.** It reads `dir` from the base commit's `.resaledger.json`, checks it with the guard's own folder rule (and stops with a message when it fails), takes that commit's guard, `<dir>/scripts/records.mjs`, and runs it in the head's checkout. For a push, the commit before the push stands in for the base. The first pull request that adds ResaLedger has no base rules, so it is judged by its own, and the output says so.
 4. **It handles guard updates.** When the head's guard names another version, it fetches that release from npm and passes it with `--release` ([below](#updates-to-the-guard)).
+5. **It does not hold a runner for long.** The job stops after 30 minutes, and a new push to a pull request cancels the check still running for the previous one. Pushes to a branch are all checked.
 
-Its permissions are read-only, apart from `pull-requests: write` for its one job, so it can comment. It runs on `pull_request`, never on `pull_request_target`, so a pull request from a fork runs its gates without secrets and with a read-only token.
+Its permissions are read-only, apart from `pull-requests: write` for its one job, so it can comment. It runs on `pull_request`, never on `pull_request_target`, so a pull request from a fork runs its gates without secrets and with a read-only token. `ci` refuses `pull_request_target` if a workflow is changed to use it.
 
 ### What you see
 
@@ -124,5 +125,7 @@ node ../records.mjs ci --base origin/main --head HEAD --lane t1-add-a-price-list
   ```
 
 - **The head's guard instead of the base's.** Running the head's own `records.mjs` works, and it still takes the configuration from the base, but the code that judges the pull request is then the pull request's. Take the guard from the base, as in step 2.
+- **A working tree that is not at the head.** The gates run in the checkout, so `ci` fails the gates check without running them when the checkout is at another commit, such as the base or a merge ref. Check out the head first.
+- **Gates that take longer than 30 minutes.** The workflow's `timeout-minutes` stops the job. Raising it changes the workflow, which the check lists and which needs a decision.
 - **A shallow clone.** The commits between the merge base and the head are missing, and the check cannot run. Fetch the whole history.
 - **Gates that need a service.** CI runs the gates on the head. If a verify gate needs a database or a browser, set it up in the CI job before the check, or set `ci.runGates` to `false` and commit a stamp from `verify` with each pull request. Turning `runGates` off is a weakening change, so it needs a decision.

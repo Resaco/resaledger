@@ -205,7 +205,8 @@ function orders(items) {
 describe('three lanes work at once', () => {
   test('each lane passes ci as a pull request into main', () => {
     for (const lane of LANES) {
-      const out = ok(main.cli('ci', '--base', 'main', '--head', lane.branch, '--lane', lane.branch))
+      // CI runs in a checkout of the head: the gates refuse to judge any other working tree.
+      const out = ok(lane.at.cli('ci', '--base', 'main', '--head', lane.branch, '--lane', lane.branch))
       assert.doesNotMatch(out, /✖/)
     }
   })

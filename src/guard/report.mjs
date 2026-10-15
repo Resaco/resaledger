@@ -42,7 +42,7 @@ export function ciCheckLine(check, result) {
       if (gates.mode === 'stamp') return `gates: ${problems}${gates.stamp ? `the head carries its stamp ${gates.stamp}` : 'no stamp for the head'} (ci.runGates is false)`
       const timings = gates.passed.map(({ command, seconds }) => `${command} ✔ ${seconds} s`)
       if (gates.failure) timings.push(`${gates.failure.command} ✖`)
-      return `gates on ${ciShort(gates.ranOn)}: ${timings.join(' · ')}${note}`
+      return `gates on ${ciShort(gates.ranOn)}: ${timings.length > 0 ? timings.join(' · ') : 'not run'}${note}`
     }
     default:
       return `${check.name}: ${problems}`.replace(/; $/, '')
@@ -149,7 +149,7 @@ function ciGatesSummary(result) {
   if (gates.mode === 'stamp') return `**Gates:** ${gates.stamp ? `the head carries its stamp ${ciMarkdownCode(gates.stamp)}` : '✖ no stamp for the head'}, as ci.runGates is false ${from}`
   const timings = gates.passed.map(({ command, seconds }) => `${ciMarkdownCode(command)} ✔ ${seconds} s`)
   if (gates.failure) timings.push(`${ciMarkdownCode(gates.failure.command)} ✖ (exit ${gates.failure.status})`)
-  return `**Gates** on \`${ciShort(gates.ranOn)}\`: ${timings.join(' · ')} ${from}`
+  return `**Gates** on \`${ciShort(gates.ranOn)}\`: ${timings.length > 0 ? timings.join(' · ') : 'not run'} ${from}`
 }
 
 /** The enforcement lines: "unchanged", or each change with its id. */

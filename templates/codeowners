@@ -3,5 +3,5 @@
 /.resaledger.json @your-org/maintainers
 /{{dir}}/scripts/records.mjs @your-org/maintainers
 /.githooks/ @your-org/maintainers
-/.github/workflows/resaledger.yml @your-org/maintainers
+/.github/workflows/ @your-org/maintainers
 /.github/CODEOWNERS @your-org/maintainers
