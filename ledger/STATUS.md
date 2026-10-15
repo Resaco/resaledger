@@ -8,7 +8,7 @@ Building. Done: the foundation (F), the record format (R), the git hooks (H), th
 
 ## Active work
 
-[T3.4](work/ledger.md#t34-setup-that-works-everywhere), [C2](work/ledger.md#c2-changes-to-enforcement) and [A2](work/ledger.md#a2-cursor-gemini-cli-and-github-copilot), with workers.
+[W5](work/ledger.md#w5-changes), [C2](work/ledger.md#c2-changes-to-enforcement) and [A2](work/ledger.md#a2-cursor-gemini-cli-and-github-copilot), with workers.
 
 ## Last verified
 

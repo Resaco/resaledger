@@ -193,11 +193,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: A lane branch is named `<branchPrefix><id in lowercase>-<slug>`, as spec section 6.3 now says. `claim` does not check that a takeover branch starts from the old lane, and a stale claim gets the same refusal as a live one, with the advice to take it over.
 
 ### W5 `changes`
-- Status: todo
+- Status: doing
 - Depends on: V2
 - Plan: [W-work.md](../plan/W-work.md#w5-changes)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `w5-changes`.
 
 ## C: The CI check
 
