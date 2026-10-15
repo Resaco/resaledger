@@ -2,7 +2,7 @@
 // git to a bare repository, so that the pushed refs and object ids are git's own.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { HOOK_NAMES, renderHook } from '../src/cli/hooks.mjs'
@@ -297,19 +297,31 @@ describe('Git LFS', { skip: process.platform === 'win32' && 'the stand-in git-lf
   function standIn(code = 0) {
     const bin = temporary('resaledger-lfs-')
     const log = join(bin, 'calls.log')
+    const versions = join(bin, 'versions.log')
     const script = `#!/bin/sh
-if [ "$1" = version ]; then echo "git-lfs/0.0.0 (stand-in)"; exit 0; fi
+if [ "$1" = version ]; then echo version >> '${versions}'; echo "git-lfs/0.0.0 (stand-in)"; exit 0; fi
 { printf 'args:'; for arg in "$@"; do printf ' %s' "$arg"; done; printf '\\n'; cat; } >> '${log}'
 echo "stand-in git-lfs ran" >&2
 exit ${code}
 `
     writeFileSync(join(bin, 'git-lfs'), script, { mode: 0o755 })
-    return { bin, log, calls: () => (existsSync(log) ? readFileSync(log, 'utf8').split('args: ').slice(1) : []) }
+    const text = (file) => (existsSync(file) ? readFileSync(file, 'utf8') : '')
+    return { bin, log, calls: () => text(log).split('args: ').slice(1), versions: () => text(versions).split('\n').filter(Boolean) }
   }
 
-  /** git push with the given PATH, through the hooks. */
+  /**
+   * git push with the given PATH, through the hooks. HOME is an empty folder and
+   * XDG_CONFIG_HOME is unset, so git's global attributes on this machine stay out, unless
+   * variables say otherwise.
+   */
   function pushWith(r, path, ...args) {
-    const result = spawnSync('git', ['push', '-q', 'origin', ...args], { cwd: r.root, env: { ...ENV, PATH: path }, encoding: 'utf8' })
+    const variables = typeof args[0] === 'object' ? args.shift() : {}
+    const { XDG_CONFIG_HOME, ...env } = ENV
+    const result = spawnSync('git', ['push', '-q', 'origin', ...args], {
+      cwd: r.root,
+      env: { ...env, HOME: temporary('resaledger-home-'), PATH: path, ...variables },
+      encoding: 'utf8'
+    })
     return { status: result.status, out: `${result.stdout}${result.stderr}` }
   }
 
@@ -352,6 +364,90 @@ exit ${code}
     const lfs = standIn()
     passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane'))
     assert.deepEqual(lfs.calls(), [])
+    assert.deepEqual(lfs.versions(), [])
+  })
+
+  test('a branch that adds filter=lfs, pushed while a branch without it is checked out, runs it', () => {
+    const r = lfsLane()
+    r.git('checkout', '-q', 'main')
+    const lfs = standIn()
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane'))
+    assert.equal(lfs.calls().length, 1)
+  })
+
+  test("the user's grep.patternType does not hide filter=lfs", () => {
+    const r = lfsLane()
+    r.git('config', 'grep.patternType', 'fixed')
+    const lfs = standIn()
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane'))
+    assert.equal(lfs.calls().length, 1)
+    // From a checkout without it, the pushed commit's tree is searched the same way.
+    r.git('checkout', '-q', 'main')
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane:copy'))
+    assert.equal(lfs.calls().length, 2)
+  })
+
+  test("a rule only in the repository's info/attributes counts", () => {
+    const r = workspace()
+    lane(r)
+    r.write('.git/info/attributes', '# the images\n*.psd filter=lfs diff=lfs merge=lfs -text\n')
+    const lfs = standIn()
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane'))
+    assert.equal(lfs.calls().length, 1)
+  })
+
+  test('a rule only in the file core.attributesFile names counts, with a leading ~', () => {
+    const r = workspace()
+    lane(r)
+    const home = temporary('resaledger-home-')
+    writeFileSync(join(home, 'attributes'), '*.psd filter=lfs diff=lfs merge=lfs -text\n')
+    r.git('config', 'core.attributesFile', '~/attributes')
+    const lfs = standIn()
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, { HOME: home }, 'lane'))
+    assert.equal(lfs.calls().length, 1)
+  })
+
+  test("without core.attributesFile, a rule only in $XDG_CONFIG_HOME/git/attributes counts", () => {
+    const r = workspace()
+    lane(r)
+    const xdg = temporary('resaledger-xdg-')
+    mkdirSync(join(xdg, 'git'))
+    writeFileSync(join(xdg, 'git', 'attributes'), '*.psd filter=lfs diff=lfs merge=lfs -text\n')
+    // ~/.config/git/attributes, which XDG_CONFIG_HOME replaces, has no rule.
+    const home = temporary('resaledger-home-')
+    const lfs = standIn()
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, { HOME: home, XDG_CONFIG_HOME: xdg }, 'lane'))
+    assert.equal(lfs.calls().length, 1)
+  })
+
+  test('without core.attributesFile or XDG_CONFIG_HOME, a rule only in ~/.config/git/attributes counts', () => {
+    const r = workspace()
+    lane(r)
+    const home = temporary('resaledger-home-')
+    mkdirSync(join(home, '.config', 'git'), { recursive: true })
+    writeFileSync(join(home, '.config', 'git', 'attributes'), '*.psd filter=lfs diff=lfs merge=lfs -text\n')
+    const lfs = standIn()
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, { HOME: home }, 'lane'))
+    assert.equal(lfs.calls().length, 1)
+  })
+
+  test("a commented rule in the repository's own attributes does not count", () => {
+    const r = workspace()
+    lane(r)
+    r.write('.git/info/attributes', '# *.psd filter=lfs\n')
+    const lfs = standIn()
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, 'lane'))
+    assert.deepEqual(lfs.calls(), [])
+    assert.deepEqual(lfs.versions(), [])
+  })
+
+  test('with no refs on the input, nothing of Git LFS runs', () => {
+    // A hook manager that ran git lfs pre-push first leaves the guard an empty input.
+    const r = lfsLane()
+    const lfs = standIn()
+    passed(spawnHook(r, { PATH: `${lfs.bin}:${process.env.PATH}` }))
+    assert.deepEqual(lfs.calls(), [])
+    assert.deepEqual(lfs.versions(), [])
   })
 
   test('a failing git lfs pre-push fails the push, and its output reaches the user', () => {
@@ -372,7 +468,7 @@ exit ${code}
     writeFileSync(join(bin, 'git'), `#!/bin/sh\nexec '${real}' "$@"\n`, { mode: 0o755 })
     writeFileSync(join(bin, 'node'), `#!/bin/sh\nexec '${process.execPath}' "$@"\n`, { mode: 0o755 })
     const result = pushWith(r, bin, 'lane')
-    refused(result, /this repository uses Git LFS \(a \.gitattributes file names filter=lfs\), but git-lfs was not found on your PATH/)
+    refused(result, /this push uses Git LFS \(filter=lfs in a \.gitattributes file or in git's attributes\), but git-lfs was not found on your PATH/)
     assert.match(result.out, /git lfs pre-push/)
     assert.equal(r.git('ls-remote', 'origin', 'refs/heads/lane').out.trim(), '')
   })
