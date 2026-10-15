@@ -9,8 +9,9 @@ This guide covers GitHub Actions with the shipped workflow, and any other CI sys
 On a pull request, `ci`:
 
 - validates the records in the head;
-- checks every commit from the merge base to the head, each against its own tree: a commit that changes code names a task its lane holds;
+- checks every commit from the merge base to the head, each against its own tree: a commit that changes code names a task its lane holds, or is that other lane's own commit, brought in by a merge or a stacked branch;
 - refuses a change to a task another lane holds, and a deleted task that someone holds;
+- refuses a task this lane holds that another open branch holds as another lane, a double claim, unless this lane took it over with `claim <id> --take`;
 - refuses a task id that also exists, as a different task, on the base or in another open branch;
 - wants evidence on every task that becomes `done`;
 - runs the gates on the head, with the base's commands, or with `ci.runGates: false` in the configuration, wants a stamp for the head's code instead;

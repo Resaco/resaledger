@@ -386,6 +386,54 @@ describe('ci on a pull request', () => {
     passed(ci(r, 'pull_request', pullRequest(r, 'lane-b')))
   })
 
+  test("a stacked lane's code commit that names the holder's task fails the commits check", () => {
+    const r = setup({ tasks: [['S1', 'Bake bread'], ['S2', 'Buy flour']] })
+    r.git('checkout', '-q', '-b', 'lane-a')
+    commit(r, task('S1', 'Bake bread', { status: 'doing', lane: 'lane-a' }), 'chore: claim S1', 'Task: S1')
+    commit(r, { 'src/bread.js': '1\n' }, 'feat: bread', 'Task: S1')
+    r.git('checkout', '-q', '-b', 'lane-b')
+    commit(r, task('S2', 'Buy flour', { status: 'doing', lane: 'lane-b' }), 'chore: claim S2', 'Task: S2')
+    passed(ci(r, 'pull_request', pullRequest(r, 'lane-b')))
+    commit(r, { 'src/bread.js': '2\n' }, 'feat: more bread', 'Task: S1')
+    failed(ci(r, 'pull_request', pullRequest(r, 'lane-b')), /"feat: more bread" names task S1, whose Lane is "lane-a", but the commit is not on that lane's branch "lane-a"/)
+  })
+
+  test('a task this pull request holds that another open branch holds as another lane is a double claim', () => {
+    const r = setup({ tasks: [['S1', 'Bake bread'], ['S2', 'Buy flour']] })
+    r.git('checkout', '-q', '-b', 'lane-b')
+    commit(r, task('S1', 'Bake bread', { status: 'doing', lane: 'lane-b' }), 'chore: claim S1', 'Task: S1')
+    r.git('checkout', '-q', '-b', 'lane-a', 'main')
+    commit(r, task('S1', 'Bake bread', { status: 'doing', lane: 'lane-a' }), 'chore: claim S1', 'Task: S1')
+    failed(
+      ci(r, 'pull_request', pullRequest(r, 'lane-a')),
+      /ledger\/tasks\/S1\.md: task S1 is claimed twice: this lane "lane-a" holds it, and branch "lane-b" holds it as lane "lane-b"\. One lane gives it up, or this one takes it over with "node ledger\/scripts\/records\.mjs claim S1 --take"/
+    )
+    // A takeover recorded from that lane passes.
+    commit(r, task('S1', 'Bake bread', { status: 'doing', lane: 'lane-a', takenOver: 'lane-b at abc1234' }), 'chore: take S1', 'Task: S1')
+    passed(ci(r, 'pull_request', pullRequest(r, 'lane-a')))
+  })
+
+  test('a double claim counts only open branches: merged ones, done copies and the own branch do not', () => {
+    const r = setup({ tasks: [['S1', 'Bake bread'], ['S2', 'Buy flour']] })
+    r.git('checkout', '-q', '-b', 'lane-a')
+    commit(r, task('S1', 'Bake bread', { status: 'doing', lane: 'lane-a' }), 'chore: claim S1', 'Task: S1')
+    // A branch stacked on lane-a carries lane-a's copy: the same lane.
+    r.git('checkout', '-q', '-b', 'lane-c')
+    commit(r, task('S2', 'Buy flour', { status: 'doing', lane: 'lane-c' }), 'chore: claim S2', 'Task: S2')
+    // A branch where another lane once held S1 and finished it holds nothing.
+    r.git('checkout', '-q', '-b', 'lane-d', 'main')
+    commit(r, task('S1', 'Bake bread', { status: 'done', lane: 'lane-d' }), 'docs: S1 done')
+    // A branch merged into the base is not open, whatever its copy says.
+    r.git('checkout', '-q', '-b', 'lane-e', 'main')
+    commit(r, task('S1', 'Bake bread', { status: 'doing', lane: 'lane-e' }), 'chore: claim S1', 'Task: S1')
+    commit(r, task('S1', 'Bake bread'), 'docs: give S1 up')
+    r.git('checkout', '-q', 'main')
+    assert.equal(r.git('merge', '-q', '--no-ff', '-m', 'Merge lane-e', 'lane-e~1').status, 0)
+    commit(r, task('S1', 'Bake bread'), 'docs: S1 is free again')
+    r.git('branch', '-q', '-f', 'lane-e', 'main~1')
+    passed(ci(r, 'pull_request', pullRequest(r, 'lane-a')))
+  })
+
   test('fifty stacked tasks of fifty lanes are read in one batch', () => {
     const ids = Array.from({ length: 50 }, (_, index) => `S${index + 1}`)
     const r = setup({ tasks: ids.map((id) => [id, `Task ${id}`]) })

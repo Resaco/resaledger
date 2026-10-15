@@ -35,7 +35,7 @@ A task that is `doing` belongs to the lane in its `Lane:` field, and only that l
 - In the team preset, `claim` on the protected base creates the lane branch, commits the claim and pushes it, so everyone sees it at once.
 - `claim <id> --take` takes over a task whose lane has stopped, and records where it came from.
 
-Claims are detected, not locked: there is no server. A double claim is visible after one fetch, and CI reports a task held in two open branches.
+Claims are detected, not locked: there is no server. A double claim is visible after one fetch, and CI reports a task held in two open branches: the pull request fails until one lane gives the task up or the other takes it over.
 
 ## Commits name their task
 

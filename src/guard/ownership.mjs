@@ -138,3 +138,34 @@ export function laneCopyProblems(tasks, copies, config) {
   }
   return problems
 }
+
+/** The tasks of a Map from taskRecordsById that a lane holds: [{ id, task }]. */
+export function heldTasks(tasks, lane) {
+  return [...tasks].filter(([, { task }]) => ownershipHolder(task) === lane).map(([id, { task }]) => ({ id, task }))
+}
+
+/**
+ * The double claims of a lane (spec 6.3): a task the lane holds that another open branch holds
+ * under a different lane, unless this lane records a takeover from that lane. held is from
+ * heldTasks; copies is [{ id, branch, task }], the copies of those tasks on the other branches.
+ * One problem per task and other lane, naming the first branch.
+ */
+export function doubleClaimProblems(held, copies, lane, config) {
+  const guard = `node ${config.dir}/scripts/records.mjs`
+  const ours = new Map(held.map(({ id, task }) => [id, task]))
+  const problems = []
+  const seen = new Set()
+  for (const { id, branch, task: copy } of copies) {
+    const task = ours.get(id)
+    const holder = ownershipHolder(copy)
+    if (!task || !holder || holder === lane || ownershipIsTakeover(task, lane, holder)) continue
+    if (seen.has(`${id}\0${holder}`)) continue
+    seen.add(`${id}\0${holder}`)
+    problems.push({
+      file: task.file,
+      line: 0,
+      message: `task ${id} is claimed twice: this lane "${lane}" holds it, and branch "${branch}" holds it as lane "${holder}". One lane gives it up, or this one takes it over with "${guard} claim ${id} --take"`
+    })
+  }
+  return problems
+}

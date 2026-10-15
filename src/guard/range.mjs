@@ -278,6 +278,67 @@ export function isRevert(root, message, parent, commit) {
 }
 
 /**
+ * The branch of each lane in the clone, from one `git for-each-ref`: a Map from lane to
+ * { ref, branch, commit, commits }. ref, branch and commit are those of a remote-tracking branch
+ * (refs/remotes/<remote>/<lane>, the first by name) or else the local one (refs/heads/<lane>);
+ * commits are the tips of all of them. A lane with neither is left out. No fetch.
+ */
+export function laneBranches(root, lanes) {
+  const branches = new Map()
+  const wanted = new Set(lanes)
+  if (wanted.size === 0) return branches
+  // A * in a for-each-ref pattern matches one path segment: one remote name.
+  const patterns = [...wanted].flatMap((lane) => [`refs/remotes/*/${lane}`, `refs/heads/${lane}`])
+  const found = new Map()
+  const output = rangeGit(root, ['for-each-ref', '--format=%(refname)%00%(objectname)%00%(objecttype)%00%(refname:short)', ...patterns]).toString('utf8')
+  for (const line of output.split('\n')) {
+    const [ref, commit, type, branch] = line.split('\0')
+    if (type !== 'commit') continue
+    const remote = ref.startsWith('refs/remotes/')
+    const lane = remote ? ref.slice('refs/remotes/'.length).replace(/^[^/]+\//, '') : ref.slice('refs/heads/'.length)
+    if (!wanted.has(lane)) continue
+    if (!found.has(lane)) found.set(lane, [])
+    found.get(lane).push({ ref, branch, commit, remote })
+  }
+  for (const [lane, refs] of found) {
+    const first = refs.find(({ remote }) => remote) ?? refs[0]
+    branches.set(lane, { ref: first.ref, branch: first.branch, commit: first.commit, commits: [...new Set(refs.map(({ commit }) => commit))] })
+  }
+  return branches
+}
+
+/**
+ * The commits on each lane's branches that are not ancestors of `from` (every one without it),
+ * from one `git rev-list --parents` for all lanes: a Map from lane to a Set of commit ids.
+ * branches is a Map from laneBranches.
+ */
+function rangeLaneReach(root, from, branches) {
+  const reach = new Map()
+  const tips = [...new Set([...branches.values()].flatMap(({ commits }) => commits))]
+  if (tips.length === 0) return reach
+  const parents = new Map()
+  const output = rangeGit(root, ['rev-list', '--parents', ...tips, ...(from ? [`^${from}`] : []), '--']).toString('utf8')
+  for (const line of output.split('\n')) {
+    if (line === '') continue
+    const [hash, ...ids] = line.split(' ')
+    if (!RANGE_HASH.test(hash)) throw rangeUnreadable('the commits of the lane branches')
+    parents.set(hash, ids)
+  }
+  for (const [lane, { commits }] of branches) {
+    const seen = new Set()
+    const stack = commits.filter((commit) => parents.has(commit))
+    while (stack.length > 0) {
+      const commit = stack.pop()
+      if (seen.has(commit)) continue
+      seen.add(commit)
+      for (const parent of parents.get(commit)) if (parents.has(parent) && !seen.has(parent)) stack.push(parent)
+    }
+    reach.set(lane, seen)
+  }
+  return reach
+}
+
+/**
  * The commits of a range, oldest first: [{ hash, short, parents, committer, subject, message,
  * paths, exemption }]. paths are the files a commit touches against its parent (every file for a
  * root commit); for a merge, only the code paths it changes of its own (mergeOwnPaths).
@@ -355,10 +416,15 @@ export function taskFileFor(names, id) {
  *
  * commit is { short, parents, committer, subject, message, paths, exemption }: for a merge,
  * paths are the code paths it changes of its own (mergeOwnPaths). context is { config, lane,
- * skipGitHubMerges, task, startLane }: task(id) is the parsed task in the commit's own tree,
- * or null when it has no file there; startLane(id) is the task's Lane where the range starts
- * (null when the task is not there, has no Lane, or there is no start). A task whose Lane is
- * not the lane is accepted when that Lane was set after the start. lane null skips the lane rule.
+ * skipGitHubMerges, task, startLane, onLane }: task(id) is the parsed task in the commit's own
+ * tree, or null when it has no file there; startLane(id) is the task's Lane where the range
+ * starts (null when the task is not there, has no Lane, or there is no start); the optional
+ * onLane(lane) is { branch, reachable } for a lane with a branch in the clone, reachable telling
+ * whether this commit is on it, and null otherwise. lane null skips the lane rule.
+ *
+ * A task whose Lane is another lane's is accepted when the commit is on that lane's branch (as
+ * after merging the lane); when that lane has no branch in the clone, when its Lane was set
+ * after the start.
  */
 export function checkCommit(commit, context) {
   const { config } = context
@@ -408,13 +474,23 @@ export function checkCommit(commit, context) {
     if (lane !== null && task.lane !== lane) laneChecks.push({ id, task })
   }
 
-  // The lane rule only refuses naming a task that another lane held before the start: a Lane
-  // equal to this lane, or set after the start (by a claim, also in a records-only commit, or
-  // under a branch name that was later renamed), is accepted. Taking a held task without
+  // Another lane's task is accepted on that lane's own commits, which a merge or a stacked
+  // branch brings in, and refused on any other commit, also one a side branch launders in.
+  // Without the lane's branch, the rule only refuses naming a task another lane held before the
+  // start: a Lane set after the start (by a claim, also in a records-only commit, or under a
+  // branch name that was later renamed, or by a lane merged and deleted since) is accepted. Taking a held task without
   // claim --take is caught by the ownership check in pre-commit and CI (H1 and C1), not here.
   for (const { id, task } of laneChecks) {
     if (task.lane === null) {
       problem(`names task ${id}, which has no Lane in that commit. Claim the task for "${lane}" first`)
+      continue
+    }
+    const holder = context.onLane?.(task.lane) ?? null
+    if (holder?.reachable) continue
+    if (holder !== null) {
+      problem(
+        `names task ${id}, whose Lane is "${task.lane}", but the commit is not on that lane's branch "${holder.branch}". Name a task this lane holds, or take it over with claim --take`
+      )
       continue
     }
     if (context.startLane(id) !== task.lane) continue
@@ -423,6 +499,31 @@ export function checkCommit(commit, context) {
     )
   }
   return problems
+}
+
+/**
+ * The lane branches of the other lanes a range's commits name, as onLane(hash, lane) for
+ * checkCommit: { branch, reachable } or null. naming is the commits that name a task id, and
+ * taskOf(commit, id) the parsed task in a commit's tree. Reads git only when a commit names a
+ * task whose Lane is not `lane`.
+ */
+function rangeOnLane(root, from, lane, naming, taskOf) {
+  const holders = new Set()
+  if (lane !== null) {
+    for (const commit of naming) {
+      for (const id of taskTrailers(commit.message).ids) {
+        const task = TASK_ID.test(id) ? taskOf(commit, id) : null
+        if (task?.lane && task.lane !== lane) holders.add(task.lane)
+      }
+    }
+  }
+  if (holders.size === 0) return () => null
+  const branches = laneBranches(root, [...holders])
+  const reach = rangeLaneReach(root, from, branches)
+  return (hash, holder) => {
+    const branch = branches.get(holder)
+    return branch ? { branch: branch.branch, reachable: reach.get(holder).has(hash) } : null
+  }
 }
 
 /**
@@ -437,8 +538,10 @@ export function checkCommit(commit, context) {
  * Each commit is judged by checkCommit, with its own tree and the tasks at `from`: a merge
  * that changes no code of its own and a real revert are skipped (rangeCommits). A commit that
  * changes code needs a Task: trailer; each id it names must be doing or done in that commit's
- * own tree, with a Lane there that is the lane or was set inside the range (not held by another
- * lane already at `from`). "maintenance" is allowed.
+ * own tree, with a Lane there that is the lane, or another lane's when the commit is on that
+ * lane's branch (or, when it has none in the clone, set inside the range). "maintenance" is
+ * allowed. Only a range that names another lane's task reads the lane branches: one
+ * `git for-each-ref` and one `git rev-list` (laneBranches, rangeLaneReach).
  */
 export function checkRange(from, to, context) {
   const { config } = context
@@ -495,12 +598,14 @@ export function checkRange(from, to, context) {
     return lane
   }
 
+  const onLane = rangeOnLane(root, from, context.lane ?? null, naming, (commit, id) => taskIn(entriesOf.get(commit.hash), id))
   return commits.flatMap((commit) =>
     checkCommit(commit, {
       ...context,
       config,
       task: (id) => taskIn(entriesOf.get(commit.hash) ?? new Map(), id),
-      startLane
+      startLane,
+      onLane: (holder) => onLane(commit.hash, holder)
     })
   )
 }
