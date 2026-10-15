@@ -35,7 +35,7 @@ Useful options:
 - `--agents claude,codex,cursor,gemini,copilot` to choose the agent hook configurations instead of detecting them; `none` for none.
 - `--yes` to accept the defaults without questions.
 
-init writes `.resaledger.json`, the workspace README, the guard in `<dir>/scripts/records.mjs`, the git hooks, the managed block in `AGENTS.md` and the hook configurations of the agents it finds. It changes nothing that has uncommitted changes. It prints a commit command at the end; run it after the next two steps.
+init writes `.resaledger.json`, the workspace README, the guard in `<dir>/scripts/records.mjs`, the git hooks, the managed block in `AGENTS.md` and the hook configurations of the agents it finds. It refuses to change a file that has uncommitted changes. It prints a commit command at the end; run it after the next two steps.
 
 For an agent-ledger 0.x workspace, run `npx resaledger migrate --dry-run` first, then `npx resaledger migrate`.
 
