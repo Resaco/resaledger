@@ -106,6 +106,8 @@ export function migrateCommand(args) {
   )
   list('Links that could not be rewritten', unresolved.map((link) => `${link.file}:${link.line}: ${link.target} (${link.unresolved})`))
   list('Waiting for, taken from the notes of blocked tasks', report.waiting.map(({ id, value }) => `${id}: ${value}`))
+  if (report.laneGiven.length > 0)
+    console.log(`\ndoing tasks without a Lane get Lane: ${report.lane}; run migrate on the branch the work continues on, or take them over with claim --take afterwards.`)
   list('Warnings', report.warnings.map((warning) => `! ${warning}`))
   if (plan.problems.length > 0) {
     console.error(`\nProblems with the 1.0 rules in the result (${plan.problems.length}):`)
@@ -113,7 +115,9 @@ export function migrateCommand(args) {
   }
 
   if (plan.problems.length > 0 && !options.acceptProblems) {
-    console.error('\n✖ Nothing was written. Fix these in the 0.x records and commit, or run again with --accept-problems to write anyway and fix them afterwards.')
+    console.error(
+      '\n✖ Nothing was written. Fix these in the 0.x records and commit, or run again with --accept-problems to write anyway; the commit of the migration is then refused until they are fixed.'
+    )
     process.exit(1)
   }
   if (options.dryRun) {
@@ -154,7 +158,10 @@ export function migrateCommand(args) {
   } else if (failed) {
     console.error('✖ the migrated workspace does not pass check although it passed in memory; this is a bug in resaledger. Undo with the command below.')
   }
-  if (plan.problems.length > 0) console.log(`\nFollow-up work: the ${plan.problems.length} problems listed above. Fix them before you commit, or commit and fix them next.`)
+  if (plan.problems.length > 0)
+    console.log(
+      `\nBefore you commit, fix the ${plan.problems.length} problems listed above: the pre-commit hook refuses the commit until they are fixed. See them again with: node ${dir}/scripts/records.mjs check`
+    )
   console.log(`
 Review the change, then commit it:
   ${COMMIT_COMMAND}

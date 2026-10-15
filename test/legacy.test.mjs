@@ -313,6 +313,8 @@ describe('parseLegacyLedger', () => {
     const duplicate = ledger.tasks[3]
     assert.equal(duplicate.fields.Status, 'blocked')
     assert.deepEqual(duplicate.extra, ['- Status: todo'])
+    assert.deepEqual(duplicate.attached, [])
+    assert.deepEqual(ledger.tasks[0].attached, [{ name: 'Evidence', index: 0 }])
   })
 
   test('reads CRLF text the same, and keeps every line', () => {
