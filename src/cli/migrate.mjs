@@ -147,21 +147,21 @@ export function lineDiff(before, after) {
       out.push(`  ${a[i]}`)
       i += 1
       j += 1
-    } else if (j < b.length && (i === a.length || table[i][j + 1] >= table[i + 1][j])) {
-      out.push(`+ ${b[j]}`)
-      j += 1
-    } else {
+    } else if (i < a.length && (j === b.length || table[i + 1][j] >= table[i][j + 1])) {
       out.push(`- ${a[i]}`)
       i += 1
+    } else {
+      out.push(`+ ${b[j]}`)
+      j += 1
     }
   }
   return out.join('\n')
 }
 
-/** A unique path: the candidate, or the candidate with -2, -3 … before .md. */
-function uniquePath(taken, candidate) {
+/** A path no file has, tracked, planned or on disk: the candidate, or it with -2, -3 … before .md. */
+function uniquePath(root, taken, candidate) {
   let path = candidate
-  for (let count = 2; taken.has(path); count += 1) path = candidate.replace(/\.md$/, `-${count}.md`)
+  for (let count = 2; taken.has(path) || existsSync(join(root, path)); count += 1) path = candidate.replace(/\.md$/, `-${count}.md`)
   taken.add(path)
   return path
 }
@@ -296,7 +296,7 @@ function rewriteLinks(text, frame, dest, mapTarget) {
     if (rawPath.startsWith('/')) relativePath = `/${path}`
     else {
       relativePath = posix.relative(posix.dirname(dest), path) || '.'
-      if (mapped?.folder || relativePath === '.') relativePath = `${relativePath.replace(/\/$/, '')}/`
+      if (mapped?.folder || relativePath === '.' || (!mapped && rawPath.endsWith('/'))) relativePath = `${relativePath.replace(/\/$/, '')}/`
     }
     if (!angle) relativePath = relativePath.replace(/ /g, '%20')
     const rewritten = `${relativePath}${newAnchor ? `#${newAnchor}` : ''}`
@@ -536,7 +536,7 @@ export function planMigration(root, options = {}) {
       if (all.length > 0) out.push('', '## Notes', '', ...all)
     }
     const id = /^[A-Za-z0-9._-]+$/.test(task.id) ? task.id : task.id.replace(/[^A-Za-z0-9._-]+/g, '-') || 'task'
-    const path = uniquePath(taken, taskFileName(dir, id, task.title))
+    const path = uniquePath(root, taken, taskFileName(dir, id, task.title))
     put(path, [{ text: `${out.join('\n')}\n`, frame: files.ledger }])
     taskFiles.set(task.anchor, path)
   }
@@ -548,7 +548,7 @@ export function planMigration(root, options = {}) {
   const logFiles = new Map() // log anchor → log file
   for (const entry of legacy.log.entries) {
     const slug = slugify(entry.title.replace(/\s*\([^()]*\)\s*$/, '')) || 'entry'
-    const path = uniquePath(taken, `${dir}/log/${entry.date}-${slug}.md`)
+    const path = uniquePath(root, taken, `${dir}/log/${entry.date}-${slug}.md`)
     put(path, [{ text: `# ${entry.heading}\n${entry.body ? `\n${entry.body}\n` : ''}`, frame: files.log }])
     logFiles.set(entry.anchor, path)
   }
@@ -561,7 +561,7 @@ export function planMigration(root, options = {}) {
   for (const row of decisions.rows) {
     const text = row.decision
     const date = DATE.test(row.date) ? row.date : 'undated'
-    const path = uniquePath(taken, `${dir}/decisions/${date}-${slugify(text) || 'decision'}.md`)
+    const path = uniquePath(root, taken, `${dir}/decisions/${date}-${slugify(text) || 'decision'}.md`)
     const out = [`# ${decisionTitle(text)}`, '', `- Date: ${row.date || '—'}`, `- Decided by: ${row.decidedBy || '—'}`, '- Status: accepted']
     if (text) out.push('', text)
     const extra = decisionExtraCells(row.cells, decisions.header?.cells ?? [], columns)
@@ -731,7 +731,7 @@ export function planMigration(root, options = {}) {
   }
 
   // The migration's log entry.
-  const logPath = uniquePath(taken, `${dir}/log/${today}-migrated-to-resaledger-1-0.md`)
+  const logPath = uniquePath(root, taken, `${dir}/log/${today}-migrated-to-resaledger-1-0.md`)
   const logText = `# ${today} · Migrated to ResaLedger 1.0
 
 This workspace moved from agent-ledger 0.x to ResaLedger 1.0 with \`npx resaledger migrate\`: one file per task, decision and log entry, the status file's lasting facts in the README, and the protocol in the root \`AGENTS.md\`. The 0.x files are in git history before this change. Below, word for word, is the 0.x text that has no other place in 1.0.
@@ -747,7 +747,8 @@ ${logLines.join('\n\n')}
 
   // 3. The content check, before any link changes: every non-empty old line is in a new file.
   if (options.testDropLine !== undefined) dropLine(planned, options.testDropLine)
-  const output = [...planned.values()].flatMap((segments) => segments.map((segment) => segment.text))
+  // Only the new Markdown files count: a line found in the guard's code would prove nothing.
+  const output = [...planned].filter(([path]) => MARKDOWN.test(path)).flatMap(([, segments]) => segments.map((segment) => segment.text))
   const checked = checkedLines(legacy, files)
   const lost = lostLegacyLines(checked.lines.join('\n'), output)
   for (const item of lost) {
@@ -794,14 +795,17 @@ ${logLines.join('\n\n')}
     if (!MARKDOWN.test(path)) continue
     if (!planned.has(path)) {
       const full = join(root, path)
-      if (!existsSync(full) || lstatSync(full).isSymbolicLink()) continue
+      if (!existsSync(full) || lstatSync(full).isSymbolicLink() || !statSync(full).isFile()) continue
     }
     const segments = planned.get(path) ?? [{ text: readFileSync(join(root, path), 'utf8'), frame: path }]
     let changed = false
     const texts = segments.map((segment) => {
       if (segment.frame === null) return segment.text
       const result = rewriteLinks(segment.text, segment.frame, path, mapTarget)
-      if (maskLinkTargets(result.text) !== maskLinkTargets(segment.text)) throw new Error(`rewriting the links of ${path} changed more than link targets; this is a bug in migrate`)
+      if (maskLinkTargets(result.text) !== maskLinkTargets(segment.text)) {
+        refuse(`rewriting the links of ${path} would change more than link targets; this is a bug in resaledger, please report it`)
+        return segment.text
+      }
       plan.report.links.push(...result.links)
       if (result.text !== segment.text) changed = true
       return result.text
@@ -809,6 +813,7 @@ ${logLines.join('\n\n')}
     if (planned.has(path) || changed) final.set(path, texts.join(''))
   }
   for (const [path, segments] of planned) if (!final.has(path)) final.set(path, segments.map((segment) => segment.text).join(''))
+  if (plan.refusals.length > 0) return plan
 
   // 5. The result.
   for (const [path, text] of [...final].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
