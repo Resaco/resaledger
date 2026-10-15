@@ -57,7 +57,7 @@ export function laneTasks(reader, dir) {
 /** A folder's real path for comparison, or null when it does not exist. */
 function lanesRealPath(path) {
   try {
-    return realpathSync(path)
+    return realpathSync.native(path)
   } catch {
     return null
   }

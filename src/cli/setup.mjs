@@ -61,8 +61,8 @@ export function realRelative(root, path) {
   const full = join(root, path)
   if (!existsSync(full)) return path
   if (!lstatSync(full).isSymbolicLink()) return path
-  const real = realpathSync(full)
-  const inside = relative(realpathSync(root), real)
+  const real = realpathSync.native(full)
+  const inside = relative(realpathSync.native(root), real)
   if (inside.startsWith('..') || resolve(inside) === inside) return null
   return inside.split(/[\\/]/).join('/')
 }

@@ -791,7 +791,7 @@ function agentsRealPath(path) {
     existing = parent
   }
   try {
-    return resolve(realpathSync(existing), ...rest)
+    return resolve(realpathSync.native(existing), ...rest)
   } catch {
     return path
   }
