@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { parseConfig } from '../src/guard/config.mjs'
 import { checkRange, taskTrailers } from '../src/guard/range.mjs'
-import { BUDGET, ENV, PACKAGE, repository, run, temporary } from './helpers.mjs'
+import { budget, ENV, PACKAGE, repository, run, temporary } from './helpers.mjs'
 
 // GitHub's committer address, in two parts for the hygiene scan.
 const GITHUB = ['noreply', 'github.com'].join('@')
@@ -498,7 +498,7 @@ describe('checkRange: speed', () => {
     const problems = check(r, base, { to: 'lane-a' })
     const elapsed = Number(process.hrtime.bigint() - started) / 1e6
     assert.deepEqual(problems, [])
-    assert.ok(elapsed < 3000 * BUDGET, `200 commits took ${Math.round(elapsed)} ms`)
+    assert.ok(elapsed < budget(3000), `200 commits took ${Math.round(elapsed)} ms`)
     console.log(`# checkRange: 200 commits in ${Math.round(elapsed)} ms`)
   })
 })

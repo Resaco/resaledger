@@ -3,16 +3,23 @@
 // installed, worktrees, and a bare remote to push to and fetch from.
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { availableParallelism, loadavg, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { after } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 export const PACKAGE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
-// Time budgets are written for Linux and macOS. Windows starts processes several times more
-// slowly, so its budgets are three times as long; T2 sets the final budgets.
-export const BUDGET = process.platform === 'win32' ? 3 : 1
+// Time budgets are written for an idle Linux or macOS machine. Windows starts processes several
+// times more slowly, so its budgets are three times as long, and a busy machine (several test
+// runs at once) gets more time in proportion to its load per CPU. Windows reports no load.
+const PLATFORM_FACTOR = process.platform === 'win32' ? 3 : 1
+
+/** The time budget in milliseconds for something that takes at most `ms` on an idle machine. */
+export function budget(ms) {
+  const load = loadavg()[0] / availableParallelism()
+  return ms * PLATFORM_FACTOR * Math.max(1, load)
+}
 
 const created = []
 after(() => created.forEach((folder) => rmSync(folder, { recursive: true, force: true })))

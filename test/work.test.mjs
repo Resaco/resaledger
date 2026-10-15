@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { HOOK_NAMES, renderHook } from '../src/cli/hooks.mjs'
 import { compareTaskIds } from '../src/guard/work.mjs'
-import { BUDGET, ENV, PACKAGE, repository, run, temporary } from './helpers.mjs'
+import { budget, ENV, PACKAGE, repository, run, temporary } from './helpers.mjs'
 
 const GUARD = join(temporary(), 'records.mjs')
 const built = run(PACKAGE, process.execPath, [join(PACKAGE, 'scripts', 'bundle.mjs'), '--out', GUARD])
@@ -296,7 +296,7 @@ test('work finishes within the budget on 300 tasks', (t) => {
   assert.equal(result.status, 0, result.out)
   assert.match(result.out, /300 done or dropped|of 300 done or dropped/)
   t.diagnostic(`work on 300 tasks: ${elapsed.toFixed(0)} ms, including node start-up`)
-  assert.ok(elapsed < 3000 * BUDGET, `work took ${elapsed} ms`)
+  assert.ok(elapsed < budget(3000), `work took ${elapsed} ms`)
 })
 
 test('the header says whether the gates passed on the code at HEAD', () => {
@@ -547,5 +547,5 @@ test('work --all finishes within the budget on 500 pushed branches', (t) => {
   assert.equal(work(r, '--json').status, 0)
   const plain = Number(process.hrtime.bigint() - plainStarted) / 1e6
   t.diagnostic(`work --all on 500 branches: ${elapsed.toFixed(0)} ms, including node start-up; plain work: ${plain.toFixed(0)} ms`)
-  assert.ok(elapsed < 2000 * BUDGET, `work --all took ${elapsed} ms`)
+  assert.ok(elapsed < budget(2000), `work --all took ${elapsed} ms`)
 })
