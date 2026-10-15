@@ -41,3 +41,7 @@ R5 merged, which completes phase R: the guard reads a workspace from the working
 ## 2026-10-15 · The hook scripts, and the finished identity
 
 H3 merged: POSIX hook scripts that find Node or Bun on every platform, `hooks --activate` for a fresh clone, and integration with husky and simple-git-hooks, with snippets for lefthook and the pre-commit framework. 230 tests pass. The designer finished the C1 identity, which waits for the owner's approval. H1 needs V1's gate runner, so V1 and W1 run first, next to V2.
+
+## 2026-10-15 · `work`, and two review findings
+
+W1 merged: `work` shows this lane, the other local worktrees, what waits for the owner, what is blocked and ready, and warns about double and stale claims, in about half a second for 300 tasks. While testing V1 a worker found that two stamps sharing their gate list look like a rename to git, so two lanes replacing one stamp would conflict; the specification now binds every byte of a stamp to the fingerprint. Reviewing V2, the lead widened the lane rule of the range check to the whole range, so a claim in a records-only commit and a branch renamed before its pull request both pass. 243 tests pass. M1, reading 0.x workspaces, started.

@@ -31,11 +31,11 @@ The guard is written as modules in `src/guard/` and bundled into one file ([F1](
 | `records.mjs` | R4 | `SETUP_MARKER`; `parseDecision`, `validateDecision`, `parseLogEntry`, `validateLogEntry`, `planStatus(text) → { value, date, by, line } \| null`, `validatePlanStatus(path, status)`, `parseReadme(path, text)` (its `sections` is a Map), `validateReadme` |
 | `workspace.mjs` | R5 | `treeReader(source)` with `source` `{ kind: 'worktree' }`, `{ kind: 'index' }` or `{ kind: 'commit', rev }` and an optional `root`, returning `{ list(prefix), read(path), exists(path) }`; `loadWorkspace(reader, config) → workspace` (parse problems in `workspace.problems`); `checkWorkspace(workspace, reader, config) → problems`; `isCode(path, config)`; `fingerprint(source, config)` (index or commit sources only); `checkCommand(args)`, which reads the configuration from the source it checks |
 | `gates.mjs` | V1 | `runGates(commands) → { passed, failure }`; `stampPath(config, fingerprint)` → `<dir>/verified/<first 16 hex>.json`; `verifiedStamp(reader, config, fingerprint) → stamp \| null`; `verifyCommand(options)`; `gatesCommand()` |
-| `range.mjs` | V2 | `taskTrailers(message) → ids`; `checkRange(from, to, context) → problems`, with `context = { config, lane, skipGitHubMerges, root }` (`lane` null skips the lane rule) |
+| `range.mjs` | V2 | `taskTrailers(message) → { ids, maintenance }`; `checkRange(from, to, context) → problems`, with `context = { config, lane, skipGitHubMerges, root }` (`lane` null skips the lane rule) |
 | `handoff.mjs` | V3 | `handoffProblems(context) → problems`; `handoffCommand()` |
 | `githooks.mjs` | H1, H2, H3 | `HOOKS_PATH = '.githooks'`; `preCommit()`, `commitMsg(file)`, `prePush(input)`, `hooksActive()` (also true when a hook manager calls the guard), `activateHooks() → 'activated' \| 'active' \| { foreign }` |
-| `lanes.mjs` | W1, W2 | `currentLane()`; `localLanes()`; `remoteLanes(options)` |
-| `work.mjs` | W1 | `workCommand(options)` |
+| `lanes.mjs` | W1, W2 | `currentLane()`; `localBranches() → Map<branch, { author, date }>`; `laneTasks(reader, dir)`; `localLanes(config, branches)`; `remoteLanes(options)` (W2). A lane is `{ branch, path?, source: 'this' \| 'worktree' \| 'remote', tasks, lastCommit? }` |
+| `work.mjs` | W1 | `workCommand(args)`; `compareTaskIds(a, b)`, the natural id order |
 | `create.mjs` | W3 | `taskCommand(id)`; `newCommand(args)`; `nextTaskId(prefix, known)`; `nextChildId(parent, known)` |
 | `claim.mjs` | W4 | `claimCommand(args)` |
 | `changes.mjs` | W5 | `changesCommand(args)` |
