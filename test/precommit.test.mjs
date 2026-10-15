@@ -278,3 +278,22 @@ test('a failing commit gate refuses the commit', () => {
   assert.match(result.out, /exited with 3/)
   assert.equal(r.git('rev-list', '--count', 'HEAD').out.trim(), '1')
 })
+
+test("after merging another lane in, a task that lane holds is not deleted", () => {
+  const r = workspace()
+  r.git('checkout', '-q', '-b', 'lane-b')
+  task(r, 'S9', 'Other work', { status: 'doing', lane: 'lane-b' })
+  passed(r.commit('chore: claim S9'))
+  r.git('checkout', '-q', 'main')
+  r.git('checkout', '-q', '-b', 'lane-a')
+  r.write('ledger/decisions/2026-10-15-a-choice.md', '# A choice\n\n- Date: 2026-10-15\n- Decided by: Alex\n\nBecause.\n')
+  passed(r.commit('docs: decision'))
+  passed(r.git('merge', '-q', '--no-ff', '-m', 'Merge lane-b', 'lane-b'))
+  r.git('rm', '-q', 'ledger/tasks/S9.md')
+  refused(r.commit('chore: drop S9'), /ledger\/tasks\/S9\.md: task S9 is deleted or its id renamed, but lane "lane-b" holds it \(Status: doing\)/)
+  // The holding lane may still remove a task it created and never merged.
+  r.git('reset', '-q', '--hard')
+  r.git('checkout', '-q', 'lane-b')
+  r.git('rm', '-q', 'ledger/tasks/S9.md')
+  passed(r.commit('chore: drop S9'))
+})

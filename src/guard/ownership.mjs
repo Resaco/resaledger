@@ -39,8 +39,9 @@ function ownershipIsTakeover(task, lane, holder) {
  * - baseName: how messages name the base branch.
  *
  * A task that `after` changes (or adds) and another lane holds in `before` or in a `holders`
- * Map is a problem, unless `after` records a takeover from that lane. A task in `kept` that
- * `after` no longer has is a problem: deleted, or its id renamed.
+ * Map is a problem, unless `after` records a takeover from that lane. A task that `after` no
+ * longer has (deleted, or its id renamed) is a problem when it is in `kept`, or when another
+ * lane holds it in `before`, as after merging that lane in, whatever `kept` says.
  */
 export function ownershipProblems(context) {
   const { before, after, lane, config } = context
@@ -52,12 +53,21 @@ export function ownershipProblems(context) {
   const problems = []
 
   for (const [id, { task }] of before) {
-    if (after.has(id) || !kept.has(id)) continue
-    problems.push({
-      file: task.file,
-      line: 0,
-      message: `task ${id} is deleted or its id renamed, but it exists on ${baseName}. Tasks are never deleted: keep the file and set "Status: dropped" with a "Reason"`
-    })
+    if (after.has(id)) continue
+    const holder = ownershipHolder(task)
+    if (kept.has(id)) {
+      problems.push({
+        file: task.file,
+        line: 0,
+        message: `task ${id} is deleted or its id renamed, but it exists on ${baseName}. Tasks are never deleted: keep the file and set "Status: dropped" with a "Reason"`
+      })
+    } else if (holder && holder !== lane) {
+      problems.push({
+        file: task.file,
+        line: 0,
+        message: `task ${id} is deleted or its id renamed, but lane "${holder}" holds it (Status: ${task.status}), so only that lane changes it`
+      })
+    }
   }
 
   for (const [id, { task, text }] of after) {
