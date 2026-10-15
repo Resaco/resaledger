@@ -400,6 +400,11 @@ describe('the answers', () => {
     assert.match(parseInitArgs(['--agents', 'emacs']).error, /unknown agent "emacs"/)
     assert.match(parseInitArgs(['--agents']).error, /--agents needs a list/)
     assert.match(parseInitArgs(['--dir']).error, /--dir needs a folder name/)
+    // One trailing '/', as a shell's completion adds it, is dropped; the rest of the rule holds.
+    assert.equal(parseInitArgs(['--dir', 'docs/ledger/']).flags.dir, 'docs/ledger')
+    assert.equal(parseInitArgs(['--dir=records/']).flags.dir, 'records')
+    assert.match(parseInitArgs(['--dir', 'records//']).error, /is not a folder name/)
+    assert.match(parseInitArgs(['--dir', '/']).error, /--dir needs a folder name/)
     assert.match(parseInitArgs(['--no-ci']).error, /unknown option "--no-ci"/)
   })
 
@@ -436,7 +441,7 @@ function printedCommands(out) {
 }
 
 describe('a workspace folder that would break out of the hooks', () => {
-  const HOSTILE = ['x"; touch pwned; "', "x'; touch pwned; '", 'x$(touch pwned)', 'x`touch pwned`', 'x;touch pwned', 'a b', '-x', 'docs/../x', 'ledger/']
+  const HOSTILE = ['x"; touch pwned; "', "x'; touch pwned; '", 'x$(touch pwned)', 'x`touch pwned`', 'x;touch pwned', 'a b', '-x', 'docs/../x', 'docs//ledger']
 
   test('--dir with shell syntax is refused before anything is written', () => {
     const r = project()

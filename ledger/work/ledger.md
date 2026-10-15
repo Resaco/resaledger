@@ -323,11 +323,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: —
 
 ### T3 Independent review of the guard
-- Status: blocked
+- Status: done
 - Depends on: V3, H2
 - Plan: [T-acceptance.md](../plan/T-acceptance.md#t3-independent-review-of-the-guard)
-- Evidence: [The review](../evidence/t3/review.md): 13 findings, one blocker, five major and seven minor, each reproduced with the real product.
-- Notes: Waits for its child tasks: T3.1 to T3.4 fix or answer every finding.
+- Evidence: [The review](../evidence/t3/review.md): 13 findings, one blocker, five major and seven minor, each reproduced with the real product; all 13 fixed in T3.1 to T3.4, each with a test.
+- Notes: The child tasks T3.1 to T3.4 fixed every finding.
 
 ### T3.1 A range check that cannot be fooled
 - Status: done
@@ -351,11 +351,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: Spec section 5.10 now says which workspace files are code. Pre-push takes its range start through `adoptionStart` too since T3.2 merged.
 
 ### T3.4 Setup that works everywhere
-- Status: doing
+- Status: done
 - Depends on: T3
 - Plan: [The review](../evidence/t3/review.md#findings), findings 12 and 13
-- Evidence: —
-- Notes: A worker builds it on branch `t3-4-setup`. Restrict `dir` and `codePaths` to safe path segments; add `.githooks/* text eol=lf` to `.gitattributes` in `init` and `migrate`; and in the team preset let `init` set up on a branch, because the protected base refuses the setup commit (seen during the review).
+- Evidence: 773 of 773 on Node 24.18.0, 22.23.3 and 20.20.2 on the branch; [init.test.mjs](../../test/init.test.mjs) refuses nine hostile `--dir` values before writing anything, keeps the hooks LF in a clone with `core.autocrlf=true`, and runs the printed steps on a protected base so the setup commit lands on `resaledger-setup`; [config.test.mjs](../../test/config.test.mjs), [migrate.test.mjs](../../test/migrate.test.mjs) and [update.test.mjs](../../test/update.test.mjs) cover the folder rule, the `.gitattributes` line and the setup branch.
+- Notes: Worked on branch `t3-4-setup`. `dir` and `codePaths` are now strict: `./ledger` and `docs//ledger` are refused rather than normalised, and so are non-ASCII names; `init --dir` drops one trailing `/`, as a shell's completion adds it. The hook scripts single-quote the guard's path. Edge cases left: a team setup in a repository with no commits has no base to open a pull request into, the push step assumes the remote `origin`, and a migrated `branchPattern` may refuse the branch name `resaledger-setup`.
 
 ### T4 Independent review of the CI check
 - Status: todo

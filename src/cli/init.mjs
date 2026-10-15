@@ -35,7 +35,9 @@ export function parseInitArgs(args) {
     if (arg === '--team') flags.team = true
     else if (arg === '--yes' || arg === '-y') flags.yes = true
     else if (arg === '--dir' || arg.startsWith('--dir=')) {
-      const value = arg === '--dir' ? args[++index] : arg.slice('--dir='.length)
+      // A shell's completion adds a trailing '/', so one is dropped here; the configuration stays strict.
+      const given = arg === '--dir' ? args[++index] : arg.slice('--dir='.length)
+      const value = given?.endsWith('/') ? given.slice(0, -1) : given
       if (value === undefined || value === '' || value.startsWith('--')) return { flags, error: '--dir needs a folder name, such as --dir records' }
       if (!isSafeFolderPath(value)) return { flags, error: `--dir ${JSON.stringify(value)} is not a folder name ResaLedger accepts; use ${SAFE_FOLDER_RULE}, such as --dir records or --dir docs/ledger` }
       flags.dir = value
