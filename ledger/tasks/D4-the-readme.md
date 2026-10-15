@@ -8,4 +8,4 @@
 
 ## Handoff
 
-The README is written for the release candidate: the pitch, a status line, the quickstart, the three graphics, solo or team, the layers and agents, the comparison table, the commands, an FAQ, the docs and the contributing links. The quickstart was run as written in a new repository through an `npx` shim to the local package: `init`, its printed commit command, `new`, the plan, `claim`, the commit, `verify` and `handoff` all behave as the page says. Next: add the terminal demo from L1 under the quickstart, then the owner reads the page.
+The README is written for the release candidate, with the terminal demo from L1 under the quickstart; the quickstart ran as written in a new repository through an `npx` shim. The code of conduct now sends reports through GitHub's private form, so no owner marker is left. Next: the owner reads the page; then set D4 to done.
