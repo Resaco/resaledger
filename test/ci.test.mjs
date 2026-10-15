@@ -4,7 +4,7 @@
 // a shallow clone and the --base/--head/--lane flags.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { contentHash, normalizeManaged } from '../src/guard/managed.mjs'
@@ -536,6 +536,36 @@ describe('ci and changes to enforcement', () => {
     failed(ci(r, 'pull_request', pullRequest(r, 'lane-a')), /✖ gates\.verify: removed "node -e \\"process\.exit\(0\)\\""/)
   })
 
+  test('a hook that stops being executable, or becomes a symlink, weakens', () => {
+    const r = setup()
+    r.write('.githooks/pre-commit', hook('pre-commit'))
+    chmodSync(join(r.root, '.githooks/pre-commit'), 0o755)
+    commit(r, {}, 'chore: hooks', 'Task: maintenance')
+    r.git('checkout', '-q', '-b', 'lane-a')
+    chmodSync(join(r.root, '.githooks/pre-commit'), 0o644)
+    commit(r, {}, 'chore: mode', 'Task: maintenance')
+    const plain = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
+    failed(plain, /✖ enforcement: 1 weakening change no decision names; 1 change, 1 weakening/)
+    assert.match(plain.out, /\n {2}✖ hooks\/pre-commit: \.githooks\/pre-commit is now not executable \(mode 100644\), was executable: this weakens enforcement/)
+    commit(r, decision('hooks/pre-commit'), 'docs: decide', 'Task: maintenance')
+    passed(ci(r, 'pull_request', pullRequest(r, 'lane-a')))
+
+    r.git('checkout', '-q', '-b', 'lane-b', 'main')
+    rmSync(join(r.root, '.githooks/pre-commit'))
+    symlinkSync('../ledger/README.md', join(r.root, '.githooks/pre-commit'))
+    commit(r, {}, 'chore: link', 'Task: maintenance')
+    failed(ci(r, 'pull_request', pullRequest(r, 'lane-b')), /✖ hooks\/pre-commit: .*; \.githooks\/pre-commit is now a symlink, was executable: this weakens enforcement/)
+  })
+
+  test('a change to .gitattributes is listed', () => {
+    const r = change({ '.gitattributes': '.githooks/* text eol=lf\n' }, { 'notes.md': 'After.\n' })
+    r.git('rm', '-q', '.gitattributes')
+    commit(r, {}, 'chore: drop the attributes', 'Task: maintenance')
+    const result = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
+    passed(result)
+    assert.match(result.out, /✔ enforcement: 1 change, 0 weakening\n {2}gitattributes: \.gitattributes removed\n/)
+  })
+
   test('a decision that names a different change, or one already on the base, does not help', () => {
     const r = setup()
     commit(r, { '.resaledger.json': json({ wip: 3 }), ...decision('wip', 'old') }, 'chore: before', 'Task: maintenance')
@@ -707,9 +737,18 @@ describe('ci on a push', () => {
     const result = ci(r, 'push', { before, after: rev(r), ref: 'refs/heads/main' })
     passed(result)
     assert.match(result.out, /push to refs\/heads\/main, [0-9a-f]{7}\.\.[0-9a-f]{7}/)
-    assert.match(result.out, /✔ commits: 1 commit pushed/)
+    assert.match(result.out, /✔ commits: 1 commit pushed, 1 exempt as GitHub's merge or squash commit by the committer address/)
     assert.match(result.out, /S1 Bake bread: todo → done/)
     assert.doesNotMatch(result.out, /ownership|ids|gates/)
+  })
+
+  test("a code commit with GitHub's committer address but no squash subject fails, as a web edit on the base does", () => {
+    const r = setup({ tasks: [['S1', 'Bake bread']] })
+    const before = rev(r)
+    squash(r, { 'src/bread.js': 'evil\n' }, 'Update bread.js')
+    const result = ci(r, 'push', { before, after: rev(r), ref: 'refs/heads/main' })
+    failed(result, /✖ commits: 1 problem; 1 commit pushed\n/)
+    assert.match(result.out, /"Update bread\.js" changes code but names no task/)
   })
 
   test('a direct code commit without a trailer fails, and the push names no lane', () => {

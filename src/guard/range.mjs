@@ -16,6 +16,8 @@ const RANGE_HASH = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
 const RANGE_COMMITTER = /^committer .*<([^<>]*)> -?\d+ [+-]\d{4}$/
 // GitHub's own committer address, written in two parts so the hygiene scan sees no address.
 const RANGE_GITHUB_COMMITTER = ['noreply', 'github.com'].join('@')
+// The subject GitHub gives a squash merge: the pull request's title, then " (#<number>)".
+const RANGE_GITHUB_SQUASH = /\(#\d+\)$/
 const RANGE_MAINTENANCE = 'maintenance'
 const RANGE_SHOWN_PATHS = 3
 // Options that make a diff the same whatever the user's diff configuration is.
@@ -331,14 +333,22 @@ export function taskTrailers(message) {
  * Why a commit is exempt from the trailer rules, or null: commit.exemption, which the caller
  * found in git ('merge' for a merge that changes no code of its own, 'revert' for a real
  * revert), or 'github' (a commit GitHub made when merging a pull request, only with
- * context.skipGitHubMerges). The message alone never exempts a commit, and a release commit
- * that changes code needs a Task: line like any other.
- * commit is { committer, exemption }.
+ * context.skipGitHubMerges): GitHub's committer address on a merge commit or on a commit whose
+ * subject has GitHub's squash form, "Title (#12)". The address is not verified, so it buys no
+ * more than that. The message alone never exempts a commit, and a release commit that changes
+ * code needs a Task: line like any other.
+ * commit is { parents, committer, subject, exemption }.
  */
 export function commitExemption(commit, context) {
   if (commit.exemption) return commit.exemption
-  if (context.skipGitHubMerges && commit.committer.toLowerCase() === RANGE_GITHUB_COMMITTER) return 'github'
+  if (context.skipGitHubMerges && isGitHubMerge(commit)) return 'github'
   return null
+}
+
+/** True for a merge or squash commit with GitHub's committer address. */
+function isGitHubMerge({ parents, committer, subject }) {
+  if (committer.toLowerCase() !== RANGE_GITHUB_COMMITTER) return false
+  return parents.length > 1 || RANGE_GITHUB_SQUASH.test(subject ?? '')
 }
 
 /** The task file for an id among a tasks folder's entries: <id>.md or <id>-<slug>.md. */
@@ -429,10 +439,11 @@ export function checkCommit(commit, context) {
  * Checks every commit in from..to, oldest first, and returns problems as
  * { file: <short hash>, line: 0, message }. Without `from`, every ancestor of `to` is checked.
  *
- * context is { config, lane, skipGitHubMerges, root }: the effective configuration; the lane
- * (branch) that must hold each named task, or null to skip that rule; whether commits that
- * GitHub made when merging a pull request are skipped (the CI push check); and the repository,
- * by default the one of the current folder.
+ * context is { config, lane, skipGitHubMerges, root, exempt }: the effective configuration; the
+ * lane (branch) that must hold each named task, or null to skip that rule; whether commits that
+ * GitHub made when merging a pull request are skipped (the CI push check); the repository, by
+ * default the one of the current folder; and an optional Map that counts the code commits
+ * exempted, by reason ('merge', 'revert' or 'github').
  *
  * Each commit is judged by checkCommit, with its own tree and the tasks at `from`: a merge
  * that changes no code of its own and a real revert are skipped (rangeCommits). A commit that
@@ -444,9 +455,12 @@ export function checkRange(from, to, context) {
   const { config } = context
   const root = context.root ?? repositoryRoot()
   const tasksFolder = `${config.dir}/tasks`
-  const commits = rangeCommits(root, config, from, to).filter(
-    (commit) => commitExemption(commit, context) === null && commit.paths.some((path) => isCode(path, config))
-  )
+  const commits = rangeCommits(root, config, from, to).filter((commit) => {
+    if (!commit.paths.some((path) => isCode(path, config))) return false
+    const reason = commitExemption(commit, context)
+    if (reason !== null && context.exempt) context.exempt.set(reason, (context.exempt.get(reason) ?? 0) + 1)
+    return reason === null
+  })
   if (commits.length === 0) return []
   const hashBytes = commits[0].hash.length / 2
 

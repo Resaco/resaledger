@@ -7,6 +7,9 @@ import { parseDecision } from './records.mjs'
 import { treeReader } from './workspace.mjs'
 
 const ENFORCEMENT_HOOKS = '.githooks/'
+// The file whose line keeps the hooks LF on Windows (spec 13); a change to it is listed.
+const ENFORCEMENT_ATTRIBUTES = '.gitattributes'
+const ENFORCEMENT_EXECUTABLE = '100755'
 export const ENFORCEMENT_WORKFLOW = '.github/workflows/resaledger.yml'
 // The decision field that names the weakening changes a decision allows (spec 10).
 const ENFORCEMENT_FIELD = 'Weakens'
@@ -135,7 +138,36 @@ function managedChange(change, released) {
   return [enforcementChange(id, false, `${path} ${how}: ResaLedger ${version}, a released version`, path)]
 }
 
-/** The changes to the guard, the git hooks and the workflow between two trees. */
+/** The mode of a hook as words, for a message. */
+function hookModeName(mode) {
+  if (mode === ENFORCEMENT_EXECUTABLE) return 'executable'
+  if (mode === '120000') return 'a symlink'
+  return `not executable (mode ${mode})`
+}
+
+/**
+ * The change to a hook's mode, folded into the change to its text: a hook that was executable
+ * and is no longer (or became a symlink) does not run for anyone who clones, so it weakens.
+ */
+function hookModeChange(changes, id, path, before, after) {
+  if (before === null || after === null || before === after) return changes
+  const weakening = before === ENFORCEMENT_EXECUTABLE
+  const what = `${path} is now ${hookModeName(after)}, was ${hookModeName(before)}`
+  if (changes.length === 0) return [enforcementChange(id, weakening, what, path)]
+  const [change] = changes
+  return [{ ...change, kind: weakening || change.kind === 'weakening' ? 'weakening' : 'listed', what: `${change.what}; ${what}` }]
+}
+
+/** The change to .gitattributes, listed: it holds the line that keeps the hooks LF on Windows. */
+function attributesChange(beforeReader, afterReader) {
+  const before = beforeReader.read(ENFORCEMENT_ATTRIBUTES)
+  const after = afterReader.read(ENFORCEMENT_ATTRIBUTES)
+  if (before === after) return []
+  const how = before === null ? 'added' : after === null ? 'removed' : 'changed'
+  return [enforcementChange('gitattributes', false, `${ENFORCEMENT_ATTRIBUTES} ${how}`, ENFORCEMENT_ATTRIBUTES)]
+}
+
+/** The changes to the guard, the git hooks, the workflow and .gitattributes between two trees. */
 function fileChanges(beforeReader, afterReader, beforeDir, afterDir, released) {
   const files = [
     {
@@ -150,11 +182,12 @@ function fileChanges(beforeReader, afterReader, beforeDir, afterDir, released) {
   const hooks = [...new Set([...beforeReader.list(ENFORCEMENT_HOOKS), ...afterReader.list(ENFORCEMENT_HOOKS)])].sort()
   for (const path of hooks) {
     const name = path.slice(ENFORCEMENT_HOOKS.length)
-    files.push({ id: `hooks/${name}`, key: `hooks/${name}`, path, before: beforeReader.read(path), after: afterReader.read(path), dir: afterDir })
+    files.push({ id: `hooks/${name}`, key: `hooks/${name}`, path, before: beforeReader.read(path), after: afterReader.read(path), dir: afterDir, modes: [beforeReader.mode(path), afterReader.mode(path)] })
   }
   // The workflow reads the folder from the configuration, so its text holds no folder name.
   files.push({ id: 'workflow', key: 'workflow', path: ENFORCEMENT_WORKFLOW, before: beforeReader.read(ENFORCEMENT_WORKFLOW), after: afterReader.read(ENFORCEMENT_WORKFLOW), dir: null })
-  return files.flatMap((file) => managedChange(file, released))
+  const changes = files.flatMap((file) => (file.modes ? hookModeChange(managedChange(file, released), file.id, file.path, ...file.modes) : managedChange(file, released)))
+  return [...changes, ...attributesChange(beforeReader, afterReader)]
 }
 
 /**

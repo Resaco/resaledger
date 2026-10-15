@@ -21,7 +21,7 @@
   ],
   "moved": [
     { "id": "S4", "title": "Store the orders of the bakery shop", "file": "ledger/tasks/S4.md", "from": "doing", "to": "done", "evidence": "`npm test -- server/storage`: 14 of 14 · storage.md" },
-    { "id": "S4.1", "title": "Fix the flaky <upload> test", "file": "ledger/tasks/S4.1.md", "from": null, "to": "todo", "evidence": null }
+    { "id": "S4.1", "title": "Fix the flaky <upload> test in *checkout_form*", "file": "ledger/tasks/S4.1.md", "from": null, "to": "todo", "evidence": null }
   ],
   "gates": {
     "mode": "run",

@@ -23,7 +23,7 @@ export function ciCheckLine(check, result) {
       return `records: ${problems}${recordCounts(counts.tasks, counts.decisions, counts.logs)}${note}`
     case 'commits':
       if (check.skipped) return `commits: not checked${note}`
-      return `commits: ${problems}${plural(counts.commits, 'commit')} ${result.event === 'push' ? 'pushed' : 'from the merge base to the head'}${note}`
+      return `commits: ${problems}${plural(counts.commits, 'commit')} ${result.event === 'push' ? 'pushed' : 'from the merge base to the head'}${ciGitHubExempt(counts)}${note}`
     case 'ownership':
       return `ownership: ${problems}${plural(counts.changed, 'task')} changed${note}`
     case 'ids':
@@ -47,6 +47,11 @@ export function ciCheckLine(check, result) {
     default:
       return `${check.name}: ${problems}`.replace(/; $/, '')
   }
+}
+
+/** How many code commits passed as GitHub's merge or squash commits, trusted by their committer. */
+function ciGitHubExempt(counts) {
+  return counts.github > 0 ? `, ${counts.github} exempt as GitHub's merge or squash ${counts.github === 1 ? 'commit' : 'commits'} by the committer address` : ''
 }
 
 /** A change's text led by its id, which a configuration change's text already starts with. */
@@ -112,9 +117,46 @@ export function ciText(result) {
   return out.join('\n')
 }
 
-/** Text from the records, made safe for Markdown: one line, and no HTML tags or hidden comments. */
+/**
+ * Text from the records, made safe for Markdown: one line that renders as written. Code spans
+ * stay as they are, since nothing renders inside them; elsewhere `<` becomes `&lt;` (no HTML or
+ * hidden comments) and the punctuation of links, images and emphasis is escaped. A backtick run
+ * with no closing run of the same length is escaped too, as CommonMark reads it literally.
+ */
 function ciMarkdownText(text) {
-  return String(text).replace(/\s+/g, ' ').replace(/</g, '&lt;').trim()
+  const plain = String(text).replace(/\s+/g, ' ').trim()
+  let out = ''
+  let at = 0
+  while (at < plain.length) {
+    const tick = plain.indexOf('`', at)
+    if (tick === -1) return out + ciMarkdownEscape(plain.slice(at))
+    out += ciMarkdownEscape(plain.slice(at, tick))
+    const run = /^`+/.exec(plain.slice(tick))[0]
+    const close = ciClosingRun(plain, tick + run.length, run.length)
+    if (close === -1) {
+      out += ciMarkdownEscape(run)
+      at = tick + run.length
+      continue
+    }
+    out += plain.slice(tick, close + run.length)
+    at = close + run.length
+  }
+  return out
+}
+
+/** Where the next run of exactly `length` backticks starts, from `from`, or -1. */
+function ciClosingRun(text, from, length) {
+  const runs = /`+/g
+  runs.lastIndex = from
+  for (let match = runs.exec(text); match !== null; match = runs.exec(text)) {
+    if (match[0].length === length) return match.index
+  }
+  return -1
+}
+
+/** Plain text outside code spans, escaped: backslashes, Markdown's inline punctuation and `<`. */
+function ciMarkdownEscape(text) {
+  return text.replace(/[\\`*_[\]~]/g, '\\$&').replace(/</g, '&lt;')
 }
 
 /** A command as a Markdown code span, on one line. */
@@ -137,7 +179,7 @@ function ciCommitsSummary(result) {
   if (!check) return null
   if (check.skipped) return `**Commits:** not checked${check.note ? ` (${ciMarkdownText(check.note)})` : ''}`
   const verdict = check.ok ? 'all pass' : plural(check.problems.length, 'problem')
-  return `**Commits:** ${check.counts.commits} checked, ${verdict}`
+  return `**Commits:** ${check.counts.commits} checked, ${verdict}${ciGitHubExempt(check.counts)}`
 }
 
 /** The gates line: each command with its time, where it ran, and where the rules came from. */

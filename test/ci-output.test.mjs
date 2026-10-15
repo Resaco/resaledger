@@ -157,10 +157,20 @@ describe('the job summary and the comment, rendered from fixtures', () => {
 
   test('task titles cannot inject HTML or a hidden marker', () => {
     const markdown = ciMarkdown(fixture('pull-request'))
-    assert.match(markdown, /Fix the flaky &lt;upload> test · new, todo/)
+    assert.match(markdown, /Fix the flaky &lt;upload> test in .* · new, todo/)
     const result = fixture('pull-request')
     result.moved[0].title = `${CI_COMMENT_MARKER} spoof`
     assert.doesNotMatch(ciMarkdown(result), /<!-- resaledger/)
+  })
+
+  test('record text cannot render as Markdown: no image, no link, no emphasis; code spans stay', () => {
+    const result = fixture('pull-request')
+    result.moved[0].title = 'Bake ![](https://example.invalid/pixel.png) [approved](https://example.invalid/x) **✔ passed** ~~old~~ \\[x] `` a ` b `` `open'
+    result.moved[0].evidence = '[all 200 tests](https://example.invalid/fake) · `npm test`: 3 of 3 · __done__'
+    const markdown = ciMarkdown(result)
+    const line = markdown.split('\n').find((text) => text.startsWith('- **S4**'))
+    assert.equal(line, '- **S4** Bake !\\[\\](https://example.invalid/pixel.png) \\[approved\\](https://example.invalid/x) \\*\\*✔ passed\\*\\* \\~\\~old\\~\\~ \\\\\\[x\\] `` a ` b `` \\`open · doing → done')
+    assert.match(markdown, /\n {2}Evidence: \\\[all 200 tests\\\]\(https:\/\/example\.invalid\/fake\) · `npm test`: 3 of 3 · \\_\\_done\\_\\_\n/)
   })
 
   test('a failing pull request lists the problems, the failed gate and the undecided weakening change', () => {
@@ -178,7 +188,7 @@ describe('the job summary and the comment, rendered from fixtures', () => {
     const text = ciText(fixture('pull-request'))
     const order = [...text.matchAll(/^[✔✖] (\w+)/gm)].map((match) => match[1])
     assert.deepEqual(order, ['records', 'commits', 'ownership', 'ids', 'tasks', 'gates', 'enforcement'])
-    assert.match(text, /S4\.1 Fix the flaky <upload> test: new, todo/)
+    assert.match(text, /S4\.1 Fix the flaky <upload> test in \*checkout_form\*: new, todo/)
   })
 })
 

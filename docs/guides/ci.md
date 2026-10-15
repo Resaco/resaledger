@@ -16,7 +16,7 @@ On a pull request, `ci`:
 - runs the gates on the head, with the base's commands and without `GITHUB_TOKEN` or GitHub's `ACTIONS_*` variables in their environment, or with `ci.runGates: false` in the configuration, wants a stamp for the head's code instead;
 - lists every change to the enforcement files and fails a weakening one unless the pull request adds a decision that names it ([the team guide](team.md#a-deliberate-loosening-needs-a-decision)).
 
-On a push to the base, it validates the records and checks the new commits. It leaves out merge commits and the commits GitHub makes when it merges a pull request, which were checked in the pull request, so squash merges work.
+On a push to the base, it validates the records and checks the new commits. It leaves out merge commits and the commits GitHub makes when it merges a pull request, which were checked in the pull request, so squash merges work. A commit counts as GitHub's when GitHub's address is its committer and it is a merge or has the subject of a squash merge, `Title (#12)`; the output says how many it left out that way. Anyone can write that address into a commit, so this check trusts it: protect the base, so that only pull requests reach it.
 
 It exits with 0 when every check passes and with 1 when one fails or the check cannot run.
 
@@ -42,7 +42,7 @@ Its permissions are read-only, apart from `pull-requests: write` for its one job
 
 ### What you see
 
-The check writes the same Markdown to the job summary and, on a pull request from the same repository, to one comment that it updates on each run. It lists each task the pull request moves, with its evidence, and the result of each check. A pull request from a fork gets no comment, because its token cannot write; the job summary still has everything. A failure to comment prints a warning and never changes the result.
+The check writes the same Markdown to the job summary and, on a pull request from the same repository, to one comment that it updates on each run. It lists each task the pull request moves, with its evidence, and the result of each check. Titles and evidence show as written: code spans stay, and no record can add an image, a link or bold text to the comment. A pull request from a fork gets no comment, because its token cannot write; the job summary still has everything. A failure to comment prints a warning and never changes the result.
 
 Make the check required, and protect the workflow with CODEOWNERS: [the team guide](team.md#make-resaledger-a-required-status-check) shows both.
 

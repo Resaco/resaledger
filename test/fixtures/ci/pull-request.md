@@ -2,7 +2,7 @@
 
 - **S4** Store the orders of the bakery shop · doing → done
   Evidence: `npm test -- server/storage`: 14 of 14 · storage.md
-- **S4.1** Fix the flaky &lt;upload> test · new, todo
+- **S4.1** Fix the flaky &lt;upload> test in \*checkout\_form\* · new, todo
 
 **Commits:** 6 checked, all pass
 
