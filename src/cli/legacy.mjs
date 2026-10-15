@@ -90,6 +90,51 @@ function problem(file, line, message) {
   return { file, line, message }
 }
 
+/**
+ * The 1-based line of the first byte in a buffer that is not part of valid UTF-8, or null when
+ * the whole buffer is valid UTF-8: then decoding and encoding it again gives the same bytes.
+ */
+export function invalidUtf8Line(buffer) {
+  let index = 0
+  let line = 1
+  while (index < buffer.length) {
+    const byte = buffer[index]
+    if (byte < 0x80) {
+      if (byte === 0x0a) line += 1
+      index += 1
+      continue
+    }
+    // The length of the sequence and the range its second byte must be in (no overlong forms, no surrogates).
+    let length = 0
+    let low = 0x80
+    let high = 0xbf
+    if (byte >= 0xc2 && byte <= 0xdf) length = 2
+    else if (byte >= 0xe0 && byte <= 0xef) {
+      length = 3
+      if (byte === 0xe0) low = 0xa0
+      if (byte === 0xed) high = 0x9f
+    } else if (byte >= 0xf0 && byte <= 0xf4) {
+      length = 4
+      if (byte === 0xf0) low = 0x90
+      if (byte === 0xf4) high = 0x8f
+    } else return line
+    if (index + length > buffer.length) return line
+    if (buffer[index + 1] < low || buffer[index + 1] > high) return line
+    for (let next = 2; next < length; next += 1) if (buffer[index + next] < 0x80 || buffer[index + next] > 0xbf) return line
+    index += length
+  }
+  return null
+}
+
+/** The message for a line with a byte that is not UTF-8, which migrate refuses: it would replace the byte. */
+export const INVALID_UTF8 = 'this line has a byte that is not UTF-8, which migrate would replace; re-save the file as UTF-8'
+
+/** A file's text and, when it is not valid UTF-8, the line of the first bad byte (else null). */
+export function readSourceText(path) {
+  const buffer = readFileSync(path)
+  return { text: buffer.toString('utf8'), invalidLine: invalidUtf8Line(buffer) }
+}
+
 // ── The configuration ──────────────────────────────────────────────────────────────
 
 /** A version-1 .agent-ledger.json, every key kept as written. config is null when the text is not a JSON object. */
@@ -594,7 +639,11 @@ export function readLegacyWorkspace(root) {
     result.problems.push(problem(LEGACY_CONFIG_FILE, 0, 'is missing in the repository root'))
     return result
   }
-  const configText = readFileSync(configPath, 'utf8')
+  const { text: configText, invalidLine: configInvalid } = readSourceText(configPath)
+  if (configInvalid !== null) {
+    result.problems.push(problem(LEGACY_CONFIG_FILE, configInvalid, INVALID_UTF8))
+    return result
+  }
   result.sources.set(LEGACY_CONFIG_FILE, configText)
   const { config, problems } = parseLegacyConfig(configText)
   result.config = config
@@ -613,7 +662,11 @@ export function readLegacyWorkspace(root) {
       result.problems.push(problem(path, 0, 'is missing'))
       continue
     }
-    const text = readFileSync(join(root, path), 'utf8')
+    const { text, invalidLine } = readSourceText(join(root, path))
+    if (invalidLine !== null) {
+      result.problems.push(problem(path, invalidLine, INVALID_UTF8))
+      continue
+    }
     result.sources.set(path, text)
     const parsed = PARSERS[name](text, path)
     result[name] = parsed
