@@ -45,11 +45,16 @@ test('the package command prints the version', () => {
  * npm_execpath; otherwise as a command, through a shell on Windows, where Node refuses to start
  * npm.cmd without one.
  */
+/** Runs npm in the package: { status, stdout, out }, out holding stderr too. */
 function npm(args) {
-  if (process.env.npm_execpath) return run(PACKAGE, process.execPath, [process.env.npm_execpath, ...args])
-  if (process.platform !== 'win32') return run(PACKAGE, 'npm', args)
-  const result = spawnSync('npm', args, { cwd: PACKAGE, env: ENV, encoding: 'utf8', shell: true })
-  return { status: result.status, out: `${result.stdout}${result.stderr}` }
+  const [command, list, shell] = process.env.npm_execpath
+    ? [process.execPath, [process.env.npm_execpath, ...args], false]
+    : process.platform === 'win32'
+      ? ['npm', args, true]
+      : ['npm', args, false]
+  const result = spawnSync(command, list, { cwd: PACKAGE, env: ENV, encoding: 'utf8', shell })
+  if (result.error) throw result.error
+  return { status: result.status, stdout: result.stdout, out: `${result.stdout}${result.stderr}` }
 }
 
 /** Every file under a path in the package, as POSIX paths relative to the package. */
@@ -65,7 +70,8 @@ test('npm pack publishes exactly the files in "files", the built guard, package.
   // scripts/test.mjs has built it already.
   const packed = npm(['pack', '--dry-run', '--json', '--ignore-scripts'])
   assert.equal(packed.status, 0, packed.out)
-  const listed = JSON.parse(packed.out.slice(packed.out.indexOf('['))) [0].files.map((file) => file.path).sort()
+  // Only stdout: npm may warn on stderr, as it does about an auth token in a release job.
+  const listed = JSON.parse(packed.stdout.slice(packed.stdout.indexOf('[')))[0].files.map((file) => file.path).sort()
   const intended = [...new Set([...manifest.files.flatMap(filesUnder), 'dist/records.mjs', 'package.json', 'README.md'])].sort()
   assert.deepEqual(listed, intended)
   assert.ok(listed.includes('dist/records.mjs'))
