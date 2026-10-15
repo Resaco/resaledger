@@ -43,6 +43,14 @@ Three lanes work at once. Each commit carries the task it belongs to. A commit w
 3. **Git hooks** refuse a commit with no task, invalid records, or a change to another lane's task.
 4. **CI** judges each pull request by the rules of main, so whatever got past a hook stops there.
 
+## Contributing
+
+- [Contributing](CONTRIBUTING.md): how this repository is worked, with its own ledger.
+- [Code of Conduct](CODE_OF_CONDUCT.md): the Contributor Covenant 2.1.
+- [Security policy](SECURITY.md): report vulnerabilities privately.
+- [Changelog](CHANGELOG.md) and [release notes](https://github.com/Resaco/resaledger/releases): what changed in each version.
+- [Versions and releases](docs/releasing.md): the version policy and how a release is published.
+
 ## License
 
 [MIT](LICENSE) © Resaco Oy
