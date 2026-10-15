@@ -8,16 +8,16 @@ Building. Done: the foundation (F), the record format (R), the git hooks (H), th
 
 ## Active work
 
-[T5.2](work/ledger.md#t52-a-faithful-conversion) and [T1](work/ledger.md#t1-the-parallel-lanes-acceptance-test), with workers; [T3](work/ledger.md#t3-independent-review-of-the-guard), with a reviewer. The How it works animation (G3) and the new README graphics (G4) wait for the owner.
+[T3](work/ledger.md#t3-independent-review-of-the-guard), with a reviewer. The How it works animation (G3) and the new README graphics (G4) wait for the owner.
 
 ## Last verified
 
-- `verify` passed on the current code (2026-10-15): the bundle check, and `npm test` with 679 of 679 tests on Node 24, 22 and 20. The history scan is clean.
+- `verify` passed on the current code (2026-10-15): the bundle check, and `npm test` with 696 of 696 tests on Node 24, 22 and 20. The history scan is clean.
 - CI on GitHub passes on Linux and macOS with Node 20, 22 and 24. Windows failed on two test problems, both fixed since the last push.
 
 ## Next step
 
-Review T5.2 and T1 when their workers report. Then C2, A2 and M4.
+Review T5.2 and T3 when they report. Then C2, A2 and M4, once the plan's five-hour usage window resets.
 
 ## Waiting for the owner
 

@@ -236,7 +236,7 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Depends on: A1
 - Plan: [A-agents.md](../plan/A-agents.md#a2-cursor-gemini-cli-and-github-copilot)
 - Evidence: —
-- Notes: —
+- Notes: Also add to the built-in refusals the commands that throw work away (`reset --hard`, `clean -f`, `checkout -- .`, `restore`) when they would hit another lane's worktree or a protected branch: on 15 October an experimenting reviewer's shell ran such a chain in the lead's checkout. Decide too whether `update` adds back an agent configuration a project removed on purpose.
 
 ### A3 The `AGENTS.md` block, the skill and the plugin
 - Status: todo
@@ -253,6 +253,7 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Plan: [I-installer.md](../plan/I-installer.md#i1-init)
 - Evidence: `node scripts/test.mjs` on `main` after the merges: 507 of 507 on Node 24.18.0, 22.23.3 and 20.20.2; the 39 tests in [init.test.mjs](../../test/init.test.mjs) set up real repositories in the solo and team presets, with `--yes` and off a terminal, with `--dir`, an existing `ledger/`, `AGENTS.md` and `CLAUDE.md`, husky, a dirty file and a 0.x workspace, and run the printed commit command through the installed hooks. Not verified: Windows (CI); the interactive questions on a real terminal.
 - Notes: `init` and `migrate` share the managed block, the guard build and turning the hooks on (`src/cli/setup.mjs`). `init` also refuses to overwrite a `.githooks/` hook that is not ResaLedger's. The `--agents`, `--no-run` and `--no-ci` flags come with A1, I2 and C3, which add their steps.
+- Follow-up: in the team preset, pre-commit refuses the printed setup commit on the protected base; `init --team` must set up on a branch and say to open a pull request (found by T3's reviewer).
 
 ### I2 Detecting the gates
 - Status: todo
@@ -301,11 +302,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 ## T: Acceptance and independent review
 
 ### T1 The parallel-lanes acceptance test
-- Status: doing
+- Status: done
 - Depends on: W4, V3, H2, C1
 - Plan: [T-acceptance.md](../plan/T-acceptance.md#t1-the-parallel-lanes-acceptance-test)
-- Evidence: —
-- Notes: A worker builds it on branch `t1-acceptance` in its own worktree. Next: review, merge, and see it pass in CI on all three systems.
+- Evidence: [acceptance.test.mjs](../../test/acceptance.test.mjs), 10 of 10 on `main` (43 s): `init` sets up a repository; three lanes created with `claim --worktree` work at the same time, each claiming, adding a child task, committing code, verifying, writing a decision and a log entry, finishing with evidence and passing `handoff`; the lanes merge in all six orders and once by squash with no conflict, after which `check` passes and `work` shows every task done and no stale claim; a fourth lane that edits another lane's task is refused by pre-commit and by `ci`. `node scripts/test.mjs` on `main` after T1 and T5.2: 696 of 696 on Node 24.18.0, 22.23.3 and 20.20.2. Not verified: CI on the three systems (the next push).
+- Notes: The test found no bug. It found one case for T4: a lane built on top of another lane's claim commit can change that task, and `ci` accepts it, because the base never recorded the claim; pre-commit refuses it locally.
 
 ### T2 Performance and Windows
 - Status: todo
@@ -326,14 +327,14 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Depends on: C2, C3
 - Plan: [T-acceptance.md](../plan/T-acceptance.md#t4-independent-review-of-the-ci-check)
 - Evidence: —
-- Notes: —
+- Notes: For the reviewer: T1 found that a lane stacked on another lane's claim commit can change that task and pass `ci`, because the base never recorded the claim; decide whether `ci` should compare such a task with the holding lane's branch.
 
 ### T5 Independent review of `migrate`
-- Status: blocked
+- Status: done
 - Depends on: M3
 - Plan: [T-acceptance.md](../plan/T-acceptance.md#t5-independent-review-of-migrate)
-- Evidence: [The review](../evidence/t5/review.md): 14 findings, one blocker, two major, eleven minor, each reproduced on synthetic repositories.
-- Notes: Waits for its child tasks: T5.1, T5.2 and T5.3 fix or answer every finding.
+- Evidence: [The review](../evidence/t5/review.md): 14 findings, all fixed in T5.1, T5.2 and T5.3, each with its own tests.
+- Notes: —
 
 ### T5.1 Data safety in migrate
 - Status: done
@@ -343,11 +344,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: An untracked, ignored stamp file is left in place with a warning, because the undo could not bring it back; a file that is not UTF-8 blocks the run only when `migrate` would write or delete it.
 
 ### T5.2 A faithful conversion
-- Status: doing
+- Status: done
 - Depends on: T5.1
 - Plan: [The review](../evidence/t5/review.md#findings), findings 7 to 13
-- Evidence: —
-- Notes: A worker fixes findings 7 to 13 on branch `t5-2-faithful` in its own worktree. Next: review, merge, record.
+- Evidence: `node scripts/test.mjs` on `main` after the merge: 696 of 696 on Node 24.18.0, 22.23.3 and 20.20.2. A suite "a faithful conversion" in [migrate.test.mjs](../../test/migrate.test.mjs) covers a duplicated Evidence field, blank lines kept in fences, a `standards.md#commits` link listed as less precise, an HTML link listed, an indented-code link left alone, a CRLF and BOM workspace, a guard without its version line, the Lane line, and the `--accept-problems` advice with the commit refused.
+- Notes: For a duplicated field the last one counts, as in 0.x; the earlier one and its lines move to Notes, word for word. The project's own text is no longer tidied; only the joins `migrate` makes are.
 
 ### T5.3 The agent hook command that migrate writes
 - Status: done
