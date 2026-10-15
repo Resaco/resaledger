@@ -2,7 +2,7 @@
 // git to a bare repository, so that the pushed refs and object ids are git's own.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { HOOK_NAMES, renderHook } from '../src/cli/hooks.mjs'
@@ -309,9 +309,19 @@ exit ${code}
     return { bin, log, calls: () => text(log).split('args: ').slice(1), versions: () => text(versions).split('\n').filter(Boolean) }
   }
 
-  /** git push with the given PATH, through the hooks. */
+  /**
+   * git push with the given PATH, through the hooks. HOME is an empty folder and
+   * XDG_CONFIG_HOME is unset, so git's global attributes on this machine stay out, unless
+   * variables say otherwise.
+   */
   function pushWith(r, path, ...args) {
-    const result = spawnSync('git', ['push', '-q', 'origin', ...args], { cwd: r.root, env: { ...ENV, PATH: path }, encoding: 'utf8' })
+    const variables = typeof args[0] === 'object' ? args.shift() : {}
+    const { XDG_CONFIG_HOME, ...env } = ENV
+    const result = spawnSync('git', ['push', '-q', 'origin', ...args], {
+      cwd: r.root,
+      env: { ...env, HOME: temporary('resaledger-home-'), PATH: path, ...variables },
+      encoding: 'utf8'
+    })
     return { status: result.status, out: `${result.stdout}${result.stderr}` }
   }
 
@@ -393,9 +403,31 @@ exit ${code}
     writeFileSync(join(home, 'attributes'), '*.psd filter=lfs diff=lfs merge=lfs -text\n')
     r.git('config', 'core.attributesFile', '~/attributes')
     const lfs = standIn()
-    const env = { ...ENV, HOME: home, PATH: `${lfs.bin}:${process.env.PATH}` }
-    const result = spawnSync('git', ['push', '-q', 'origin', 'lane'], { cwd: r.root, env, encoding: 'utf8' })
-    passed({ status: result.status, out: `${result.stdout}${result.stderr}` })
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, { HOME: home }, 'lane'))
+    assert.equal(lfs.calls().length, 1)
+  })
+
+  test("without core.attributesFile, a rule only in $XDG_CONFIG_HOME/git/attributes counts", () => {
+    const r = workspace()
+    lane(r)
+    const xdg = temporary('resaledger-xdg-')
+    mkdirSync(join(xdg, 'git'))
+    writeFileSync(join(xdg, 'git', 'attributes'), '*.psd filter=lfs diff=lfs merge=lfs -text\n')
+    // ~/.config/git/attributes, which XDG_CONFIG_HOME replaces, has no rule.
+    const home = temporary('resaledger-home-')
+    const lfs = standIn()
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, { HOME: home, XDG_CONFIG_HOME: xdg }, 'lane'))
+    assert.equal(lfs.calls().length, 1)
+  })
+
+  test('without core.attributesFile or XDG_CONFIG_HOME, a rule only in ~/.config/git/attributes counts', () => {
+    const r = workspace()
+    lane(r)
+    const home = temporary('resaledger-home-')
+    mkdirSync(join(home, '.config', 'git'), { recursive: true })
+    writeFileSync(join(home, '.config', 'git', 'attributes'), '*.psd filter=lfs diff=lfs merge=lfs -text\n')
+    const lfs = standIn()
+    passed(pushWith(r, `${lfs.bin}:${process.env.PATH}`, { HOME: home }, 'lane'))
     assert.equal(lfs.calls().length, 1)
   })
 
@@ -436,7 +468,7 @@ exit ${code}
     writeFileSync(join(bin, 'git'), `#!/bin/sh\nexec '${real}' "$@"\n`, { mode: 0o755 })
     writeFileSync(join(bin, 'node'), `#!/bin/sh\nexec '${process.execPath}' "$@"\n`, { mode: 0o755 })
     const result = pushWith(r, bin, 'lane')
-    refused(result, /this repository uses Git LFS \(a \.gitattributes file names filter=lfs\), but git-lfs was not found on your PATH/)
+    refused(result, /this push uses Git LFS \(filter=lfs in a \.gitattributes file or in git's attributes\), but git-lfs was not found on your PATH/)
     assert.match(result.out, /git lfs pre-push/)
     assert.equal(r.git('ls-remote', 'origin', 'refs/heads/lane').out.trim(), '')
   })

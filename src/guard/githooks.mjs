@@ -663,7 +663,8 @@ const GITHOOKS_LFS_RULE = '^[^#]*filter=lfs'
 
 /**
  * Whether Git LFS is in use for this push: filter=lfs outside a comment in the repository's
- * own attributes (info/attributes and the file core.attributesFile names), or in a
+ * own attributes (info/attributes and the file core.attributesFile names, or git's default
+ * global attributes file when it is unset), or in a
  * .gitattributes file, at the root or in a folder, of the index or of the tree of a pushed
  * commit, since a branch can bring Git LFS before the checkout has it. Two small file reads,
  * one git grep over the index and one per distinct pushed object id.
@@ -680,8 +681,10 @@ function githooksUsesLfs(root, lines) {
   const info = spawnSync('git', ['rev-parse', '--git-path', 'info/attributes'], { cwd: root, encoding: 'utf8', windowsHide: true })
   if (info.status === 0 && names(info.stdout.trim())) return true
   const named = spawnSync('git', ['config', '--get', 'core.attributesFile'], { cwd: root, encoding: 'utf8', windowsHide: true })
-  const file = named.status === 0 ? named.stdout.trim() : ''
-  if (file && names(file.replace(/^~(?=$|[/\\])/, () => homedir()))) return true
+  // Unset, git reads its default: $XDG_CONFIG_HOME/git/attributes, else ~/.config/git/attributes.
+  const xdg = process.env.XDG_CONFIG_HOME || join(homedir(), '.config')
+  const file = named.status === 0 ? named.stdout.trim().replace(/^~(?=$|[/\\])/, () => homedir()) : join(xdg, 'git', 'attributes')
+  if (file && names(file)) return true
   const grep = (...where) =>
     spawnSync('git', ['grep', '-q', '-G', '-e', GITHOOKS_LFS_RULE, ...where, '--', ':(glob)**/.gitattributes'], { cwd: root, stdio: 'ignore', windowsHide: true }).status === 0
   if (grep('--cached')) return true
@@ -700,7 +703,7 @@ function githooksLfsPrePush(root, input, lines, args) {
   if (version.error || version.status !== 0) {
     console.error('✖ This push is refused')
     console.error(
-      "  this repository uses Git LFS (a .gitattributes file names filter=lfs), but git-lfs was not found on your PATH, so the push would send LFS pointers without their objects. Install Git LFS and push again: ResaLedger's pre-push hook runs \"git lfs pre-push\" itself. If the repository no longer uses Git LFS, remove filter=lfs from its .gitattributes files"
+      "  this push uses Git LFS (filter=lfs in a .gitattributes file or in git's attributes), but git-lfs was not found on your PATH, so the push would send LFS pointers without their objects. Install Git LFS and push again: ResaLedger's pre-push hook runs \"git lfs pre-push\" itself. If the repository no longer uses Git LFS, remove filter=lfs from its .gitattributes files and git's attributes"
     )
     process.exit(1)
   }
