@@ -50,11 +50,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: The working files stay in the private brand files. The interim README shows the cover until D4 writes the real one.
 
 ### G3 Animated explanations of how it works
-- Status: todo
+- Status: doing
 - Depends on: G2
 - Plan: [G-brand.md](../plan/G-brand.md#g3-animated-explanations-of-how-it-works)
 - Evidence: —
-- Notes: —
+- Notes: The lead built one 11-second loop from the storyboard, in a dark and a light file, with a private generator next to the brand files; the owner saw it on 15 October. Next: commit the files with their check, then the owner decides between this one loop and three, and views it on GitHub after the next push.
 
 ## F: Foundation
 
@@ -165,11 +165,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: The verification state is not shown yet; the lead adds it once V1's stamps merge. A lane that exists only as a remote-tracking branch shows as a stale claim until W2 adds remote lanes.
 
 ### W2 `work --all` across pushed branches
-- Status: doing
+- Status: done
 - Depends on: W1
 - Plan: [W-work.md](../plan/W-work.md#w2-work---all-across-pushed-branches)
-- Evidence: —
-- Notes: A worker builds it on branch `w2-work-all` in its own worktree, and moves pre-commit's fix for git's hook variables into `localLanes`. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs` on `main` after the merge: 533 of 533 on Node 24.18.0, 22.23.3 and 20.20.2. [work.test.mjs](../../test/work.test.mjs) covers two pushed lanes holding the same task, stale claims from a merged and from a deleted branch, `--fetch` against an unreachable remote, a lane that is both a worktree and pushed, verified and unverified heads, and 500 branches in 0.5 to 1.6 seconds on a loaded machine; [lanes.test.mjs](../../test/lanes.test.mjs) reads another worktree with git's hook variables set. Not verified: git before 2.41 (its fallback was measured by hand), Windows (CI).
+- Notes: A worktree lane is never reported stale, because a fresh worktree at the base looks merged. `--fetch` implies `--all`. Reading another worktree now ignores the variables git sets for hooks, in `localLanes` itself.
 
 ### W3 `task` and `new`
 - Status: done
@@ -218,11 +218,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 ## A: Agent integrations
 
 ### A1 The agent hook core, Claude Code and Codex
-- Status: todo
+- Status: doing
 - Depends on: W1, H1
 - Plan: [A-agents.md](../plan/A-agents.md#a1-the-agent-hook-core-claude-code-and-codex)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `a1-agent-hooks` in its own worktree. M4 now depends on it, because `migrate` writes the `hook` command into `.claude/settings.json` (T5 finding 3). Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### A2 Cursor, Gemini CLI and GitHub Copilot
 - Status: todo
@@ -255,11 +255,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: —
 
 ### I3 `update` and the package's command line
-- Status: doing
+- Status: done
 - Depends on: I1
 - Plan: [I-installer.md](../plan/I-installer.md#i3-update-and-the-packages-command-line)
-- Evidence: —
-- Notes: A worker builds it on branch `i3-update` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs` on `main` after the merge: 558 of 558 on Node 24.18.0, 22.23.3 and 20.20.2. [update.test.mjs](../../test/update.test.mjs) covers a clean update, an upgrade from a released version, a hand-edited hook and block kept and then forced, a missing guard restored, a newer guard refused, and commands passed to the repository's guard from a subfolder with their stdin and exit code; [package.test.mjs](../../test/package.test.mjs) checks the list that `npm pack` publishes. Not verified: Windows (CI).
+- Notes: An older package recognises a newer guard by the guard's version line. Spec section 15 now says that releases record hashes of the managed files instead of version lines in the hooks and the block. `scripts/release-hashes.mjs` adds a release's hashes; L3 runs it.
 
 ## M: Migration
 
@@ -286,7 +286,7 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 
 ### M4 This repository moves to 1.0
 - Status: todo
-- Depends on: M3, T5, I3, H2, V3
+- Depends on: M3, T5, I3, H2, V3, A1, T5.1, T5.2
 - Plan: [M-migration.md](../plan/M-migration.md#m4-this-repository-moves-to-10)
 - Evidence: —
 - Notes: —
@@ -322,11 +322,32 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: —
 
 ### T5 Independent review of `migrate`
-- Status: doing
+- Status: blocked
 - Depends on: M3
 - Plan: [T-acceptance.md](../plan/T-acceptance.md#t5-independent-review-of-migrate)
+- Evidence: [The review](../evidence/t5/review.md): 14 findings, one blocker, two major, eleven minor, each reproduced on synthetic repositories.
+- Notes: Waits for its child tasks: T5.1, T5.2 and T5.3 fix or answer every finding.
+
+### T5.1 Data safety in migrate
+- Status: doing
+- Depends on: T5
+- Plan: [The review](../evidence/t5/review.md#findings), findings 1, 2, 4, 5, 6 and 14
 - Evidence: —
-- Notes: A reviewer running Fable 5.1 reads M1–M3 at a fixed commit and reports findings; each finding becomes a child task of T5. Next: record the review, fix or answer every finding.
+- Notes: A worker fixes them on branch `t5-1-migrate-safety`: refuse planned paths that git ignores, print the undo when writing fails, refuse bytes that are not UTF-8, refuse symlinks and untracked targets, compare paths case-insensitively, refuse names Windows reserves.
+
+### T5.2 A faithful conversion
+- Status: todo
+- Depends on: T5.1
+- Plan: [The review](../evidence/t5/review.md#findings), findings 7 to 13
+- Evidence: —
+- Notes: —
+
+### T5.3 The agent hook command that migrate writes
+- Status: todo
+- Depends on: A1
+- Plan: [The review](../evidence/t5/review.md#findings), finding 3
+- Evidence: —
+- Notes: A1 adds `hook <agent> <event>` to the guard; this task adds a test that runs every command `migrate` writes into `.claude/settings.json` against the bundled guard.
 
 ## D: Documentation and repository files
 

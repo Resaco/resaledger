@@ -559,7 +559,7 @@ It is to be tested on synthetic workspaces that cover every quirk of the real on
 
 - The configuration's `version` is the format version: 1 for 0.x, 2 for 1.0. The guard refuses a newer version and prints the command that updates it.
 - Within 1.x, changes are additive only: new optional fields, new commands. A 1.x guard reads the records of any 1.y workspace and keeps fields it does not know.
-- Managed files (the guard, the git hooks, the `AGENTS.md` block, the agent hook configurations) carry a version line. `update` replaces a managed file only when it matches the content of a released version; a file changed by hand is shown and left alone unless `--force` is given. 0.3's `update` overwrites a hand-edited hook without a word as long as the hook still carries its marker.
+- Managed files are the guard, the git hooks, the `AGENTS.md` block and the agent hook configurations. Each release records a hash of every managed file it ships (`templates/released.json`), with the workspace folder written as a placeholder so that one hash serves every `dir`. `update` replaces a managed file only when its content matches a released version; a file changed by hand is shown and left alone unless `--force` is given. The guard also carries its version line, so an older package refuses to replace a newer guard. Hooks and the block carry no version line, so a release rewrites only the files that changed. 0.3's `update` overwrites a hand-edited hook without a word as long as the hook still carries its marker.
 - `update` never touches the README, the records or the project's own part of `AGENTS.md`.
 - A breaking change needs a new format version, a `migrate` step and a major release.
 
