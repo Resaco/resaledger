@@ -19,7 +19,7 @@ import { homedir } from 'node:os'
 import { relative, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { DEFAULTS, loadConfig } from './config.mjs'
+import { CONFIG_FILE, DEFAULTS, loadConfig } from './config.mjs'
 import { handoffProblems, handoffReport } from './handoff.mjs'
 import { activateHooks } from './githooks.mjs'
 import { currentLane } from './lanes.mjs'
@@ -694,9 +694,27 @@ function agentsGitRefusal(args, context, cwd) {
     }
     const protectedRefusal = agentsProtectedPushRefusal(options, refspecs, context, folder)
     if (protectedRefusal) return protectedRefusal
-    if (context.config.agent.pushNeedsHandoff) return agentsPushHandoffRefusal(context, folder)
+    if (context.config.agent.pushNeedsHandoff) {
+      // A dry run pushes nothing.
+      if (options.some((option) => option === '--dry-run' || agentsShortHas(option, 'n'))) return null
+      if (context.changedBy) {
+        return `"git push" follows "git ${context.changedBy}" in the same command, and agent.pushNeedsHandoff judges a push before the command runs, so it cannot see what "git ${context.changedBy}" changes. Run "git push" as a command of its own, after the rest has run`
+      }
+      return agentsPushHandoffRefusal(context, folder)
+    }
   }
   return null
+}
+
+// The git commands that change the commits, the index or the checkout, for a push after them.
+const AGENTS_CHANGING = ['add', 'am', 'apply', 'checkout', 'cherry-pick', 'clean', 'commit', 'merge', 'mv', 'pull', 'rebase', 'reset', 'restore', 'revert', 'rm', 'stash', 'switch']
+
+/** Notes the last git command so far in a command line that changes the commits, the index or the checkout. */
+function agentsTrackChange(args, context, cwd) {
+  const { sub, rest } = agentsGitInvocation(args, cwd)
+  if (!AGENTS_CHANGING.includes(sub)) return
+  if (sub === 'stash' && ['list', 'show'].includes(rest[0])) return
+  context.changedBy = sub
 }
 
 /** The refusal for a push that would reach a protected branch, or null. */
@@ -740,6 +758,9 @@ function agentsPushHandoffRefusal(context, folder) {
   const root = worktree.top
   const { config, problems: configProblems } =
     root === agentsRealPath(context.root) && context.loadedConfig ? { config: context.loadedConfig, problems: [] } : loadConfig(agentsCommittedFile(root))
+  if (!config && agentsCommittedFile(root)(CONFIG_FILE) === null && worktree.branch) {
+    return `the lane "${worktree.branch}" has no ${CONFIG_FILE} at its last commit: the lane branched before ResaLedger was set up. Merge the base branch into it, which brings the configuration, and push again`
+  }
   const problems = config ? handoffProblems({ root, config: { ...config, requirePushed: false }, lane: worktree.branch }) : configProblems
   if (problems.length === 0) return null
   return `agent.pushNeedsHandoff is on, so an agent pushes only work that is handed over, and "${context.guard} handoff" does not pass here:
@@ -927,7 +948,10 @@ function agentsShellRefusal(text, context, folder = context.cwd) {
       if (reason) return reason
     }
     editRefusal ??= agentsEditRefusal(agentsWrittenPaths(command).map((path) => resolve(cwd, agentsExpandHome(path))), context)
-    if (program === 'git') agentsTrackSwitch(command.args, context, cwd)
+    if (program === 'git') {
+      agentsTrackSwitch(command.args, context, cwd)
+      agentsTrackChange(command.args, context, cwd)
+    }
     if (program === 'cd' && command.depth === 0 && command.words[1] && !command.words[1].dynamic) cwd = resolve(cwd, agentsExpandHome(command.args[1]))
   }
   if (context.config.agent.deny.length > 0) {
@@ -1090,7 +1114,9 @@ function agentsContext(session, adapter) {
     sessionKey: key,
     adapter,
     worktrees: new Map(),
-    switched: new Map()
+    switched: new Map(),
+    // The last git command so far in this command line that changes the commits, the index or the checkout.
+    changedBy: null
   }
 }
 
