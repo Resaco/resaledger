@@ -1,0 +1,17 @@
+{
+  "name": "resaledger",
+  "owner": {
+    "name": "ResaLedger"
+  },
+  "metadata": {
+    "description": "The ResaLedger skill for coding agents: set up a task ledger in a repository and keep records the next agent can use.",
+    "version": "1.0.0-dev.0"
+  },
+  "plugins": [
+    {
+      "name": "resaledger",
+      "source": "./plugins/resaledger",
+      "description": "Set up ResaLedger in a repository, and write plans, evidence, handoffs and decisions the next agent can act on."
+    }
+  ]
+}
