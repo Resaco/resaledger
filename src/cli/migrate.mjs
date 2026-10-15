@@ -564,17 +564,30 @@ export function planMigration(root, options = {}) {
     return plan
   }
   // Git LFS's own hooks may lie untracked in .githooks/: its pre-push is replaced, the others are left out of the commit.
-  const isUntrackedLfs = (line) => {
+  const untrackedLfsName = (line) => {
     const name = line.startsWith(`?? ${HOOKS_FOLDER}/`) ? line.slice(`?? ${HOOKS_FOLDER}/`.length) : null
-    return GIT_LFS_HOOKS.includes(name) && isGitLfsHook(name, readFileSync(join(root, HOOKS_FOLDER, name), 'utf8'))
+    return GIT_LFS_HOOKS.includes(name) ? name : null
+  }
+  // A link to nothing in place of one of Git LFS's hooks cannot be read, so it is refused by name.
+  const isDangling = (line) => {
+    const name = untrackedLfsName(line)
+    return name !== null && lstatSync(join(root, HOOKS_FOLDER, name)).isSymbolicLink() && !existsSync(join(root, HOOKS_FOLDER, name))
+  }
+  const isUntrackedLfs = (line) => {
+    const name = untrackedLfsName(line)
+    if (name === null || isDangling(line) || !statSync(join(root, HOOKS_FOLDER, name)).isFile()) return false
+    return isGitLfsHook(name, readFileSync(join(root, HOOKS_FOLDER, name), 'utf8'))
   }
   const statusLines = status.stdout.split('\n').filter(Boolean)
+  for (const line of statusLines.filter(isDangling)) {
+    refuse(`${line.slice(3)} is a symbolic link to a file that does not exist, so migrate cannot tell whether it is Git LFS's hook; remove the link or replace it with the hook itself`)
+  }
   const untrackedLfs = statusLines.filter(isUntrackedLfs).map((line) => line.slice(3))
   const left = untrackedLfs.filter((path) => !HOOK_NAMES.includes(path.slice(HOOKS_FOLDER.length + 1)))
   plan.report.commitCommand = commitCommand(left)
-  if (statusLines.length > untrackedLfs.length) {
-    const lines = statusLines.filter((line) => !isUntrackedLfs(line))
-    refuse('the working tree has uncommitted changes; commit or stash them first, so the migration is one reviewable change', lines.slice(0, 20).join('\n') + (lines.length > 20 ? `\n… and ${lines.length - 20} more` : ''))
+  const others = statusLines.filter((line) => !isUntrackedLfs(line) && !isDangling(line))
+  if (others.length > 0) {
+    refuse('the working tree has uncommitted changes; commit or stash them first, so the migration is one reviewable change', others.slice(0, 20).join('\n') + (others.length > 20 ? `\n… and ${others.length - 20} more` : ''))
   }
   const legacy = readLegacyWorkspace(root)
   for (const item of legacy.problems) {

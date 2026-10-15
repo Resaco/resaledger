@@ -8,7 +8,7 @@ import { AGENT_NAMES, agentConfigFile, agentConfigSnippet, detectAgents, mergeAg
 import { CONFIG_FILE, CONFIG_VERSION, DEFAULTS, isSafeFolderPath, parseConfig, SAFE_FOLDER_RULE } from '../guard/config.mjs'
 import { ENFORCEMENT_WORKFLOW } from '../guard/enforcement.mjs'
 import { SETUP_MARKER } from '../guard/records.mjs'
-import { detectHookManager, HOOK_NAMES, integrateHookManager, isGitLfsHook, renderHook } from './hooks.mjs'
+import { detectHookManager, HOOK_NAMES, integrateHookManager, isGitLfsHook, managerGitLfsPrePush, renderHook } from './hooks.mjs'
 import { LEGACY_CONFIG_FILE } from './legacy.mjs'
 import { agentsBlock, BUILT_GUARD, claudeFile, detectBase, GITATTRIBUTES_FILE, hasAgentsImport, HOOKS_FOLDER, realRelative, turnOnHooks, withAgentsBlock, withHooksEolRule } from './setup.mjs'
 
@@ -176,21 +176,28 @@ function dirtyFiles(root, paths, replaceable = []) {
 }
 
 /**
- * A refusal for each ignore rule (.gitignore, info/exclude, the global excludes file) that
- * matches one of paths, naming its file and line: the files init must commit there could not be.
+ * The ignore rules (.gitignore, info/exclude, the global excludes file) that match paths.
+ * Returns { refusals, forced }: a refusal for each untracked path a rule matches, naming its file
+ * and line, as init could not commit it there; and the tracked paths a rule matches, which git
+ * commits all the same, though "git add" needs -f for them.
  */
 export function ignoredRefusals(root, paths) {
-  if (paths.length === 0) return []
+  if (paths.length === 0) return { refusals: [], forced: [] }
+  const listed = spawnSync('git', ['ls-files', '-z', '--', ...paths], { cwd: root, encoding: 'utf8' })
+  if (listed.status !== 0) return { refusals: [`git ls-files failed: ${listed.stderr.trim()}`], forced: [] }
+  const tracked = new Set(listed.stdout.split('\0'))
   const result = spawnSync('git', ['check-ignore', '--verbose', '--no-index', '--stdin', '-z'], { cwd: root, encoding: 'utf8', input: `${paths.join('\0')}\0` })
-  if (result.status !== 0 && result.status !== 1) return [`git check-ignore failed: ${result.stderr.trim()}`]
+  if (result.status !== 0 && result.status !== 1) return { refusals: [`git check-ignore failed: ${result.stderr.trim()}`], forced: [] }
   const fields = result.stdout.split('\0')
   const refusals = []
+  const forced = []
   for (let index = 0; index + 3 < fields.length; index += 4) {
     const [source, line, pattern, path] = fields.slice(index, index + 4)
     if (!pattern || pattern.startsWith('!')) continue
-    refusals.push(`${source}:${line}: ${pattern} ignores ${path}, so init could not commit it; remove or change the rule`)
+    if (tracked.has(path)) forced.push(path)
+    else refusals.push(`${source}:${line}: ${pattern} ignores ${path}, so init could not commit it; remove or change the rule`)
   }
-  return refusals
+  return { refusals, forced }
 }
 
 // What each agent does with the project's hooks before they run (spec 11), for init's output.
@@ -233,7 +240,8 @@ export function planAgentConfigs(root, agents, dir, writes) {
  * gates, commitStyle }; agents null finds the agents in use, gates is { commit, verify } (none
  * when absent) and commitStyle "conventional" or "free" (the default, not written). Returns { refusals,
  * writes (path → text), executable, created, changed, managerFiles, manager, instructions, warnings, dir,
- * preset, config, goalMarker, agents, codeowners, gitLfs }, gitLfs holding the Git LFS hooks it replaces.
+ * preset, config, goalMarker, agents, codeowners, gitLfs, forceHooks }, gitLfs holding the Git LFS hooks it
+ * replaces, and forceHooks true when an ignore rule matches a hook that git tracks.
  * The team preset adds the CI workflow, a pull request template when the project has none, and
  * codeowners, the CODEOWNERS lines to print. Nothing may be written when refusals is not empty.
  */
@@ -254,7 +262,8 @@ export function planInit(root, options = {}) {
     goalMarker: !options.goal,
     agents: [],
     codeowners: null,
-    gitLfs: []
+    gitLfs: [],
+    forceHooks: false
   }
   const refuse = (message) => plan.refusals.push(message)
 
@@ -286,6 +295,8 @@ export function planInit(root, options = {}) {
   // 2. The git hooks: a hook manager's files, or .githooks/.
   const touched = [] // existing files init changes, for the uncommitted-changes check
   plan.manager = detectHookManager(root)
+  const lfsLine = managerGitLfsPrePush(root, plan.manager)
+  if (lfsLine) refuse(`${lfsLine} runs "git lfs pre-push", which would read git's input before the guard, so the guard would check nothing; remove that line: ResaLedger's guard runs Git LFS's pre-push itself`)
   if (plan.manager === 'husky') plan.managerFiles = HOOK_NAMES.map((name) => `.husky/${name}`)
   else if (plan.manager === 'simple-git-hooks') plan.managerFiles = ['package.json']
   else if (plan.manager) plan.instructions = integrateHookManager(root, plan.manager, dir).instructions // lefthook and pre-commit: a snippet, no writes
@@ -303,7 +314,9 @@ export function planInit(root, options = {}) {
       plan.executable.add(path)
     }
     plan.writes.set(GITATTRIBUTES_FILE, withHooksEolRule(readText(root, GITATTRIBUTES_FILE)))
-    for (const message of ignoredRefusals(root, HOOK_NAMES.map((name) => `${HOOKS_FOLDER}/${name}`))) refuse(message)
+    const ignored = ignoredRefusals(root, HOOK_NAMES.map((name) => `${HOOKS_FOLDER}/${name}`))
+    for (const message of ignored.refusals) refuse(message)
+    plan.forceHooks = ignored.forced.length > 0
   }
   touched.push(...plan.managerFiles)
 
@@ -405,8 +418,11 @@ function shellWord(path) {
   return /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replaceAll("'", "'\\''")}'`
 }
 
-/** The command that commits exactly the given files, by default with init's message. */
-export function commitCommand(files, message = INIT_COMMIT_MESSAGE) {
+/**
+ * The command that commits exactly the given files, by default with init's message. forceHooks
+ * adds the hooks with -f, for hooks git tracks under an ignore rule; init refuses untracked ones.
+ */
+export function commitCommand(files, message = INIT_COMMIT_MESSAGE, forceHooks = false) {
   const [header, trailer] = message
   // The hooks are staged as executable: a file system without an executable bit, as on Windows,
   // would otherwise commit them so that git on Linux and macOS skips them.
@@ -414,6 +430,6 @@ export function commitCommand(files, message = INIT_COMMIT_MESSAGE) {
   const others = files.filter((file) => !file.startsWith(`${HOOKS_FOLDER}/`))
   const adds = []
   if (others.length > 0) adds.push(`git add ${others.map(shellWord).join(' ')}`)
-  if (hooks.length > 0) adds.push(`git add --chmod=+x ${hooks.map(shellWord).join(' ')}`)
+  if (hooks.length > 0) adds.push(`git add ${forceHooks ? '-f ' : ''}--chmod=+x ${hooks.map(shellWord).join(' ')}`)
   return `${adds.join(' && ')} && git commit -m "${header}" -m "${trailer}"`
 }

@@ -388,7 +388,7 @@ Some refusals come from your own setup:
 
 ## Git LFS
 
-In a repository that uses Git LFS, where a tracked `.gitattributes` names `filter=lfs`, the guard's `pre-push` runs Git LFS's `pre-push` after its own checks pass, so a push uploads the LFS objects and a refused push uploads none. When Git LFS had written its hooks into `.githooks/`, `init` replaced its `pre-push` and left its other hooks alone.
+In a repository that uses Git LFS, where a tracked `.gitattributes` names `filter=lfs`, the guard's `pre-push` runs Git LFS's `pre-push` after its own checks pass, so a push uploads the LFS objects and a refused push uploads none. When Git LFS had written its hooks into `.githooks/`, `init` replaced its `pre-push` and left its other hooks alone. With a hook manager, remove a `git lfs pre-push` line from its `pre-push` before `init`: it would read git's input before the guard, which then checks nothing, so `init` refuses husky's and simple-git-hooks' and its lefthook and pre-commit instructions say so.
 
 In a fresh clone, `git lfs install` finds the guard's `pre-push` and stops:
 

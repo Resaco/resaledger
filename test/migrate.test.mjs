@@ -1330,6 +1330,13 @@ describe("Git LFS's own hooks in .githooks/", () => {
     assert.doesNotMatch(refused.out, /is not tracked by git/)
   })
 
+  test('a dangling link in place of a Git LFS hook is refused with its path, not thrown', () => {
+    const r = legacyRepository()
+    symlinkSync('missing-post-merge', join(r.root, '.githooks', 'post-merge'))
+    const refused = assertRefused(r, ['--dry-run'], /✖ \.githooks\/post-merge is a symbolic link to a file that does not exist, so migrate cannot tell whether it is Git LFS's hook; remove the link or replace it with the hook itself/)
+    assert.doesNotMatch(refused.out, /uncommitted changes|ENOENT/)
+  })
+
   test("a pre-push that is not Git LFS's is still refused as changed by hand", () => {
     const r = legacyRepository({ files: { '.githooks/pre-push': `${lfsHook('pre-push')}make lint\n` } })
     assertRefused(r, [], /\.githooks\/pre-push differs from the hook agent-ledger 0\.x wrote, so it was changed by hand/)

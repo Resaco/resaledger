@@ -291,7 +291,7 @@ export async function initCommand(args) {
   const steps = []
   const sections = [...(plan.goalMarker ? ['Goal'] : []), 'Environments', 'Manual checks']
   steps.push(`Write the project's own text in ${dir}/README.md where a ${SETUP_MARKER} marker is (${sections.join(', ')}); "handoff" asks for it.`)
-  steps.push(...setupCommitSteps(currentBranch(root), plan.config, commitCommand(files)))
+  steps.push(...setupCommitSteps(currentBranch(root), plan.config, commitCommand(files, undefined, plan.forceHooks)))
   steps.push(`Start working: node ${dir}/scripts/records.mjs work`)
   if (plan.codeowners) {
     const lines = plan.codeowners.trimEnd().split('\n').map((line) => `       ${line}`).join('\n')
