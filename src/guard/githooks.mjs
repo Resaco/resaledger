@@ -129,11 +129,11 @@ function githooksBranchProblems(branch, config) {
 
 /**
  * The ownership problems of the staged tasks (spec 6.2), compared by id with HEAD: a task that
- * exists on the base branch was deleted or had its id renamed, or a task another lane holds was
- * changed without a takeover. During a merge, a task staged exactly as a merged commit has it
- * is that lane's own change and passes.
+ * exists on the base branch was deleted or had its id renamed, or a task another lane holds, in
+ * HEAD or in `holders` (the other local worktrees), was changed without a takeover. During a
+ * merge, a task staged exactly as a merged commit has it is that lane's own change and passes.
  */
-function githooksOwnershipProblems(root, branch, config, head, headTasks, stagedTasks, mergeHeads) {
+function githooksOwnershipProblems(root, branch, config, head, headTasks, stagedTasks, mergeHeads, holders) {
   let kept = new Set(headTasks.keys())
   const deleted = [...headTasks.keys()].some((id) => !stagedTasks.has(id))
   const base = deleted && branch !== config.base ? githooksCommit(config.base) : null
@@ -147,7 +147,20 @@ function githooksOwnershipProblems(root, branch, config, head, headTasks, staged
     if (mergeBase !== head) kept = new Set(taskRecordsById(treeReader({ kind: 'commit', rev: mergeBase, root }), config.dir).keys())
   }
   const accepted = mergeHeads.map((rev) => taskRecordsById(treeReader({ kind: 'commit', rev, root }), config.dir))
-  return ownershipProblems({ before: headTasks, after: stagedTasks, lane: branch, config, kept, accepted })
+  return ownershipProblems({ before: headTasks, after: stagedTasks, lane: branch, config, kept, holders, accepted })
+}
+
+/**
+ * The tasks each other local worktree holds, as one Map by id per worktree: its tasks on disk
+ * whose Lane is its own branch, so that a claim it has not committed yet counts (spec 6.2).
+ */
+function githooksWorktreeHolders(lanes) {
+  return lanes.map((lane) => new Map(lane.tasks.filter((task) => task.id && task.lane === lane.branch).map((task) => [task.id, { task }])))
+}
+
+/** Whether the staged tasks change or add a task compared with HEAD. */
+function githooksTasksChanged(headTasks, stagedTasks) {
+  return [...stagedTasks].some(([id, { text }]) => headTasks.get(id)?.text !== text)
 }
 
 /**
@@ -193,7 +206,7 @@ function githooksGitPath(root, name) {
  * locally visible branch has in another file. The other branches are the local branches and the
  * remote-tracking branches, except this lane's own, and the other worktrees as they are on disk.
  */
-function githooksIdProblems(root, branch, config, headTasks, stagedTasks) {
+function githooksIdProblems(root, branch, config, headTasks, stagedTasks, lanes) {
   const added = [...stagedTasks.values()].filter(({ task }) => !headTasks.has(task.id)).map(({ task }) => ({ id: task.id, file: task.file }))
   if (added.length === 0) return []
   let own = new Set()
@@ -202,7 +215,7 @@ function githooksIdProblems(root, branch, config, headTasks, stagedTasks) {
     own = new Set([`refs/heads/${branch}`, ...remotes.map((remote) => `refs/remotes/${remote}/${branch}`)])
   }
   const others = branchTaskFiles({ root, dir: config.dir, exclude: (ref) => own.has(ref.ref) })
-  for (const lane of localLanes(config)) {
+  for (const lane of lanes()) {
     others.push({ branch: lane.branch, worktree: true, files: new Map(lane.tasks.filter((task) => task.id).map((task) => [task.id, task.file])) })
   }
   return idCollisions(added, others, config)
@@ -240,10 +253,11 @@ function githooksWithRules(config, rules) {
  * The pre-commit hook, and pre-merge-commit, which git runs instead for a merge that commits
  * by itself. Judged on the staged content (the index git names in GIT_INDEX_FILE, which is a
  * temporary one for `git commit -- <paths>`): the configuration, the branch rules, the records,
- * task ownership against HEAD, new ids against the other local branches and worktrees, and
- * the commit gates when code is staged. The rules (githooksWithRules) are HEAD's committed
- * ones, so staging a looser configuration does not loosen the commit that adds it; the index's
- * hold only before the first commit, or when HEAD has no valid configuration yet.
+ * task ownership against HEAD and the other local worktrees' claims on disk, new ids against
+ * the other local branches and worktrees, and the commit gates when code is staged. The rules
+ * (githooksWithRules) are HEAD's committed ones, so staging a looser configuration does not
+ * loosen the commit that adds it; the index's hold only before the first commit, or when HEAD
+ * has no valid configuration yet.
  * hook is the hook git runs, which tells where the merged commits of a merge are found.
  * A refusal prints every problem and exits 1; a pass prints only the gate lines.
  */
@@ -265,8 +279,14 @@ export function preCommit(hook = 'pre-commit') {
   problems.push(...checkWorkspace(loadWorkspace(reader, staged), reader, staged))
   const headTasks = head === null ? new Map() : taskRecordsById(treeReader({ kind: 'commit', rev: head, root }), config.dir)
   const stagedTasks = taskRecordsById(reader, config.dir)
-  if (branch !== null && head !== null) problems.push(...githooksOwnershipProblems(root, branch, config, head, headTasks, stagedTasks, githooksMergeHeads(root, hook)))
-  problems.push(...githooksIdProblems(root, branch, config, headTasks, stagedTasks))
+  // The other worktrees are read once, and only when a task changes: most commits change none.
+  let others = null
+  const lanes = () => (others ??= localLanes(config, new Map()))
+  if (branch !== null && head !== null) {
+    const holders = githooksTasksChanged(headTasks, stagedTasks) ? githooksWorktreeHolders(lanes()) : []
+    problems.push(...githooksOwnershipProblems(root, branch, config, head, headTasks, stagedTasks, githooksMergeHeads(root, hook), holders))
+  }
+  problems.push(...githooksIdProblems(root, branch, config, headTasks, stagedTasks, lanes))
   if (problems.length > 0) githooksRefuse(problems)
 
   if (config.gates.commit.length === 0 || !githooksStagedPaths().some((path) => isCode(path, config))) return

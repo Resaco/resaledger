@@ -5,7 +5,7 @@ import { chmodSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { HOOK_NAMES, renderHook } from '../src/cli/hooks.mjs'
-import { PACKAGE, repository, run, temporary } from './helpers.mjs'
+import { PACKAGE, budget, repository, run, temporary } from './helpers.mjs'
 
 const GUARD = join(temporary(), 'records.mjs')
 const built = run(PACKAGE, process.execPath, [join(PACKAGE, 'scripts', 'bundle.mjs'), '--out', GUARD])
@@ -400,4 +400,47 @@ test('a pull that merges another lane\'s change to its task passes pre-merge-com
   r.git('branch', '-q', '-D', 'other')
   passed(r.git('pull', '-q', '--no-rebase', '--no-edit', 'origin', 'other'))
   assert.equal(r.git('rev-list', '--count', '--merges', 'HEAD').out.trim(), '1')
+})
+
+test('a task claimed but not committed in another local worktree is held by that lane', () => {
+  const r = workspace({ tasks: [['S1', 'Bake bread'], ['S2', 'Buy flour']] })
+  const a = r.worktree('a')
+  const b = r.worktree('b')
+  task(a, 'S1', 'Bake bread', { status: 'doing', lane: 'a' })
+  // Another lane's Lane in a worktree does not make that worktree hold the task.
+  task(a, 'S2', 'Buy flour', { status: 'doing', lane: 'elsewhere' })
+  task(b, 'S1', 'Bake bread', { status: 'todo', note: 'An edit.' })
+  refused(b.commit('docs: S1'), /ledger\/tasks\/S1\.md: task S1 is held by lane "a" \(Status: doing\).*claim S1 --take/)
+  task(b, 'S1', 'Bake bread', { status: 'doing', lane: 'b' })
+  refused(b.commit('chore: claim S1'), /task S1 is held by lane "a"/)
+  b.git('reset', '-q', '--hard')
+  task(b, 'S2', 'Buy flour', { note: 'Not held here.' })
+  passed(b.commit('docs: S2 note'))
+
+  // Lane a commits its own claim, finishes the task and is merged.
+  a.git('checkout', '-q', '--', 'ledger/tasks/S2.md')
+  passed(a.commit('chore: claim S1'))
+  task(a, 'S1', 'Bake bread', { status: 'done', lane: 'a' })
+  passed(a.commit('docs: S1 done'))
+  passed(r.git('merge', '-q', '--no-ff', '-m', 'Merge a', 'a'))
+  passed(b.git('merge', '-q', '--no-ff', '-m', 'Merge main', 'main'))
+  task(b, 'S1', 'Bake bread', { status: 'done', lane: 'a', note: 'Fixed a link.' })
+  passed(b.commit('docs: S1 link'))
+})
+
+test('pre-commit with three other worktrees stays fast', () => {
+  const tasks = Array.from({ length: 30 }, (_, index) => [`S${index + 1}`, `Task ${index + 1}`])
+  const r = workspace({ tasks })
+  for (const name of ['a', 'b', 'c']) {
+    const other = r.worktree(name)
+    task(other, `S${name.charCodeAt(0) - 96}`, 'Claimed', { status: 'doing', lane: name })
+  }
+  const d = r.worktree('d')
+  task(d, 'S10', 'Task 10', { status: 'doing', lane: 'd' })
+  d.git('add', '-A')
+  const started = performance.now()
+  const result = d.run(process.execPath, ['ledger/scripts/records.mjs', 'pre-commit'])
+  const elapsed = performance.now() - started
+  passed(result)
+  assert.ok(elapsed < budget(1000), `pre-commit took ${Math.round(elapsed)} ms`)
 })

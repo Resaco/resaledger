@@ -324,7 +324,7 @@ A lane is a branch with someone working on it, and its identity is the branch na
 
 ### 6.2 One owner per task
 
-A task that is `doing`, or `blocked` with a Lane, belongs to that lane, and only that lane changes its file. pre-commit refuses a change to another lane's task, and so does CI in a pull request. A held task is never deleted, not even in a merge that brings in the lane that holds it. The two exceptions are claiming a task nobody holds and taking one over with `claim --take`, which records where it came from. Tasks that are `todo` without a lane, `done` or `dropped` can be edited by anyone; such edits are rare, such as planning or fixing a link.
+A task that is `doing`, or `blocked` with a Lane, belongs to that lane, and only that lane changes its file. pre-commit refuses a change to another lane's task, and so does CI in a pull request. pre-commit also reads the task files of the other local worktrees from disk, so a claim another worktree has not committed yet counts: a task there whose Lane is that worktree's branch is held by it. A held task is never deleted, not even in a merge that brings in the lane that holds it. The two exceptions are claiming a task nobody holds and taking one over with `claim --take`, which records where it came from. Tasks that are `todo` without a lane, `done` or `dropped` can be edited by anyone; such edits are rare, such as planning or fixing a link.
 
 Every other record is added and never edited: decisions (apart from marking one superseded), log entries and stamps. Plans and the workspace README are shared, and they change outside normal work.
 
@@ -431,7 +431,7 @@ The package adds `init`, `update` and `migrate` ([sections 13–15](#13-installa
 | Check | pre-commit, pre-merge-commit | commit-msg | pre-push | handoff | CI, pull request | CI, push to base |
 | --- | --- | --- | --- | --- | --- | --- |
 | Records are valid | ✓ | | | ✓ | ✓ | ✓ |
-| No change to another lane's task, no held task deleted | ✓ | | | | ✓ | |
+| No change to another lane's task, no held task deleted | ✓ with the local worktrees' claims | | | | ✓ | |
 | No commit or push on a protected branch; branch name | ✓ | | ✓ | | | |
 | A code commit names a task held by its lane | | ✓ | ✓ range | ✓ range | ✓ range | ✓ new commits |
 | Commit gates pass | ✓ on code commits | | | | ✓ | |

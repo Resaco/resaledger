@@ -5,15 +5,14 @@
 // A lane is { branch, path?, source, tasks, lastCommit? }. source is 'this' for the current
 // worktree, 'worktree' for another local one and 'remote' for a remote-tracking branch.
 import { spawnSync } from 'node:child_process'
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { join } from 'node:path'
 import { stampPath, verifiedStamp } from './gates.mjs'
 import { parseTask } from './tasks.mjs'
 import { git, repositoryRoot } from './util.mjs'
-import { fingerprint, treeReader } from './workspace.mjs'
+import { fingerprint } from './workspace.mjs'
 
 const LANES_MARKDOWN = /\.(md|markdown)$/i
-// The variables git sets for a hook that point at this worktree's repository and index.
-const LANES_LOCATION_VARIABLES = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_PREFIX', 'GIT_OBJECT_DIRECTORY']
 
 /** The current branch name, or null in a detached HEAD or outside a repository. */
 export function currentLane() {
@@ -64,17 +63,30 @@ function lanesRealPath(path) {
 }
 
 /**
- * Runs read() without git's location variables, and restores them after. git sets
- * GIT_INDEX_FILE (and for some hooks GIT_DIR) for a hook; another worktree read with them
- * would list this worktree's index instead of that worktree's files.
+ * A reader of the task files in a worktree's <dir>/tasks folder, straight from disk: no git
+ * call, so it is fast, and git's hook variables (GIT_INDEX_FILE, GIT_DIR) cannot point it at
+ * this worktree's index. Only the files directly in that folder are listed.
  */
-function lanesWithoutLocation(read) {
-  const saved = new Map(LANES_LOCATION_VARIABLES.filter((name) => name in process.env).map((name) => [name, process.env[name]]))
-  for (const name of saved.keys()) delete process.env[name]
-  try {
-    return read()
-  } finally {
-    for (const [name, value] of saved) process.env[name] = value
+function lanesTasksReader(root, dir) {
+  const folder = `${dir}/tasks`
+  return {
+    list() {
+      try {
+        return readdirSync(join(root, folder), { withFileTypes: true })
+          .filter((entry) => entry.isFile())
+          .map((entry) => `${folder}/${entry.name}`)
+          .sort()
+      } catch {
+        return []
+      }
+    },
+    read(path) {
+      try {
+        return readFileSync(join(root, path), 'utf8')
+      } catch {
+        return null
+      }
+    }
   }
 }
 
@@ -98,9 +110,9 @@ function lanesWorktrees() {
 /**
  * The other worktrees of this repository as lanes: [{ branch, path, source: 'worktree', tasks,
  * lastCommit }]. Task files are read from each worktree's disk, so an uncommitted claim shows.
- * Bare and detached worktrees, the current one and worktrees whose folder is gone are skipped.
- * The lanes are sorted by branch name. Each worktree is read without git's location variables,
- * so this is safe inside a hook.
+ * Only each worktree's <dir>/tasks folder is read, from disk, so this is fast and safe inside a
+ * hook. Bare and detached worktrees, the current one and worktrees whose folder is gone are
+ * skipped. The lanes are sorted by branch name.
  * `branches` is localBranches(), passed in when the caller already has it.
  */
 export function localLanes(config, branches = localBranches()) {
@@ -111,12 +123,7 @@ export function localLanes(config, branches = localBranches()) {
     if (!existsSync(worktree.path)) continue
     const real = lanesRealPath(worktree.path)
     if (real === null || real === here) continue
-    let tasks = []
-    try {
-      tasks = lanesWithoutLocation(() => laneTasks(treeReader({ kind: 'worktree', root: worktree.path }), config.dir))
-    } catch {
-      // A worktree git cannot read is shown with no tasks rather than stopping work.
-    }
+    const tasks = laneTasks(lanesTasksReader(worktree.path, config.dir), config.dir)
     const lane = { branch: worktree.branch, path: worktree.path, source: 'worktree', tasks }
     if (branches.has(worktree.branch)) lane.lastCommit = branches.get(worktree.branch)
     lanes.push(lane)
