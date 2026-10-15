@@ -39,7 +39,8 @@ const LEGACY_FIELD = /^- ([A-Z][\p{L}]*(?: [\p{L}]+)*):(?:[ \t]+(.*))?$/u
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 
 export const COMMIT_COMMAND = 'git add -A && git commit -m "chore: migrate to ResaLedger 1.0" -m "Task: maintenance"'
-export const UNDO_COMMAND = 'git restore . && git clean -fd'
+// Root pathspecs, so that the undo is whole when it is run from a subfolder.
+export const UNDO_COMMAND = 'git restore -- :/ && git clean -fd -- :/'
 
 // The sections of the 0.x workspace templates (identical in 0.1, 0.2 and 0.3). A section with
 // another name is the project's own and moves; the template's own are kept in the log entry.
@@ -454,7 +455,8 @@ export function planMigration(root, options = {}) {
     refuse(`${CONFIG_FILE} exists: this repository is already migrated to ResaLedger 1.0`)
     return plan
   }
-  const status = runGit(root, ['status', '--porcelain'])
+  // Untracked files count even when status.showUntrackedFiles hides them: the undo command would delete them.
+  const status = runGit(root, ['status', '--porcelain', '--untracked-files=all'])
   if (status.status !== 0) {
     refuse(`git status failed: ${status.stderr.trim()}`)
     return plan

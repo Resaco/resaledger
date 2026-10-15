@@ -344,7 +344,7 @@ describe('migrate, from end to end', () => {
     assert.match(result.out, /Rename \(1\):\n {2}\.agent-ledger\.json → \.resaledger\.json/)
     assert.match(result.out, /✔ records valid: 4 tasks, 2 decisions, 3 log entries/)
     assert.match(result.out, /git add -A && git commit -m "chore: migrate to ResaLedger 1\.0" -m "Task: maintenance"/)
-    assert.match(result.out, /git restore \. && git clean -fd/)
+    assert.match(result.out, /git restore -- :\/ && git clean -fd -- :\/ && git config --unset core\.hooksPath/)
     const check = r.node(`${DIR}/scripts/records.mjs`, 'check')
     assert.equal(check.status, 0, check.out)
     assert.equal(r.git('config', '--get', 'core.hooksPath').out.trim(), '.githooks')
@@ -584,6 +584,13 @@ describe('other shapes of a 0.x repository', () => {
 describe('refusals, each of which changes nothing', () => {
   test('a dirty tree', () => {
     const r = legacyRepository()
+    r.write('notes.txt', 'work in progress\n')
+    assertRefused(r, [], /uncommitted changes[\s\S]*\?\? notes\.txt/)
+  })
+
+  test('an untracked file that status.showUntrackedFiles hides, which the undo command would delete', () => {
+    const r = legacyRepository()
+    r.git('config', 'status.showUntrackedFiles', 'no')
     r.write('notes.txt', 'work in progress\n')
     assertRefused(r, [], /uncommitted changes[\s\S]*\?\? notes\.txt/)
   })
