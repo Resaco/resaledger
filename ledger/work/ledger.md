@@ -50,11 +50,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: The working files stay in the private brand files. The interim README shows the cover until D4 writes the real one.
 
 ### G3 Animated explanations of how it works
-- Status: blocked
+- Status: done
 - Depends on: G2
 - Plan: [G-brand.md](../plan/G-brand.md#g3-animated-explanations-of-how-it-works)
 - Evidence: [how-it-works.test.mjs](../../test/how-it-works.test.mjs) passes on [the two files](../../docs/assets/how-it-works/how-it-works-dark.svg): each is under 75 KB, runs no script, loads nothing from outside and has a still frame for reduced motion. The lead stepped through the loop frame by frame in Chromium; the storyboard's six beats are there.
-- Notes: Waits for the owner to see it play in the README on GitHub. The owner chose this one loop over three on 15 October. The generator stays with the private brand files, as G2's tools do.
+- Notes: The owner chose one loop over three and saw it play in the README on GitHub on 15 October. Not checked: Firefox and Safari. The generator stays with the private brand files, as G2's tools do.
 
 ### G4 More README graphics: use cases, and where a bad commit stops
 - Status: todo
@@ -323,25 +323,25 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: Waits for its child tasks: T3.1 to T3.4 fix or answer every finding.
 
 ### T3.1 A range check that cannot be fooled
-- Status: todo
+- Status: doing
 - Depends on: T3
 - Plan: [The review](../evidence/t3/review.md#findings), findings 1, 2, 3 and 7
 - Evidence: —
-- Notes: Read commit bodies length-prefixed (`git cat-file --batch`), never by splitting formatted output; a merge that adds code neither side changed needs a trailer; a revert must invert the commit it names, and a release subject alone exempts nothing; `--amend` is judged against HEAD's parent.
+- Notes: A worker fixes it on branch `t3-1-range`. Read commit bodies length-prefixed (`git cat-file --batch`), never by splitting formatted output; a merge that adds code neither side changed needs a trailer; a revert must invert the commit it names, and a release subject alone exempts nothing; `--amend` is judged against HEAD's parent.
 
 ### T3.2 Hooks judged by the committed rules
-- Status: todo
+- Status: doing
 - Depends on: T3
 - Plan: [The review](../evidence/t3/review.md#findings), findings 4, 6 and 9
 - Evidence: —
-- Notes: Ship a `pre-merge-commit` hook; take the protected branches, the branch pattern and the gates from the committed configuration, not the staged one; refuse deleting a task another lane holds.
+- Notes: A worker fixes it on branch `t3-2-rules`. Ship a `pre-merge-commit` hook; take the protected branches, the branch pattern and the gates from the committed configuration, not the staged one; refuse deleting a task another lane holds.
 
 ### T3.3 handoff and verify at the edges
-- Status: todo
+- Status: doing
 - Depends on: T3
 - Plan: [The review](../evidence/t3/review.md#findings), findings 5, 8, 10 and 11
 - Evidence: —
-- Notes: Start `handoff`'s range at the commit that added the configuration, as pre-push does; decide in spec section 5.10 whether code-like files in the workspace count as code; prune only stamp files; refuse `verify` when code is hidden with `skip-worktree` or `assume-unchanged`.
+- Notes: A worker fixes it on branch `t3-3-edges`. Start `handoff`'s range at the commit that added the configuration, as pre-push does; decide in spec section 5.10 whether code-like files in the workspace count as code; prune only stamp files; refuse `verify` when code is hidden with `skip-worktree` or `assume-unchanged`.
 
 ### T3.4 Setup that works everywhere
 - Status: todo

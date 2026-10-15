@@ -8,7 +8,7 @@ Building. Done: the foundation (F), the record format (R), the git hooks (H), th
 
 ## Active work
 
-Nothing is in progress: the owner paused the build on 15 October after the current tasks. The review of the guard (T3) is recorded, and its fixes are the child tasks T3.1 to T3.4.
+[T3.1](work/ledger.md#t31-a-range-check-that-cannot-be-fooled), [T3.2](work/ledger.md#t32-hooks-judged-by-the-committed-rules) and [T3.3](work/ledger.md#t33-handoff-and-verify-at-the-edges), with workers: the fixes from the review of the guard.
 
 ## Last verified
 
@@ -21,6 +21,4 @@ Fix the review's findings, the blocker first: [T3.1](work/ledger.md#t31-a-range-
 
 ## Waiting for the owner
 
-- A look at the How it works animation in the README on GitHub ([G3](work/ledger.md#g3-animated-explanations-of-how-it-works)).
 - Approval of the use-case cards and the "where a bad commit stops" diagram ([G4](work/ledger.md#g4-more-readme-graphics-use-cases-and-where-a-bad-commit-stops)), shown as previews.
-- A push of `main`, so that CI checks the Windows fixes.
