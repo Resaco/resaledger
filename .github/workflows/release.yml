@@ -41,15 +41,18 @@ jobs:
       - run: npm test
       - run: node scripts/bundle.mjs
       - run: node scripts/release-hashes.mjs --check
-      - name: Publish with provenance
+      - name: Stage the release with provenance
         env:
           # Empty with trusted publishing; set the NPM_TOKEN secret only when it is not used.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
+          # Staged publishing needs npm 11.15.0 or newer.
+          node -e 'const [major, minor] = process.argv[1].split(".").map(Number); process.exit(major > 11 || (major === 11 && minor >= 15) ? 0 : 1)' "$(npm -v)" || { echo "npm $(npm -v) cannot stage a release; staged publishing needs npm 11.15.0 or newer." >&2; exit 1; }
           # A prerelease such as v1.0.0-rc.1 goes to the "next" dist-tag, never to "latest".
           case "${TAG}" in
             *-*) dist_tag=next ;;
             *) dist_tag=latest ;;
           esac
-          npm publish --provenance --access public --tag "${dist_tag}"
+          # The version waits on npm until the owner approves it with two-factor authentication.
+          npm stage publish --provenance --access public --tag "${dist_tag}"

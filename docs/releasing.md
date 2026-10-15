@@ -16,21 +16,23 @@ The rules that join them, from [section 15 of the specification](../ledger/plan/
 
 ## What the owner sets up once
 
-The release workflow is [.github/workflows/release.yml](../.github/workflows/release.yml). It runs when a tag that starts with `v` is pushed. It checks that the tag matches `package.json`, runs `npm test`, builds the guard with `node scripts/bundle.mjs`, runs `node scripts/release-hashes.mjs --check`, and publishes with `npm publish --provenance`. Its token may only read the repository and request an OIDC token for npm (`contents: read`, `id-token: write`).
+The release workflow is [.github/workflows/release.yml](../.github/workflows/release.yml). It runs when a tag that starts with `v` is pushed. It checks that the tag matches `package.json`, runs `npm test`, builds the guard with `node scripts/bundle.mjs`, runs `node scripts/release-hashes.mjs --check`, and stages the release with `npm stage publish --provenance`. Its token may only read the repository and request an OIDC token for npm (`contents: read`, `id-token: write`).
 
-npm needs one of two ways to accept the publish.
+A staged version waits on npm, not installable, until the owner approves it with two-factor authentication ([staged publishing](https://docs.npmjs.com/staged-publishing/)). So no release reaches users without a person at the keyboard, even if the workflow or a tag is misused. The version number is taken as soon as it is staged.
+
+npm needs one of two ways to accept the staged release.
 
 **Trusted publishing (recommended).** No secret is stored.
 
 1. A trusted publisher can only be added to a package that exists on npm. Publish the first version with an access token (below), then switch: remove the `NPM_TOKEN` secret once trusted publishing works.
-2. On npmjs.com, open the package's **Settings**, then **Trusted publishing**, and add a GitHub Actions publisher: organisation or user `Resaco`, repository `resaledger`, workflow file `release.yml`, no environment.
-3. Optionally, in the same settings, require two-factor authentication and disallow tokens for publishing, so that only the workflow can publish.
+2. On npmjs.com, open the package's **Settings**, then **Trusted publishing**, and add a GitHub Actions publisher: organisation or user `Resaco`, repository `resaledger`, workflow file `release.yml`, no environment. Under **Allowed actions**, leave **npm publish** and **npm dist-tag** off: `npm stage publish` is always allowed, and it is all the workflow needs. On a publisher added earlier, turn **npm publish** off.
+3. Under **Settings**, **Publishing access**, choose **Require two-factor authentication and disallow tokens**, so that nothing but the workflow can stage and nothing but the owner can approve.
 
-Trusted publishing needs npm 11.5.1 or newer; the workflow uses Node 24, whose npm is new enough. It adds provenance on its own; the workflow also passes `--provenance`.
+Staged publishing needs npm 11.15.0 or newer and Node 22.14.0 or newer; the workflow uses Node 24 and checks its npm before it stages. Trusted publishing adds provenance on its own; the workflow also passes `--provenance`.
 
 **An access token, if trusted publishing is not used.**
 
-1. On npmjs.com, create a granular access token with read and write permission for the package `resaledger` only, and a short expiry.
+1. On npmjs.com, create a granular access token with read and write permission for the package `resaledger` only, and a short expiry. Staging never asks for two-factor authentication, so the token does not need to bypass it.
 2. In the GitHub repository, open **Settings**, **Secrets and variables**, **Actions**, and add it as the repository secret `NPM_TOKEN`.
 
 Also in the GitHub repository:
@@ -76,6 +78,17 @@ The release-candidate task prepares the release commit; the owner tags and pushe
    git push origin v1.0.0
    ```
 
-7. Watch the **release** workflow in the **Actions** tab. When it passes, check the package page on npmjs.com for the version and its provenance, and publish the release notes, `docs/releases/v<version>.md`, as a GitHub release for the tag.
+7. Watch the **release** workflow in the **Actions** tab. When it passes, the version is staged. Look at it, then approve it with two-factor authentication:
 
-If the workflow fails before `npm publish`, nothing was published: fix the cause on `main`, delete the tag (`git tag -d v1.0.0` and `git push origin :refs/tags/v1.0.0`), and tag again. A version that reached npm is never published twice; fix forward with the next patch version.
+   <!-- not run: the owner's release steps, which need npm's two-factor authentication -->
+   ```bash
+   npm stage list resaledger
+   npm stage view <stage-id>
+   npm stage approve <stage-id>
+   ```
+
+   `npm stage download <stage-id>` fetches the staged tarball, to compare with what `npm publish --dry-run` listed in step 4. The **Staged Packages** tab on npmjs.com shows the same, with an **Approve** button.
+
+8. Check the package page on npmjs.com for the version and its provenance, and publish the release notes, `docs/releases/v<version>.md`, as a GitHub release for the tag.
+
+If the workflow fails before `npm stage publish`, nothing was staged: fix the cause on `main`, delete the tag (`git tag -d v1.0.0` and `git push origin :refs/tags/v1.0.0`), and tag again. If a staged version is wrong, reject it with `npm stage reject <stage-id>` and fix forward with the next version. A version that reached npm is never published twice.

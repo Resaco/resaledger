@@ -263,14 +263,19 @@ describe('the release workflow', () => {
     assert.equal(checkout.with['persist-credentials'], false)
   })
 
-  test('tests, builds and checks the release hashes before it publishes with provenance', () => {
-    const publish = position(/npm publish --provenance/)
-    assert.ok(publish >= 0, 'no npm publish --provenance')
+  test('tests, builds and checks the release hashes before it stages the release with provenance', () => {
+    const publish = position(/npm stage publish --provenance/)
+    assert.ok(publish >= 0, 'no npm stage publish --provenance')
     for (const pattern of [/package\.json/, /^npm test$/m, /^node scripts\/bundle\.mjs$/m, /^node scripts\/release-hashes\.mjs --check$/m]) {
       const index = position(pattern)
       assert.ok(index >= 0 && index < publish, `${pattern} must run before the publish`)
     }
     assert.match(read('scripts/release-hashes.mjs'), /--check/)
+  })
+
+  test('only stages: the owner approves each release with two-factor authentication', () => {
+    for (const run of runs) assert.doesNotMatch(run, /^\s*npm publish\b/m)
+    assert.match(runs[position(/npm stage publish/)], /npm -v/, 'checks that npm is new enough to stage')
   })
 
   test('passes values from the event to its scripts only through the environment', () => {
