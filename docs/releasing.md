@@ -87,7 +87,7 @@ The release-candidate task prepares the release commit; the owner tags and pushe
    npm stage approve <stage-id>
    ```
 
-   `npm stage download <stage-id>` fetches the staged tarball, to compare with what `npm publish --dry-run` listed in step 4. The **Staged Packages** tab on npmjs.com shows the same, with an **Approve** button.
+   The `npm stage` commands need npm 11.15.0 or newer and a login on this machine: run `npm login` first. Approving asks for two-factor authentication, and the workflow's OIDC identity cannot approve. `npm stage download <stage-id>` fetches the staged tarball, to compare with what `npm publish --dry-run` listed in step 4; its `shasum` should equal the one `npm pack --dry-run` prints in a clean checkout of the tag. The **Staged Packages** tab on npmjs.com shows the same, with an **Approve** button, and needs only the website's login.
 
 8. Check the package page on npmjs.com for the version and its provenance, and publish the release notes, `docs/releases/v<version>.md`, as a GitHub release for the tag.
 
