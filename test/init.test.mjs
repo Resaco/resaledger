@@ -372,7 +372,7 @@ describe('refusals', () => {
     const r = project()
     const result = init(r, '--ci')
     assert.equal(result.status, 1)
-    assert.match(result.out, /unknown option "--ci" for init; use --team, --dir <name>, --agents <names> or --yes/)
+    assert.match(result.out, /unknown option "--ci" for init; use --team, --dir <name>, --agents <names>, --no-gates or --yes/)
   })
 
   test('the plan lists every refusal before anything is written', () => {
@@ -428,8 +428,8 @@ describe('the project name', () => {
 
 describe('the answers', () => {
   test('parseInitArgs reads the flags', () => {
-    assert.deepEqual(parseInitArgs(['--team', '--dir', 'records', '--yes']), { flags: { team: true, dir: 'records', yes: true, agents: null }, error: null })
-    assert.deepEqual(parseInitArgs([]).flags, { team: false, dir: null, yes: false, agents: null })
+    assert.deepEqual(parseInitArgs(['--team', '--dir', 'records', '--yes']), { flags: { team: true, dir: 'records', yes: true, agents: null, gates: true }, error: null })
+    assert.deepEqual(parseInitArgs([]).flags, { team: false, dir: null, yes: false, agents: null, gates: true })
     assert.deepEqual(parseInitArgs(['--agents', 'codex,claude']).flags.agents, ['codex', 'claude'])
     assert.deepEqual(parseInitArgs(['--agents=none']).flags.agents, [])
     assert.match(parseInitArgs(['--agents', 'emacs']).error, /unknown agent "emacs"/)

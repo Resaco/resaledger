@@ -8,6 +8,7 @@ import { createInterface } from 'node:readline/promises'
 import { CONFIG_FILE, DEFAULTS, isSafeFolderPath, parseConfig } from '../guard/config.mjs'
 import { hooksActive } from '../guard/githooks.mjs'
 import { SETUP_MARKER } from '../guard/records.mjs'
+import { detectCommitStyle, detectGates } from './detect.mjs'
 import { applyInit, commitCommand, initOptions, parseAgentsValue, parseInitArgs, planInit, presetFromAnswer } from './init.mjs'
 import { LEGACY_CONFIG_FILE } from './legacy.mjs'
 import { applyMigration, COMMIT_COMMAND, planMigration, UNDO_COMMAND } from './migrate.mjs'
@@ -21,16 +22,21 @@ const HELP = `ResaLedger ${version}
 Usage: npx resaledger <command>
 
 Commands:
-  init [--team] [--dir <name>] [--agents <names>] [--yes]
+  init [--team] [--dir <name>] [--agents <names>] [--no-gates] [--yes]
             set ResaLedger up in this repository: the configuration, the
             workspace README, the guard, the git hooks, the AGENTS.md block
             and the hook configurations of the agents in use (found by their
             folder or instruction file, such as .claude/, CLAUDE.md, .codex/,
             .cursor/, .gemini/, GEMINI.md or .github/copilot-instructions.md);
+            the gates are the project's own checks (package.json scripts,
+            Makefile targets, ruff, mypy, pytest, cargo, go), each run once
+            offline and kept only when it passes, and the commit style comes
+            from the history or a commitlint configuration.
             --team chooses the team preset, --dir names the workspace folder
             (default ledger), --agents claude,codex,cursor,gemini,copilot
-            names the agents instead (none for no agent), --yes asks nothing
-            and takes the defaults
+            names the agents instead (none for no agent), --no-gates runs no
+            check and leaves the gates for you to write, --yes asks nothing
+            and takes the defaults and the gates that passed
   migrate [--dry-run] [--force] [--accept-problems]
             convert an agent-ledger 0.x workspace to ResaLedger 1.0 in place;
             --dry-run only shows the plan, --force replaces 0.x git hooks that
@@ -194,13 +200,38 @@ async function askInit(flags) {
   }
 }
 
+/** Shows the gates that passed and asks whether to write them, on a terminal; an empty answer is yes. */
+async function askGates(gates) {
+  console.log('\nThe gates that passed:')
+  for (const kind of ['commit', 'verify']) for (const command of gates[kind]) console.log(`  ${kind}: ${command}`)
+  const prompt = createInterface({ input: process.stdin, output: process.stdout })
+  try {
+    for (;;) {
+      const answer = (await prompt.question('Write these gates into .resaledger.json? [Y/n] ')).trim().toLowerCase()
+      if (answer === '' || answer === 'y' || answer === 'yes') return gates
+      if (answer === 'n' || answer === 'no') return { commit: [], verify: [] }
+      console.log('  Answer "y" or "n".')
+    }
+  } finally {
+    prompt.close()
+  }
+}
+
+/** The gates for init: none with --no-gates, else the detected ones that passed, confirmed on a terminal. */
+async function initGates(root, flags, interactive) {
+  if (!flags.gates) return { commit: [], verify: [] }
+  const { gates } = await detectGates(root)
+  if (gates.commit.length + gates.verify.length === 0) return gates
+  return interactive ? askGates(gates) : gates
+}
+
 function refuseInit(messages) {
   console.error('✖ resaledger init changed nothing:')
   for (const message of messages) console.error(`  ✖ ${message}`)
   process.exit(1)
 }
 
-/** init [--team] [--dir <name>] [--agents <names>] [--yes], in the repository of the current folder. */
+/** init [--team] [--dir <name>] [--agents <names>] [--no-gates] [--yes], in the repository of the current folder. */
 export async function initCommand(args) {
   const { flags, error } = parseInitArgs(args)
   if (error) {
@@ -212,17 +243,21 @@ export async function initCommand(args) {
   const root = top.stdout.trim()
   if (!ensureGuard()) refuseInit(['the guard could not be built'])
 
-  // The refusals do not depend on the answers, so they come before the questions.
+  // The refusals do not depend on the answers or the gates, so they come before the questions and the runs.
   let plan = planInit(root, initOptions(flags))
   if (plan.refusals.length > 0) refuseInit(plan.refusals)
-  if (!flags.yes && process.stdin.isTTY && process.stdout.isTTY) {
-    plan = planInit(root, initOptions(flags, await askInit(flags)))
-    if (plan.refusals.length > 0) refuseInit(plan.refusals)
-  }
+  const interactive = !flags.yes && process.stdin.isTTY && process.stdout.isTTY
+  const answers = interactive ? await askInit(flags) : {}
+  const found = { gates: await initGates(root, flags, interactive), commitStyle: detectCommitStyle(root) }
+  plan = planInit(root, { ...initOptions(flags, answers), ...found })
+  if (plan.refusals.length > 0) refuseInit(plan.refusals)
 
   const result = applyInit(root, plan)
   const { dir } = plan
-  console.log(`resaledger init: ResaLedger is set up in ${dir}/, with the ${plan.preset} preset`)
+  console.log(`\nresaledger init: ResaLedger is set up in ${dir}/, with the ${plan.preset} preset`)
+  const gateCount = plan.config.gates.commit.length + plan.config.gates.verify.length
+  console.log(gateCount > 0 ? `Gates: ${plan.config.gates.commit.length} commit, ${plan.config.gates.verify.length} verify; "node ${dir}/scripts/records.mjs gates" lists them.` : `Gates: none. Add your checks to "gates" in ${CONFIG_FILE}.`)
+  if (plan.config.commitStyle === 'conventional') console.log('Commit style: conventional, as the history or the commitlint configuration uses it.')
   list('Created', result.created)
   list('Changed', result.changed)
   list('Warnings', plan.warnings.map((warning) => `! ${warning}`))
