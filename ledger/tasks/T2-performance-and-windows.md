@@ -8,4 +8,4 @@
 
 ## Handoff
 
-Windows: commit 7e9a831 compares paths through `realpathSync.native`, which expands the runner's 8.3 short names; it is not pushed yet, so the next push shows whether Windows passes. The timing budgets now scale with the machine's load per CPU (`budget(ms)` in `test/helpers.mjs`), so parallel lanes no longer fail them; on an idle machine a commit with 51 branches takes about 0.5 s against 3 s. Next: read the next CI run on Windows; then measure `work --all` with 500 pushed branches on CI hardware against its 5-second budget and record the time here.
+Measured on GitHub's runners in run 38709241529: `work --all` with 500 pushed branches took 132–167 ms on Linux and 215–252 ms on macOS, including Node's start-up, against the plan's 5-second budget (the test's own budget is 2 s); a commit that adds a task with 51 other branches took 168–367 ms against 3 s. Windows: the short-name fix took Node 24 from 11 failures to 2, both test bugs now fixed (7ff892c), and the job timeout is 30 minutes, since the suite takes about 14 minutes there. Next: the next push's CI on Windows; when all three Windows jobs pass, record T2 as done with these numbers.

@@ -1348,13 +1348,16 @@ function workspaceKey(path) {
  * (the staged content) or { kind: 'commit', rev }. An optional `root` names the repository;
  * by default it is the repository of the current folder.
  *
- * Returns { list(prefix), read(path), exists(path) }. list(prefix) gives the sorted file paths
- * in a folder, at any depth ('' for all). read gives a file's text, or null when it is missing.
- * exists is true for a file and for a folder that holds at least one file.
+ * Returns { list(prefix), read(path), exists(path), mode(path) }. list(prefix) gives the sorted
+ * file paths in a folder, at any depth ('' for all). read gives a file's text, or null when it is
+ * missing. exists is true for a file and for a folder that holds at least one file. mode gives
+ * git's mode of a file in the index or a commit, such as '100755', or null (always in the
+ * working tree).
  */
 function treeReader(source) {
   const root = source.root ?? repositoryRoot()
   let files = null // Map of path → object id (null in the working tree)
+  const modes = new Map() // path → git's mode, in the index or a commit
   let folders = null
   const texts = new Map()
 
@@ -1368,7 +1371,11 @@ function treeReader(source) {
       }
     } else {
       // In a merge conflict the index holds several stages of a path; the first one stands for it.
-      for (const entry of workspaceEntries(root, source)) if (!files.has(entry.path)) files.set(entry.path, entry.oid)
+      for (const entry of workspaceEntries(root, source)) {
+        if (files.has(entry.path)) continue
+        files.set(entry.path, entry.oid)
+        modes.set(entry.path, entry.mode)
+      }
     }
     files = new Map([...files].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
     folders = new Set([''])
@@ -1412,6 +1419,11 @@ function treeReader(source) {
     exists(path) {
       const key = workspaceKey(path)
       return listing().has(key) || folders.has(key)
+    },
+    mode(path) {
+      const key = workspaceKey(path)
+      listing()
+      return modes.get(key) ?? null
     }
   }
 }
@@ -2488,6 +2500,37 @@ function laneCopyProblems(tasks, copies, config) {
   return problems
 }
 
+/** The tasks of a Map from taskRecordsById that a lane holds: [{ id, task }]. */
+function heldTasks(tasks, lane) {
+  return [...tasks].filter(([, { task }]) => ownershipHolder(task) === lane).map(([id, { task }]) => ({ id, task }))
+}
+
+/**
+ * The double claims of a lane (spec 6.3): a task the lane holds that another open branch holds
+ * under a different lane, unless this lane records a takeover from that lane. held is from
+ * heldTasks; copies is [{ id, branch, task }], the copies of those tasks on the other branches.
+ * One problem per task and other lane, naming the first branch.
+ */
+function doubleClaimProblems(held, copies, lane, config) {
+  const guard = `node ${config.dir}/scripts/records.mjs`
+  const ours = new Map(held.map(({ id, task }) => [id, task]))
+  const problems = []
+  const seen = new Set()
+  for (const { id, branch, task: copy } of copies) {
+    const task = ours.get(id)
+    const holder = ownershipHolder(copy)
+    if (!task || !holder || holder === lane || ownershipIsTakeover(task, lane, holder)) continue
+    if (seen.has(`${id}\0${holder}`)) continue
+    seen.add(`${id}\0${holder}`)
+    problems.push({
+      file: task.file,
+      line: 0,
+      message: `task ${id} is claimed twice: this lane "${lane}" holds it, and branch "${branch}" holds it as lane "${holder}". One lane gives it up, or this one takes it over with "${guard} claim ${id} --take"`
+    })
+  }
+  return problems
+}
+
 // --- range.mjs ---
 // The commit range check, spec 5.9: every commit in a range that changes code names a task that is
 // doing or done in that commit's own tree and held by the lane. Pre-push, handoff and CI all use it.
@@ -2503,6 +2546,8 @@ const RANGE_HASH = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
 const RANGE_COMMITTER = /^committer .*<([^<>]*)> -?\d+ [+-]\d{4}$/
 // GitHub's own committer address, written in two parts so the hygiene scan sees no address.
 const RANGE_GITHUB_COMMITTER = ['noreply', 'github.com'].join('@')
+// The subject GitHub gives a squash merge: the pull request's title, then " (#<number>)".
+const RANGE_GITHUB_SQUASH = /\(#\d+\)$/
 const RANGE_MAINTENANCE = 'maintenance'
 const RANGE_SHOWN_PATHS = 3
 // Options that make a diff the same whatever the user's diff configuration is.
@@ -2765,6 +2810,67 @@ function isRevert(root, message, parent, commit) {
 }
 
 /**
+ * The branch of each lane in the clone, from one `git for-each-ref`: a Map from lane to
+ * { ref, branch, commit, commits }. ref, branch and commit are those of a remote-tracking branch
+ * (refs/remotes/<remote>/<lane>, the first by name) or else the local one (refs/heads/<lane>);
+ * commits are the tips of all of them. A lane with neither is left out. No fetch.
+ */
+function laneBranches(root, lanes) {
+  const branches = new Map()
+  const wanted = new Set(lanes)
+  if (wanted.size === 0) return branches
+  // A * in a for-each-ref pattern matches one path segment: one remote name.
+  const patterns = [...wanted].flatMap((lane) => [`refs/remotes/*/${lane}`, `refs/heads/${lane}`])
+  const found = new Map()
+  const output = rangeGit(root, ['for-each-ref', '--format=%(refname)%00%(objectname)%00%(objecttype)%00%(refname:short)', ...patterns]).toString('utf8')
+  for (const line of output.split('\n')) {
+    const [ref, commit, type, branch] = line.split('\0')
+    if (type !== 'commit') continue
+    const remote = ref.startsWith('refs/remotes/')
+    const lane = remote ? ref.slice('refs/remotes/'.length).replace(/^[^/]+\//, '') : ref.slice('refs/heads/'.length)
+    if (!wanted.has(lane)) continue
+    if (!found.has(lane)) found.set(lane, [])
+    found.get(lane).push({ ref, branch, commit, remote })
+  }
+  for (const [lane, refs] of found) {
+    const first = refs.find(({ remote }) => remote) ?? refs[0]
+    branches.set(lane, { ref: first.ref, branch: first.branch, commit: first.commit, commits: [...new Set(refs.map(({ commit }) => commit))] })
+  }
+  return branches
+}
+
+/**
+ * The commits on each lane's branches that are not ancestors of `from` (every one without it),
+ * from one `git rev-list --parents` for all lanes: a Map from lane to a Set of commit ids.
+ * branches is a Map from laneBranches.
+ */
+function rangeLaneReach(root, from, branches) {
+  const reach = new Map()
+  const tips = [...new Set([...branches.values()].flatMap(({ commits }) => commits))]
+  if (tips.length === 0) return reach
+  const parents = new Map()
+  const output = rangeGit(root, ['rev-list', '--parents', ...tips, ...(from ? [`^${from}`] : []), '--']).toString('utf8')
+  for (const line of output.split('\n')) {
+    if (line === '') continue
+    const [hash, ...ids] = line.split(' ')
+    if (!RANGE_HASH.test(hash)) throw rangeUnreadable('the commits of the lane branches')
+    parents.set(hash, ids)
+  }
+  for (const [lane, { commits }] of branches) {
+    const seen = new Set()
+    const stack = commits.filter((commit) => parents.has(commit))
+    while (stack.length > 0) {
+      const commit = stack.pop()
+      if (seen.has(commit)) continue
+      seen.add(commit)
+      for (const parent of parents.get(commit)) if (parents.has(parent) && !seen.has(parent)) stack.push(parent)
+    }
+    reach.set(lane, seen)
+  }
+  return reach
+}
+
+/**
  * The commits of a range, oldest first: [{ hash, short, parents, committer, subject, message,
  * paths, exemption }]. paths are the files a commit touches against its parent (every file for a
  * root commit); for a merge, only the code paths it changes of its own (mergeOwnPaths).
@@ -2818,14 +2924,22 @@ function taskTrailers(message) {
  * Why a commit is exempt from the trailer rules, or null: commit.exemption, which the caller
  * found in git ('merge' for a merge that changes no code of its own, 'revert' for a real
  * revert), or 'github' (a commit GitHub made when merging a pull request, only with
- * context.skipGitHubMerges). The message alone never exempts a commit, and a release commit
- * that changes code needs a Task: line like any other.
- * commit is { committer, exemption }.
+ * context.skipGitHubMerges): GitHub's committer address on a merge commit or on a commit whose
+ * subject has GitHub's squash form, "Title (#12)". The address is not verified, so it buys no
+ * more than that. The message alone never exempts a commit, and a release commit that changes
+ * code needs a Task: line like any other.
+ * commit is { parents, committer, subject, exemption }.
  */
 function commitExemption(commit, context) {
   if (commit.exemption) return commit.exemption
-  if (context.skipGitHubMerges && commit.committer.toLowerCase() === RANGE_GITHUB_COMMITTER) return 'github'
+  if (context.skipGitHubMerges && isGitHubMerge(commit)) return 'github'
   return null
+}
+
+/** True for a merge or squash commit with GitHub's committer address. */
+function isGitHubMerge({ parents, committer, subject }) {
+  if (committer.toLowerCase() !== RANGE_GITHUB_COMMITTER) return false
+  return parents.length > 1 || RANGE_GITHUB_SQUASH.test(subject ?? '')
 }
 
 /** The task file for an id among a tasks folder's entries: <id>.md or <id>-<slug>.md. */
@@ -2842,10 +2956,15 @@ function taskFileFor(names, id) {
  *
  * commit is { short, parents, committer, subject, message, paths, exemption }: for a merge,
  * paths are the code paths it changes of its own (mergeOwnPaths). context is { config, lane,
- * skipGitHubMerges, task, startLane }: task(id) is the parsed task in the commit's own tree,
- * or null when it has no file there; startLane(id) is the task's Lane where the range starts
- * (null when the task is not there, has no Lane, or there is no start). A task whose Lane is
- * not the lane is accepted when that Lane was set after the start. lane null skips the lane rule.
+ * skipGitHubMerges, task, startLane, onLane }: task(id) is the parsed task in the commit's own
+ * tree, or null when it has no file there; startLane(id) is the task's Lane where the range
+ * starts (null when the task is not there, has no Lane, or there is no start); the optional
+ * onLane(lane) is { branch, reachable } for a lane with a branch in the clone, reachable telling
+ * whether this commit is on it, and null otherwise. lane null skips the lane rule.
+ *
+ * A task whose Lane is another lane's is accepted when the commit is on that lane's branch (as
+ * after merging the lane); when that lane has no branch in the clone, when its Lane was set
+ * after the start.
  */
 function checkCommit(commit, context) {
   const { config } = context
@@ -2895,13 +3014,23 @@ function checkCommit(commit, context) {
     if (lane !== null && task.lane !== lane) laneChecks.push({ id, task })
   }
 
-  // The lane rule only refuses naming a task that another lane held before the start: a Lane
-  // equal to this lane, or set after the start (by a claim, also in a records-only commit, or
-  // under a branch name that was later renamed), is accepted. Taking a held task without
+  // Another lane's task is accepted on that lane's own commits, which a merge or a stacked
+  // branch brings in, and refused on any other commit, also one a side branch launders in.
+  // Without the lane's branch, the rule only refuses naming a task another lane held before the
+  // start: a Lane set after the start (by a claim, also in a records-only commit, or under a
+  // branch name that was later renamed, or by a lane merged and deleted since) is accepted. Taking a held task without
   // claim --take is caught by the ownership check in pre-commit and CI (H1 and C1), not here.
   for (const { id, task } of laneChecks) {
     if (task.lane === null) {
       problem(`names task ${id}, which has no Lane in that commit. Claim the task for "${lane}" first`)
+      continue
+    }
+    const holder = context.onLane?.(task.lane) ?? null
+    if (holder?.reachable) continue
+    if (holder !== null) {
+      problem(
+        `names task ${id}, whose Lane is "${task.lane}", but the commit is not on that lane's branch "${holder.branch}". Name a task this lane holds, or take it over with claim --take`
+      )
       continue
     }
     if (context.startLane(id) !== task.lane) continue
@@ -2913,27 +3042,58 @@ function checkCommit(commit, context) {
 }
 
 /**
+ * The lane branches of the other lanes a range's commits name, as onLane(hash, lane) for
+ * checkCommit: { branch, reachable } or null. naming is the commits that name a task id, and
+ * taskOf(commit, id) the parsed task in a commit's tree. Reads git only when a commit names a
+ * task whose Lane is not `lane`.
+ */
+function rangeOnLane(root, from, lane, naming, taskOf) {
+  const holders = new Set()
+  if (lane !== null) {
+    for (const commit of naming) {
+      for (const id of taskTrailers(commit.message).ids) {
+        const task = TASK_ID.test(id) ? taskOf(commit, id) : null
+        if (task?.lane && task.lane !== lane) holders.add(task.lane)
+      }
+    }
+  }
+  if (holders.size === 0) return () => null
+  const branches = laneBranches(root, [...holders])
+  const reach = rangeLaneReach(root, from, branches)
+  return (hash, holder) => {
+    const branch = branches.get(holder)
+    return branch ? { branch: branch.branch, reachable: reach.get(holder).has(hash) } : null
+  }
+}
+
+/**
  * Checks every commit in from..to, oldest first, and returns problems as
  * { file: <short hash>, line: 0, message }. Without `from`, every ancestor of `to` is checked.
  *
- * context is { config, lane, skipGitHubMerges, root }: the effective configuration; the lane
- * (branch) that must hold each named task, or null to skip that rule; whether commits that
- * GitHub made when merging a pull request are skipped (the CI push check); and the repository,
- * by default the one of the current folder.
+ * context is { config, lane, skipGitHubMerges, root, exempt }: the effective configuration; the
+ * lane (branch) that must hold each named task, or null to skip that rule; whether commits that
+ * GitHub made when merging a pull request are skipped (the CI push check); the repository, by
+ * default the one of the current folder; and an optional Map that counts the code commits
+ * exempted, by reason ('merge', 'revert' or 'github').
  *
  * Each commit is judged by checkCommit, with its own tree and the tasks at `from`: a merge
  * that changes no code of its own and a real revert are skipped (rangeCommits). A commit that
  * changes code needs a Task: trailer; each id it names must be doing or done in that commit's
- * own tree, with a Lane there that is the lane or was set inside the range (not held by another
- * lane already at `from`). "maintenance" is allowed.
+ * own tree, with a Lane there that is the lane, or another lane's when the commit is on that
+ * lane's branch (or, when it has none in the clone, set inside the range). "maintenance" is
+ * allowed. Only a range that names another lane's task reads the lane branches: one
+ * `git for-each-ref` and one `git rev-list` (laneBranches, rangeLaneReach).
  */
 function checkRange(from, to, context) {
   const { config } = context
   const root = context.root ?? repositoryRoot()
   const tasksFolder = `${config.dir}/tasks`
-  const commits = rangeCommits(root, config, from, to).filter(
-    (commit) => commitExemption(commit, context) === null && commit.paths.some((path) => isCode(path, config))
-  )
+  const commits = rangeCommits(root, config, from, to).filter((commit) => {
+    if (!commit.paths.some((path) => isCode(path, config))) return false
+    const reason = commitExemption(commit, context)
+    if (reason !== null && context.exempt) context.exempt.set(reason, (context.exempt.get(reason) ?? 0) + 1)
+    return reason === null
+  })
   if (commits.length === 0) return []
   const hashBytes = commits[0].hash.length / 2
 
@@ -2982,12 +3142,14 @@ function checkRange(from, to, context) {
     return lane
   }
 
+  const onLane = rangeOnLane(root, from, context.lane ?? null, naming, (commit, id) => taskIn(entriesOf.get(commit.hash), id))
   return commits.flatMap((commit) =>
     checkCommit(commit, {
       ...context,
       config,
       task: (id) => taskIn(entriesOf.get(commit.hash) ?? new Map(), id),
-      startLane
+      startLane,
+      onLane: (holder) => onLane(commit.hash, holder)
     })
   )
 }
@@ -5886,6 +6048,9 @@ function packageReleased(folder) {
 // pull request adds that let a weakening change through. The table of ids is in spec 10.
 
 const ENFORCEMENT_HOOKS = '.githooks/'
+// The file whose line keeps the hooks LF on Windows (spec 13); a change to it is listed.
+const ENFORCEMENT_ATTRIBUTES = '.gitattributes'
+const ENFORCEMENT_EXECUTABLE = '100755'
 const ENFORCEMENT_WORKFLOW = '.github/workflows/resaledger.yml'
 // The decision field that names the weakening changes a decision allows (spec 10).
 const ENFORCEMENT_FIELD = 'Weakens'
@@ -6014,7 +6179,36 @@ function managedChange(change, released) {
   return [enforcementChange(id, false, `${path} ${how}: ResaLedger ${version}, a released version`, path)]
 }
 
-/** The changes to the guard, the git hooks and the workflow between two trees. */
+/** The mode of a hook as words, for a message. */
+function hookModeName(mode) {
+  if (mode === ENFORCEMENT_EXECUTABLE) return 'executable'
+  if (mode === '120000') return 'a symlink'
+  return `not executable (mode ${mode})`
+}
+
+/**
+ * The change to a hook's mode, folded into the change to its text: a hook that was executable
+ * and is no longer (or became a symlink) does not run for anyone who clones, so it weakens.
+ */
+function hookModeChange(changes, id, path, before, after) {
+  if (before === null || after === null || before === after) return changes
+  const weakening = before === ENFORCEMENT_EXECUTABLE
+  const what = `${path} is now ${hookModeName(after)}, was ${hookModeName(before)}`
+  if (changes.length === 0) return [enforcementChange(id, weakening, what, path)]
+  const [change] = changes
+  return [{ ...change, kind: weakening || change.kind === 'weakening' ? 'weakening' : 'listed', what: `${change.what}; ${what}` }]
+}
+
+/** The change to .gitattributes, listed: it holds the line that keeps the hooks LF on Windows. */
+function attributesChange(beforeReader, afterReader) {
+  const before = beforeReader.read(ENFORCEMENT_ATTRIBUTES)
+  const after = afterReader.read(ENFORCEMENT_ATTRIBUTES)
+  if (before === after) return []
+  const how = before === null ? 'added' : after === null ? 'removed' : 'changed'
+  return [enforcementChange('gitattributes', false, `${ENFORCEMENT_ATTRIBUTES} ${how}`, ENFORCEMENT_ATTRIBUTES)]
+}
+
+/** The changes to the guard, the git hooks, the workflow and .gitattributes between two trees. */
 function fileChanges(beforeReader, afterReader, beforeDir, afterDir, released) {
   const files = [
     {
@@ -6029,11 +6223,12 @@ function fileChanges(beforeReader, afterReader, beforeDir, afterDir, released) {
   const hooks = [...new Set([...beforeReader.list(ENFORCEMENT_HOOKS), ...afterReader.list(ENFORCEMENT_HOOKS)])].sort()
   for (const path of hooks) {
     const name = path.slice(ENFORCEMENT_HOOKS.length)
-    files.push({ id: `hooks/${name}`, key: `hooks/${name}`, path, before: beforeReader.read(path), after: afterReader.read(path), dir: afterDir })
+    files.push({ id: `hooks/${name}`, key: `hooks/${name}`, path, before: beforeReader.read(path), after: afterReader.read(path), dir: afterDir, modes: [beforeReader.mode(path), afterReader.mode(path)] })
   }
   // The workflow reads the folder from the configuration, so its text holds no folder name.
   files.push({ id: 'workflow', key: 'workflow', path: ENFORCEMENT_WORKFLOW, before: beforeReader.read(ENFORCEMENT_WORKFLOW), after: afterReader.read(ENFORCEMENT_WORKFLOW), dir: null })
-  return files.flatMap((file) => managedChange(file, released))
+  const changes = files.flatMap((file) => (file.modes ? hookModeChange(managedChange(file, released), file.id, file.path, ...file.modes) : managedChange(file, released)))
+  return [...changes, ...attributesChange(beforeReader, afterReader)]
 }
 
 /**
@@ -6126,7 +6321,7 @@ function ciCheckLine(check, result) {
       return `records: ${problems}${recordCounts(counts.tasks, counts.decisions, counts.logs)}${note}`
     case 'commits':
       if (check.skipped) return `commits: not checked${note}`
-      return `commits: ${problems}${plural(counts.commits, 'commit')} ${result.event === 'push' ? 'pushed' : 'from the merge base to the head'}${note}`
+      return `commits: ${problems}${plural(counts.commits, 'commit')} ${result.event === 'push' ? 'pushed' : 'from the merge base to the head'}${ciGitHubExempt(counts)}${note}`
     case 'ownership':
       return `ownership: ${problems}${plural(counts.changed, 'task')} changed${note}`
     case 'ids':
@@ -6150,6 +6345,11 @@ function ciCheckLine(check, result) {
     default:
       return `${check.name}: ${problems}`.replace(/; $/, '')
   }
+}
+
+/** How many code commits passed as GitHub's merge or squash commits, trusted by their committer. */
+function ciGitHubExempt(counts) {
+  return counts.github > 0 ? `, ${counts.github} exempt as GitHub's merge or squash ${counts.github === 1 ? 'commit' : 'commits'} by the committer address` : ''
 }
 
 /** A change's text led by its id, which a configuration change's text already starts with. */
@@ -6215,9 +6415,46 @@ function ciText(result) {
   return out.join('\n')
 }
 
-/** Text from the records, made safe for Markdown: one line, and no HTML tags or hidden comments. */
+/**
+ * Text from the records, made safe for Markdown: one line that renders as written. Code spans
+ * stay as they are, since nothing renders inside them; elsewhere `<` becomes `&lt;` (no HTML or
+ * hidden comments) and the punctuation of links, images and emphasis is escaped. A backtick run
+ * with no closing run of the same length is escaped too, as CommonMark reads it literally.
+ */
 function ciMarkdownText(text) {
-  return String(text).replace(/\s+/g, ' ').replace(/</g, '&lt;').trim()
+  const plain = String(text).replace(/\s+/g, ' ').trim()
+  let out = ''
+  let at = 0
+  while (at < plain.length) {
+    const tick = plain.indexOf('`', at)
+    if (tick === -1) return out + ciMarkdownEscape(plain.slice(at))
+    out += ciMarkdownEscape(plain.slice(at, tick))
+    const run = /^`+/.exec(plain.slice(tick))[0]
+    const close = ciClosingRun(plain, tick + run.length, run.length)
+    if (close === -1) {
+      out += ciMarkdownEscape(run)
+      at = tick + run.length
+      continue
+    }
+    out += plain.slice(tick, close + run.length)
+    at = close + run.length
+  }
+  return out
+}
+
+/** Where the next run of exactly `length` backticks starts, from `from`, or -1. */
+function ciClosingRun(text, from, length) {
+  const runs = /`+/g
+  runs.lastIndex = from
+  for (let match = runs.exec(text); match !== null; match = runs.exec(text)) {
+    if (match[0].length === length) return match.index
+  }
+  return -1
+}
+
+/** Plain text outside code spans, escaped: backslashes, Markdown's inline punctuation and `<`. */
+function ciMarkdownEscape(text) {
+  return text.replace(/[\\`*_[\]~]/g, '\\$&').replace(/</g, '&lt;')
 }
 
 /** A command as a Markdown code span, on one line. */
@@ -6240,7 +6477,7 @@ function ciCommitsSummary(result) {
   if (!check) return null
   if (check.skipped) return `**Commits:** not checked${check.note ? ` (${ciMarkdownText(check.note)})` : ''}`
   const verdict = check.ok ? 'all pass' : plural(check.problems.length, 'problem')
-  return `**Commits:** ${check.counts.commits} checked, ${verdict}`
+  return `**Commits:** ${check.counts.commits} checked, ${verdict}${ciGitHubExempt(check.counts)}`
 }
 
 /** The gates line: each command with its time, where it ran, and where the rules came from. */
@@ -6493,8 +6730,10 @@ function ciCommitsCheck(root, from, to, config, lane, skipGitHubMerges, note) {
   if (from === null) return { name: 'commits', ok: true, skipped: true, problems: [], counts: { commits: 0 }, note }
   const start = adoptionStart(root, from, to)
   const commits = Number(ciGit(root, ['rev-list', '--count', `${start}..${to}`]))
-  const problems = checkRange(start, to, { config, lane, skipGitHubMerges, root })
-  return { name: 'commits', ok: problems.length === 0, problems, counts: { commits }, note }
+  const exempt = new Map()
+  const problems = checkRange(start, to, { config, lane, skipGitHubMerges, root, exempt })
+  // Trusted by the committer address alone, so the output says how many (spec 10).
+  return { name: 'commits', ok: problems.length === 0, problems, counts: { commits, github: exempt.get('github') ?? 0 }, note }
 }
 
 /**
@@ -6541,29 +6780,6 @@ function ciRemotes(root) {
 }
 
 /**
- * The branch of each lane in the clone, from one `git for-each-ref`: a Map from lane to
- * { ref, branch, commit }. A remote-tracking branch (refs/remotes/<remote>/<lane>) comes before
- * a local one (refs/heads/<lane>); a lane with neither is left out.
- */
-function ciLaneBranches(root, lanes) {
-  const remotes = ciRemotes(root)
-  const refsOf = new Map(lanes.map((lane) => [lane, [...remotes.map((remote) => `refs/remotes/${remote}/${lane}`), `refs/heads/${lane}`]]))
-  const patterns = [...refsOf.values()].flat()
-  const commits = new Map()
-  const output = ciGit(root, ['for-each-ref', '--format=%(refname)%00%(objectname)%00%(objecttype)%00%(refname:short)', ...patterns])
-  for (const line of output.split('\n')) {
-    const [ref, commit, type, branch] = line.split('\0')
-    if (type === 'commit') commits.set(ref, { ref, branch, commit })
-  }
-  const branches = new Map()
-  for (const [lane, refs] of refsOf) {
-    const found = refs.find((ref) => commits.has(ref))
-    if (found) branches.set(lane, commits.get(found))
-  }
-  return branches
-}
-
-/**
  * The copies of tasks on the branches of the lanes they name (spec 6.2), read in one
  * `git cat-file --batch`. tasks is [{ id, task, holder }] from foreignLaneTasks. Returns a Map
  * from id to { branch, task, text }, task and text null when that branch has no such file; an
@@ -6572,7 +6788,7 @@ function ciLaneBranches(root, lanes) {
 function ciLaneCopies(root, tasks) {
   const copies = new Map()
   if (tasks.length === 0) return copies
-  const branches = ciLaneBranches(root, [...new Set(tasks.map(({ holder }) => holder))])
+  const branches = laneBranches(root, [...new Set(tasks.map(({ holder }) => holder))])
   const wanted = tasks.filter(({ holder }) => branches.has(holder)).map(({ id, task, holder }) => ({ id, branch: branches.get(holder), spec: `${branches.get(holder).commit}:${task.file}` }))
   const objects = rangeObjects(root, wanted.map(({ spec }) => spec))
   for (const { id, branch, spec } of wanted) {
@@ -6584,19 +6800,45 @@ function ciLaneCopies(root, tasks) {
   return copies
 }
 
+/** The refs of a pull request's own branch in the clone; none for a fork, whose branch name says nothing about this repository's. */
+function ciOwnRefs(root, lane, fork) {
+  const own = new Set()
+  if (fork || !lane) return own
+  own.add(`refs/heads/${lane}`)
+  for (const remote of ciRemotes(root)) own.add(`refs/remotes/${remote}/${lane}`)
+  return own
+}
+
+/**
+ * The copies of the tasks a pull request holds on the other open branches of the clone (those
+ * not merged into the base), from one `git for-each-ref --no-merged` and one
+ * `git cat-file --batch`: [{ id, branch, task }]. held is from heldTasks; the pull request's
+ * own branch, the head and the base are left out. No fetch: the workflow fetches every branch.
+ */
+function ciOpenCopies(root, held, context) {
+  const { base, head, own } = context
+  if (held.length === 0) return []
+  const output = ciGit(root, ['for-each-ref', `--no-merged=${base}`, '--format=%(objectname)%00%(objecttype)%00%(refname)%00%(refname:short)%00%(symref)', 'refs/heads/', 'refs/remotes/'])
+  const wanted = []
+  for (const line of output.split('\n')) {
+    const [commit, type, ref, branch, symref] = line.split('\0')
+    if (type !== 'commit' || symref !== '' || own.has(ref) || commit === head || commit === base) continue
+    for (const { id, task } of held) wanted.push({ id, branch, file: task.file, spec: `${commit}:${task.file}` })
+  }
+  const objects = rangeObjects(root, wanted.map(({ spec }) => spec))
+  return wanted.flatMap(({ id, branch, file, spec }) => {
+    const object = objects.get(spec)
+    return object?.type === 'blob' ? [{ id, branch, task: parseTask(file, object.data.toString('utf8')) }] : []
+  })
+}
+
 /**
  * The ids check of a pull request: ids the head adds (not at the merge base) against the base's
- * tip and every other branch in the clone, except the pull request's own branch.
+ * tip and every other branch in the clone, except the pull request's own branch (own, from ciOwnRefs).
  */
 function ciIdsCheck(root, config, context) {
-  const { mergeBaseTasks, headTasks, baseTasks, base, head, lane, fork } = context
+  const { mergeBaseTasks, headTasks, baseTasks, base, head, own } = context
   const added = [...headTasks.values()].filter(({ task }) => !mergeBaseTasks.has(task.id)).map(({ task }) => ({ id: task.id, file: task.file }))
-  const own = new Set()
-  // A fork's branch name says nothing about the branches of this repository.
-  if (!fork && lane) {
-    own.add(`refs/heads/${lane}`)
-    for (const remote of ciRemotes(root)) own.add(`refs/remotes/${remote}/${lane}`)
-  }
   const others = [{ branch: config.base, files: new Map([...baseTasks.values()].map(({ task }) => [task.id, task.file])) }]
   let branches = 0
   if (added.length > 0) {
@@ -6694,10 +6936,14 @@ function ciPullRequest(root, options) {
   const reported = new Set(ownership.map(({ file }) => file))
   const foreign = foreignLaneTasks({ before: mergeBaseTasks, after: headTasks, lane, accepted: [baseTasks] }).filter(({ task }) => !reported.has(task.file))
   ownership.push(...laneCopyProblems(foreign, ciLaneCopies(root, foreign), config))
+  // A task this lane holds that another open branch holds under another lane: a double claim.
+  const own = ciOwnRefs(root, lane, options.fork)
+  const held = lane ? heldTasks(headTasks, lane) : []
+  ownership.push(...doubleClaimProblems(held, ciOpenCopies(root, held, { base, head, own }), lane, config))
   ownership.push(...ciRemovedRecords(root, mergeBase, head, config))
   const changed = [...headTasks].filter(([id, { text }]) => mergeBaseTasks.get(id)?.text !== text).length
   checks.push({ name: 'ownership', ok: ownership.length === 0, problems: ownership, counts: { changed }, note: null })
-  checks.push(ciIdsCheck(root, config, { mergeBaseTasks, headTasks, baseTasks, base, head, lane, fork: options.fork }))
+  checks.push(ciIdsCheck(root, config, { mergeBaseTasks, headTasks, baseTasks, base, head, own }))
 
   const moved = ciMovedTasks(mergeBaseTasks, headTasks)
   checks.push({ name: 'moved', ok: true, problems: [], counts: { moved: moved.length }, note: null })
