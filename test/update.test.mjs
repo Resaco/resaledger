@@ -67,6 +67,8 @@ describe('an update from a released version', () => {
   // An older release whose pre-commit hook and AGENTS.md block were worded differently,
   // with its hashes recorded by the release script as at a real release.
   const old = packageCopy('0.9.0', (copy) => {
+    // The older release came before every release this package's table holds.
+    writeFileSync(join(copy, 'templates', 'released.json'), '{}\n')
     const hook = join(copy, 'templates', 'hooks', 'pre-commit')
     writeFileSync(hook, readFileSync(hook, 'utf8').replace('#!/bin/sh\n', '#!/bin/sh\n# an older wording\n'))
     const block = join(copy, 'templates', 'agents-block.md')

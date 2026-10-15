@@ -4,7 +4,9 @@ All notable changes to ResaLedger are recorded here. The format follows [Keep a 
 
 ## [Unreleased]
 
-The first release of ResaLedger, 1.0.0. It replaces agent-ledger 0.x with one record format that works the same for one person and for many people and agents working in parallel. 0.x workspaces convert with `npx resaledger migrate`.
+## [1.0.0-rc.1] - 2026-10-15
+
+The release candidate for ResaLedger 1.0.0, the first release under this name. It replaces agent-ledger 0.x with one record format that works the same for one person and for many people and agents working in parallel. 0.x workspaces convert with `npx resaledger migrate`.
 
 ### Added
 
@@ -39,4 +41,7 @@ The first release of ResaLedger, 1.0.0. It replaces agent-ledger 0.x with one re
 
 ### Migration
 
-`npx resaledger migrate` converts an agent-ledger 0.1, 0.2 or 0.3 workspace in place. It refuses a dirty tree, builds everything in memory, checks that no line of the old records is lost, rewrites links into the old files, and never commits; `git restore .` undoes it. Migrate when no lane is open. The full mapping is in [section 14 of the specification](ledger/plan/spec.md#14-migration-from-0x).
+`npx resaledger migrate` converts an agent-ledger 0.1, 0.2 or 0.3 workspace in place. It refuses a dirty tree, builds everything in memory, checks that no line of the old records is lost, rewrites links into the old files, and never commits; it prints the commit command and the undo command (`git restore -- :/ && git clean -fd -- :/`). Merge or close open lanes first, or rebase them onto the migrated base afterwards: a task in progress takes the one open lane whose commits name it. The full mapping is in [section 14 of the specification](ledger/plan/spec.md#14-migration-from-0x).
+
+[Unreleased]: https://github.com/Resaco/resaledger/compare/v1.0.0-rc.1...HEAD
+[1.0.0-rc.1]: https://github.com/Resaco/resaledger/releases/tag/v1.0.0-rc.1

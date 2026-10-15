@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "The ResaLedger skill for coding agents: set up a task ledger in a repository and keep records the next agent can use.",
-    "version": "1.0.0-dev.0"
+    "version": "1.0.0-rc.1"
   },
   "plugins": [
     {

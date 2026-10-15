@@ -1,6 +1,6 @@
 {
   "name": "resaledger",
-  "version": "1.0.0-dev.0",
+  "version": "1.0.0-rc.1",
   "description": "A task ledger inside your repository that coding agents can't skip, can't fake and can't collide on.",
   "type": "module",
   "bin": {
@@ -25,5 +25,8 @@
     "node": ">=20"
   },
   "license": "MIT",
-  "repository": "github:Resaco/resaledger"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Resaco/resaledger.git"
+  }
 }
