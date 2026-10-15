@@ -221,12 +221,14 @@ export function preCommit() {
 }
 
 /**
- * The names that aiAttribution "forbid" refuses in a trailer: models, assistants and their
- * vendors, matched as whole words in any case, and the vendors' e-mail domains.
+ * What aiAttribution "forbid" refuses in a trailer. names are models, assistants and vendors,
+ * matched as whole words in any case. qualified are names that are also people's first names,
+ * so they match only in the forms listed (<version> is a version number, <digit> one digit).
+ * domains are the vendors' e-mail domains. A GitHub bot address ("<login>[bot]" at GitHub's
+ * users.noreply host) is refused when its login contains any of the names.
  */
 export const AI_ATTRIBUTION = Object.freeze({
   names: Object.freeze([
-    'Claude',
     'Anthropic',
     'OpenAI',
     'ChatGPT',
@@ -234,20 +236,26 @@ export const AI_ATTRIBUTION = Object.freeze({
     'Codex',
     'Copilot',
     'Gemini',
-    'Jules',
     'Cursor',
     'Grok',
     'xAI',
-    'Kimi',
     'Moonshot',
     'Mistral',
-    'Devin',
     'Aider',
     'Windsurf',
     'Codeium',
     'DeepSeek',
     'Qwen',
     'Amazon Q'
+  ]),
+  qualified: Object.freeze([
+    Object.freeze({
+      name: 'Claude',
+      forms: Object.freeze(['Claude Code', 'Claude Opus', 'Claude Sonnet', 'Claude Haiku', 'Claude Fable', 'Claude Instant', 'Claude <version>'])
+    }),
+    Object.freeze({ name: 'Devin', forms: Object.freeze(['Devin AI', 'devin-ai']) }),
+    Object.freeze({ name: 'Jules', forms: Object.freeze(['google-labs-jules', 'Jules[bot]']) }),
+    Object.freeze({ name: 'Kimi', forms: Object.freeze(['Kimi K<digit>', 'Kimi Code', 'Kimi AI']) })
   ]),
   domains: Object.freeze([
     'anthropic.com',
@@ -267,15 +275,39 @@ export const AI_ATTRIBUTION = Object.freeze({
 })
 
 const GITHOOKS_ESCAPE = /[.*+?^${}()|[\]\\]/g
-// A name as a word: no letter or digit before it, no letter after it (so "GPT-4o" and "Claude3" match, "cursory" does not).
+// A name as a word: no letter or digit before it, no letter after it (so "GPT-4o" matches, "cursory" does not).
 const GITHOOKS_AI_NAME = new RegExp(
   `(?<![A-Za-z0-9])(?:${AI_ATTRIBUTION.names.map((name) => name.replace(GITHOOKS_ESCAPE, '\\$&').replace(/ /g, '[\\s-]+')).join('|')})(?![A-Za-z])`,
   'i'
 )
+// The qualified forms of AI_ATTRIBUTION, one pattern for each name, in the same order.
+const GITHOOKS_AI_QUALIFIED = [
+  /(?<![A-Za-z0-9])claude(?:[\s-]+(?:code|opus|sonnet|haiku|fable|instant)(?![A-Za-z])|[\s-]*v?\d)/i,
+  /(?<![A-Za-z0-9])devin[\s-]ai(?![A-Za-z])/i,
+  /(?<![A-Za-z0-9])(?:google-labs-jules|jules\[bot\])/i,
+  /(?<![A-Za-z0-9])kimi[\s-]*(?:k\d|code(?![A-Za-z])|ai(?![A-Za-z]))/i
+]
 const GITHOOKS_AI_DOMAIN = new RegExp(
   `@(?:[A-Za-z0-9-]+\\.)*(?:${AI_ATTRIBUTION.domains.map((domain) => domain.replace(GITHOOKS_ESCAPE, '\\$&')).join('|')})(?![A-Za-z0-9-]|\\.[A-Za-z0-9])`,
   'i'
 )
+// A GitHub bot address: the login (after an optional "<id>+") ends in [bot].
+const GITHOOKS_GITHUB_BOT = /(?:\d+\+)?([A-Za-z0-9-]+)\[bot\]@users\.noreply\.github\.com/gi
+const GITHOOKS_AI_LOGIN_NAMES = [...AI_ATTRIBUTION.names, ...AI_ATTRIBUTION.qualified.map(({ name }) => name)].map((name) =>
+  name.toLowerCase().replace(/ /g, '')
+)
+
+/** Whether a trailer line names an AI model, assistant or vendor, as AI_ATTRIBUTION lists them. */
+function githooksNamesAi(line) {
+  if (GITHOOKS_AI_NAME.test(line) || GITHOOKS_AI_DOMAIN.test(line)) return true
+  if (GITHOOKS_AI_QUALIFIED.some((pattern) => pattern.test(line))) return true
+  for (const [, login] of line.matchAll(GITHOOKS_GITHUB_BOT)) {
+    const plain = login.toLowerCase()
+    if (GITHOOKS_AI_LOGIN_NAMES.some((name) => plain.includes(name))) return true
+  }
+  return false
+}
+
 // A trailer whose key ends in -by or -with: Co-authored-by, Signed-off-by, Assisted-by, Generated-with.
 const GITHOOKS_ATTRIBUTION_TRAILER = /^[A-Za-z0-9][A-Za-z0-9-]*-(?:by|with)[ \t]*:/i
 // type(scope)!: description, after any of git's fixup!, squash! and amend! prefixes.
@@ -317,7 +349,7 @@ function githooksAttributionProblems(message) {
   const problems = []
   for (const line of message.split('\n').slice(1)) {
     if (!GITHOOKS_ATTRIBUTION_TRAILER.test(line)) continue
-    if (!GITHOOKS_AI_NAME.test(line) && !GITHOOKS_AI_DOMAIN.test(line)) continue
+    if (!githooksNamesAi(line)) continue
     problems.push({
       file: '',
       line: 0,
