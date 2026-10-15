@@ -9,6 +9,8 @@ import { git, repositoryRoot } from './util.mjs'
 import { treeReader } from './workspace.mjs'
 
 const LANES_MARKDOWN = /\.(md|markdown)$/i
+// The variables git sets for a hook that point at this worktree's repository and index.
+const LANES_LOCATION_VARIABLES = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_PREFIX', 'GIT_OBJECT_DIRECTORY']
 
 /** The current branch name, or null in a detached HEAD or outside a repository. */
 export function currentLane() {
@@ -58,6 +60,21 @@ function lanesRealPath(path) {
   }
 }
 
+/**
+ * Runs read() without git's location variables, and restores them after. git sets
+ * GIT_INDEX_FILE (and for some hooks GIT_DIR) for a hook; another worktree read with them
+ * would list this worktree's index instead of that worktree's files.
+ */
+function lanesWithoutLocation(read) {
+  const saved = new Map(LANES_LOCATION_VARIABLES.filter((name) => name in process.env).map((name) => [name, process.env[name]]))
+  for (const name of saved.keys()) delete process.env[name]
+  try {
+    return read()
+  } finally {
+    for (const [name, value] of saved) process.env[name] = value
+  }
+}
+
 /** The worktrees from `git worktree list --porcelain`, as [{ path, branch, bare, detached, prunable }]. */
 function lanesWorktrees() {
   const worktrees = []
@@ -79,7 +96,8 @@ function lanesWorktrees() {
  * The other worktrees of this repository as lanes: [{ branch, path, source: 'worktree', tasks,
  * lastCommit }]. Task files are read from each worktree's disk, so an uncommitted claim shows.
  * Bare and detached worktrees, the current one and worktrees whose folder is gone are skipped.
- * The lanes are sorted by branch name.
+ * The lanes are sorted by branch name. Each worktree is read without git's location variables,
+ * so this is safe inside a hook.
  * `branches` is localBranches(), passed in when the caller already has it.
  */
 export function localLanes(config, branches = localBranches()) {
@@ -92,7 +110,7 @@ export function localLanes(config, branches = localBranches()) {
     if (real === null || real === here) continue
     let tasks = []
     try {
-      tasks = laneTasks(treeReader({ kind: 'worktree', root: worktree.path }), config.dir)
+      tasks = lanesWithoutLocation(() => laneTasks(treeReader({ kind: 'worktree', root: worktree.path }), config.dir))
     } catch {
       // A worktree git cannot read is shown with no tasks rather than stopping work.
     }
