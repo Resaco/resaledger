@@ -114,6 +114,9 @@ test('a hook that the guard refuses stops the commit', () => {
 test('the hooks reach the bundled guard, which accepts the commit and the push', () => {
   const r = repository()
   install(r)
+  // pre-commit checks the records, so the commit carries a valid workspace.
+  r.write('.resaledger.json', '{ "version": 2 }\n')
+  r.write('ledger/README.md', '# Shop\n\n## Goal\n\nSell bread.\n\n## Environments\n\nLocal only.\n\n## Manual checks\n\nNone.\n')
   r.git('config', 'core.hooksPath', '.githooks')
   const committed = r.commit('chore: start')
   assert.equal(committed.status, 0, committed.out)
