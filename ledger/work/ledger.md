@@ -294,7 +294,7 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 
 ### M4 This repository moves to 1.0
 - Status: todo
-- Depends on: M3, T5, I3, H2, V3, A1, T5.1, T5.2
+- Depends on: M3, T5, I3, H2, V3, A1, T5.1, T5.2, T3.1, T3.2
 - Plan: [M-migration.md](../plan/M-migration.md#m4-this-repository-moves-to-10)
 - Evidence: —
 - Notes: —
@@ -316,11 +316,39 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: —
 
 ### T3 Independent review of the guard
-- Status: doing
+- Status: blocked
 - Depends on: V3, H2
 - Plan: [T-acceptance.md](../plan/T-acceptance.md#t3-independent-review-of-the-guard)
+- Evidence: [The review](../evidence/t3/review.md): 13 findings, one blocker, five major and seven minor, each reproduced with the real product.
+- Notes: Waits for its child tasks: T3.1 to T3.4 fix or answer every finding.
+
+### T3.1 A range check that cannot be fooled
+- Status: todo
+- Depends on: T3
+- Plan: [The review](../evidence/t3/review.md#findings), findings 1, 2, 3 and 7
 - Evidence: —
-- Notes: A reviewer running Fable 5.1 reads R, V and H at a fixed commit; each finding becomes a child task of T3. Next: record the review, fix or answer every finding.
+- Notes: Read commit bodies length-prefixed (`git cat-file --batch`), never by splitting formatted output; a merge that adds code neither side changed needs a trailer; a revert must invert the commit it names, and a release subject alone exempts nothing; `--amend` is judged against HEAD's parent.
+
+### T3.2 Hooks judged by the committed rules
+- Status: todo
+- Depends on: T3
+- Plan: [The review](../evidence/t3/review.md#findings), findings 4, 6 and 9
+- Evidence: —
+- Notes: Ship a `pre-merge-commit` hook; take the protected branches, the branch pattern and the gates from the committed configuration, not the staged one; refuse deleting a task another lane holds.
+
+### T3.3 handoff and verify at the edges
+- Status: todo
+- Depends on: T3
+- Plan: [The review](../evidence/t3/review.md#findings), findings 5, 8, 10 and 11
+- Evidence: —
+- Notes: Start `handoff`'s range at the commit that added the configuration, as pre-push does; decide in spec section 5.10 whether code-like files in the workspace count as code; prune only stamp files; refuse `verify` when code is hidden with `skip-worktree` or `assume-unchanged`.
+
+### T3.4 Setup that works everywhere
+- Status: todo
+- Depends on: T3
+- Plan: [The review](../evidence/t3/review.md#findings), findings 12 and 13
+- Evidence: —
+- Notes: Restrict `dir` and `codePaths` to safe path segments; add `.githooks/* text eol=lf` to `.gitattributes` in `init` and `migrate`; and in the team preset let `init` set up on a branch, because the protected base refuses the setup commit (seen during the review).
 
 ### T4 Independent review of the CI check
 - Status: todo

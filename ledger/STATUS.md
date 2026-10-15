@@ -8,7 +8,7 @@ Building. Done: the foundation (F), the record format (R), the git hooks (H), th
 
 ## Active work
 
-[T3](work/ledger.md#t3-independent-review-of-the-guard), with a reviewer. The How it works animation (G3) and the new README graphics (G4) wait for the owner.
+Nothing is in progress: the owner paused the build on 15 October after the current tasks. The review of the guard (T3) is recorded, and its fixes are the child tasks T3.1 to T3.4.
 
 ## Last verified
 
@@ -17,7 +17,7 @@ Building. Done: the foundation (F), the record format (R), the git hooks (H), th
 
 ## Next step
 
-Review T5.2 and T3 when they report. Then C2, A2 and M4, once the plan's five-hour usage window resets.
+Fix the review's findings, the blocker first: [T3.1](work/ledger.md#t31-a-range-check-that-cannot-be-fooled), then T3.2 to T3.4. Then C2, A2 and M4, which now also waits for T3.1 and T3.2.
 
 ## Waiting for the owner
 
