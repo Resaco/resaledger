@@ -219,7 +219,7 @@ A blocked task and a dropped one:
 
 ### Fields
 
-Fields are a bullet list of `- Name: value` lines straight after the heading; blank lines between them are allowed. A name is letters and spaces. A value is the rest of the line. Nothing, `—`, `–` or `-` means empty. A field may hold a nested list instead of a value, indented by two spaces or a tab, as Evidence usually does. An indented line that is not a list item continues the value or the last item.
+Fields are a bullet list of `- Name: value` lines straight after the heading. Blank lines may separate the heading from the list; a blank line inside the list ends it. A name is letters and spaces. A value is the rest of the line. Nothing, `—`, `–` or `-` means empty. A field may hold a nested list instead of a value, indented by two spaces or a tab, as Evidence usually does. An indented line that is not a list item continues the value or the last item.
 
 | Field | Required | Rules |
 | --- | --- | --- |
