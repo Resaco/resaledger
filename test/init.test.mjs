@@ -394,7 +394,11 @@ describe('the project name', () => {
   }
 
   test('comes from package.json first', () => {
-    assert.equal(projectName(folder({ 'package.json': '{"name":"@scope/web"}', 'Cargo.toml': '[package]\nname = "crate"\n' })), '@scope/web')
+    assert.equal(projectName(folder({ 'package.json': '{"name":"web-app"}', 'Cargo.toml': '[package]\nname = "crate"\n' })), 'web-app')
+  })
+
+  test('a scoped package name gives the part after the slash', () => {
+    assert.equal(projectName(folder({ 'package.json': '{"name":"@scope/web"}' })), 'web')
   })
 
   test('from pyproject.toml [project]', () => {

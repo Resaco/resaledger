@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
 import { describe, test } from 'node:test'
-import { detectCommitStyle, detectGates, gateCandidates, makeTargets, OFFLINE_ENV, packageManager, proveCandidate, pythonTools, scriptCommand, tomlRequirements, tomlTables } from '../src/cli/detect.mjs'
+import { detectCommitStyle, detectGates, gateCandidates, listedScripts, makeTargets, OFFLINE_ENV, packageManager, proveCandidate, pythonTools, scriptCommand, tomlRequirements, tomlTables } from '../src/cli/detect.mjs'
 import { initOptions, parseInitArgs, planInit } from '../src/cli/init.mjs'
 import { parseConfig } from '../src/guard/config.mjs'
 import { ENV, PACKAGE, repository, temporary } from './helpers.mjs'
@@ -68,9 +68,9 @@ const commands = (root) => gateCandidates(root).map(({ command, kind }) => `${ki
 
 describe('the sources of candidates', () => {
   test('package.json scripts with the lockfile\'s package manager, only the names that count', () => {
-    const scripts = { lint: 'x', typecheck: 'x', 'check-types': 'x', 'format:check': 'x', test: 'x', build: 'x', dev: 'x', start: 'x', format: 'x', e2e: 'x' }
+    const scripts = { lint: 'x', typecheck: 'x', 'check-types': 'x', 'format:check': 'x', check: 'x', test: 'x', build: 'x', dev: 'x', start: 'x', format: 'x', e2e: 'x', 'test:unit': 'x', 'lint:fix': 'x' }
     const r = project({ 'package.json': JSON.stringify({ scripts }) })
-    assert.deepEqual(commands(r.root), ['commit: npm run lint', 'commit: npm run typecheck', 'commit: npm run check-types', 'commit: npm run format:check', 'verify: npm test', 'verify: npm run build'])
+    assert.deepEqual(commands(r.root), ['commit: npm run lint', 'commit: npm run typecheck', 'commit: npm run check-types', 'commit: npm run format:check', 'verify: npm run check', 'verify: npm test', 'verify: npm run build'])
     for (const [file, manager] of [['pnpm-lock.yaml', 'pnpm'], ['yarn.lock', 'yarn'], ['bun.lock', 'bun'], ['bun.lockb', 'bun'], ['package-lock.json', 'npm']]) {
       const locked = project({ 'package.json': '{ "scripts": { "test": "x" } }', [file]: '' })
       assert.equal(packageManager(locked.root), manager, file)
@@ -91,6 +91,16 @@ describe('the sources of candidates', () => {
     assert.deepEqual(commands(project({ Makefile: makefile }).root), ['commit: make lint', 'verify: make check', 'verify: make test', 'verify: make build'])
     const both = project({ Makefile: makefile, 'package.json': '{ "scripts": { "test": "x" } }' })
     assert.deepEqual(commands(both.root), ['verify: npm test', 'commit: make lint', 'verify: make check', 'verify: make build'])
+    const checked = project({ Makefile: makefile, 'package.json': '{ "scripts": { "check": "x" } }' })
+    assert.deepEqual(commands(checked.root), ['verify: npm run check', 'commit: make lint', 'verify: make test', 'verify: make build'])
+  })
+
+  test('scripts named test:… or lint:… are listed with the commands that run them, never as candidates', () => {
+    const scripts = { test: 'x', 'test:unit': 'x', 'test:watch': 'x', 'lint:fix': 'x', 'lint:': 'x', 'e2e:test': 'x', 'test:empty': ' ' }
+    assert.deepEqual(listedScripts(project({ 'package.json': JSON.stringify({ scripts }) }).root), ['npm run test:unit', 'npm run test:watch', 'npm run lint:fix'])
+    assert.deepEqual(listedScripts(project({ 'package.json': JSON.stringify({ scripts }), 'pnpm-lock.yaml': '' }).root), ['pnpm run test:unit', 'pnpm run test:watch', 'pnpm run lint:fix'])
+    assert.deepEqual(listedScripts(project({ 'package.json': '{ broken' }).root), [])
+    assert.deepEqual(listedScripts(project().root), [])
   })
 
   test('pyproject.toml: ruff, mypy and pytest from their tool tables or requirements, under uv run with a uv.lock', () => {
@@ -240,6 +250,24 @@ describe('init', () => {
     assert.equal(parseInitArgs([]).flags.gates, true)
     const r = repository()
     assert.match(r.node(CLI, 'help').out, /--no-gates runs no\n\s+check and leaves the gates for you to write/)
+  })
+
+  test('init --yes keeps a passing check script as a verify gate and names test:unit, which it does not run', () => {
+    const marker = 'node -e "require(\'fs\').writeFileSync(\'unit-ran\', \'\')"'
+    const r = project({ 'package.json': JSON.stringify({ name: 'web', scripts: { check: pass, 'test:unit': marker } }) })
+    const result = r.node(CLI, 'init', '--yes')
+    assert.equal(result.status, 0, result.out)
+    assert.deepEqual(JSON.parse(r.read('.resaledger.json')).gates, { commit: [], verify: ['npm run check'] })
+    assert.match(result.out, /✔ npm run check passed/)
+    assert.match(result.out, /^Not run: .*by hand.*\n {2}npm run test:unit$/m)
+    assert.equal(existsSync(join(r.root, 'unit-ran')), false)
+  })
+
+  test('the listed scripts are named when no gate candidate exists too', async () => {
+    const found = await detect(project({ 'package.json': JSON.stringify({ scripts: { 'lint:css': 'x' } }) }).root)
+    assert.deepEqual(found.listed, ['npm run lint:css'])
+    assert.match(found.out, /names no check that ResaLedger knows/)
+    assert.match(found.out, /^ {2}npm run lint:css$/m)
   })
 
   test('init --no-gates runs nothing and writes no gates', () => {

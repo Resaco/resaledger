@@ -6,8 +6,14 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { GITHOOKS_CONVENTIONAL } from '../guard/githooks.mjs'
 
-/** The package.json scripts that count as gates, by kind: fast checks commit, slow ones verify. */
-export const GATE_SCRIPTS = Object.freeze({ commit: ['lint', 'typecheck', 'check-types', 'format:check'], verify: ['test', 'build'] })
+/** The package.json scripts that count as gates, by kind: fast checks commit, slow ones verify. "check" often runs the tests, as in a Makefile. */
+export const GATE_SCRIPTS = Object.freeze({ commit: ['lint', 'typecheck', 'check-types', 'format:check'], verify: ['check', 'test', 'build'] })
+
+/**
+ * The package.json scripts that are listed for the project to add by hand and never run: a name
+ * does not say whether a script ends or changes files (test:watch, lint:fix).
+ */
+export const LISTED_SCRIPTS = /^(?:test|lint):./
 
 /** The Makefile targets that count as gates. "check" often runs the tests, so it is a verify gate. */
 export const MAKE_TARGETS = Object.freeze({ commit: ['lint'], verify: ['check', 'test', 'build'] })
@@ -166,6 +172,23 @@ function packageCandidates(root) {
   return found
 }
 
+/** The commands of the scripts named test:… or lint:…, with the lockfile's package manager, in the file's order. */
+export function listedScripts(root) {
+  const scripts = readPackageJson(root)?.scripts
+  if (scripts === null || typeof scripts !== 'object') return []
+  const manager = packageManager(root)
+  return Object.entries(scripts)
+    .filter(([name, text]) => LISTED_SCRIPTS.test(name) && typeof text === 'string' && text.trim() !== '')
+    .map(([name]) => scriptCommand(manager, name))
+}
+
+/** Prints the listed scripts after the gates, as candidates to add by hand. */
+function logListed(listed, log) {
+  if (listed.length === 0) return
+  log('Not run: these scripts may be checks, but a name does not say whether a script ends or changes files; add the ones that should be gates to "gates" in .resaledger.json by hand:')
+  for (const command of listed) log(`  ${command}`)
+}
+
 /** The candidates from the Makefile's targets; a target that a package.json script of the same name covers is skipped. */
 function makeCandidates(root) {
   const file = MAKEFILES.find((name) => existsSync(join(root, name)))
@@ -301,16 +324,23 @@ export async function proveCandidates(root, candidates, options = {}) {
   return { gates, results }
 }
 
-/** Finds the gate candidates and proves them: { gates, results }, with the progress printed by log. */
+/**
+ * Finds the gate candidates and proves them: { gates, results, listed }, with the progress printed
+ * by log, then the scripts listed to add by hand (listed holds their commands).
+ */
 export async function detectGates(root, options = {}) {
   const log = options.log ?? ((line) => console.log(line))
   const candidates = gateCandidates(root)
+  const listed = listedScripts(root)
   if (candidates.length === 0) {
     log('Gates: the project names no check that ResaLedger knows (package.json scripts, Makefile, pyproject.toml, Cargo.toml, go.mod).')
-    return { gates: { commit: [], verify: [] }, results: [] }
+    logListed(listed, log)
+    return { gates: { commit: [], verify: [] }, results: [], listed }
   }
   log(`Gates: trying ${candidates.length} check${candidates.length === 1 ? '' : 's'} once each, offline; only those that pass are kept.`)
-  return proveCandidates(root, candidates, { ...options, log })
+  const proved = await proveCandidates(root, candidates, { ...options, log })
+  logListed(listed, log)
+  return { ...proved, listed }
 }
 
 // The commit style.

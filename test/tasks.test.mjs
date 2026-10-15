@@ -218,6 +218,12 @@ describe('validateTask: status and required fields', () => {
     fails(FILE, taskText('S4 Store projects', ['Status: done']), /done task needs evidence/)
     const empty = fails(FILE, taskText('S4 Store projects', ['Status: done', 'Evidence: —']), /done task needs evidence/)
     assert.equal(empty.line, 4)
+    assert.match(empty.message, /replace "—" after "- Evidence:" with a command in backticks, a link or a URL/)
+  })
+
+  test('an empty Evidence line is fine before done, as new writes it', () => {
+    passes(FILE, taskText('S4 Store projects', ['Status: todo', 'Evidence: —']))
+    passes(FILE, taskText('S4 Store projects', ['Status: doing', 'Lane: s4', PLAN_LINK, 'Evidence: —']))
   })
 })
 

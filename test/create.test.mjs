@@ -101,7 +101,7 @@ describe('ids', () => {
 Next: write its goal and checks under "## Plan", or link "- Plan:" to a plan section; then node ledger/scripts/records.mjs claim S4
 `
     )
-    assert.equal(r.read('ledger/tasks/S4-sell-cakes.md'), '# S4 Sell cakes\n\n- Status: todo\n')
+    assert.equal(r.read('ledger/tasks/S4-sell-cakes.md'), '# S4 Sell cakes\n\n- Status: todo\n- Evidence: —\n')
     checks(r)
   })
 
@@ -170,6 +170,18 @@ Next: write its goal and checks under "## Plan", or link "- Plan:" to a plan sec
   })
 })
 
+describe('the format reference', () => {
+  test('its todo task example has the fields new writes', () => {
+    const doc = readFileSync(join(PACKAGE, 'docs', 'format.md'), 'utf8')
+    const example = /^```markdown task ledger\/tasks\/S4\.1-[^\n]*\n([\s\S]*?)\n```$/m.exec(doc)
+    assert.ok(example, 'docs/format.md has the S4.1 todo example')
+    const fields = (text) => text.split('\n').filter((line) => line.startsWith('- '))
+    const r = workspace()
+    const path = created(r, 'S', 'Fix the flaky upload test')
+    assert.deepEqual(fields(r.read(path)), fields(example[1].split('\n## ')[0]))
+  })
+})
+
 describe('slugs', () => {
   test('non-ASCII and long titles make short ASCII slugs, or none', () => {
     const r = workspace()
@@ -179,7 +191,7 @@ describe('slugs', () => {
       'ledger/tasks/S2-store-the-projects-and-the-documents-on.md'
     )
     assert.equal(created(r, 'S', '日本語のタイトル'), 'ledger/tasks/S3.md')
-    assert.equal(r.read('ledger/tasks/S3.md'), '# S3 日本語のタイトル\n\n- Status: todo\n')
+    assert.equal(r.read('ledger/tasks/S3.md'), '# S3 日本語のタイトル\n\n- Status: todo\n- Evidence: —\n')
     checks(r)
   })
 
@@ -272,10 +284,10 @@ describe('--issue', { skip: process.platform === 'win32' && 'the fake gh is a sh
     const r = workspace()
     const result = withGh(r, `[ "$1 $2 $3 $4 $5" = "issue view 42 --json title" ] || exit 3\necho '{"title":"Crash on an empty cart"}'`, 'S', '--issue', '42')
     assert.equal(result.status, 0, result.out)
-    assert.equal(r.read('ledger/tasks/S1-crash-on-an-empty-cart.md'), '# S1 Crash on an empty cart\n\n- Status: todo\n- Issue: #42\n')
+    assert.equal(r.read('ledger/tasks/S1-crash-on-an-empty-cart.md'), '# S1 Crash on an empty cart\n\n- Status: todo\n- Evidence: —\n- Issue: #42\n')
     const titled = withGh(r, 'exit 1', '--issue', '#43', 'Given title')
     assert.equal(titled.status, 0, titled.out)
-    assert.equal(r.read('ledger/tasks/T1-given-title.md'), '# T1 Given title\n\n- Status: todo\n- Issue: #43\n')
+    assert.equal(r.read('ledger/tasks/T1-given-title.md'), '# T1 Given title\n\n- Status: todo\n- Evidence: —\n- Issue: #43\n')
     checks(r)
   })
 

@@ -111,7 +111,7 @@ test('solo: claims in place, keeping every other byte, and says the claim is loc
   assert.equal(
     result.out,
     `✔ S1 claimed in lane main
-The claim is visible to the local worktrees now, and to others once the branch is pushed.
+The claim is visible to the local worktrees now.
 Next: node ledger/scripts/records.mjs task S1 for the plan, then start work; run node ledger/scripts/records.mjs handoff before you stop.
 `
   )

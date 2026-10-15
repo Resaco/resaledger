@@ -125,7 +125,8 @@ export function projectName(root) {
     ['package.json', (text) => {
       try {
         const name = JSON.parse(text)?.name
-        return typeof name === 'string' ? name : null
+        // A scoped name, @scope/web, gives the part after the slash.
+        return typeof name === 'string' ? name.replace(/^@[^/]+\//, '') : null
       } catch {
         return null
       }
