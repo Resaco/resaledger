@@ -2,7 +2,7 @@
 // in this clone, and turning them on.
 import { readFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
-import { CONFIG_FILE, loadConfig } from './config.mjs'
+import { CONFIG_FILE, DEFAULTS, loadConfig } from './config.mjs'
 import { runGates } from './gates.mjs'
 import { branchTaskFiles, idCollisions } from './ids.mjs'
 import { currentLane, localLanes } from './lanes.mjs'
@@ -13,6 +13,10 @@ import { fail, git, repositoryRoot } from './util.mjs'
 import { checkWorkspace, isCode, loadWorkspace, treeReader } from './workspace.mjs'
 
 export const HOOKS_PATH = '.githooks'
+
+// The git hooks that call the guard. git runs pre-merge-commit, not pre-commit, for a merge
+// that commits by itself; a fast-forward makes no commit, so only pre-push sees it.
+export const GIT_HOOKS = Object.freeze(['pre-commit', 'pre-merge-commit', 'commit-msg', 'pre-push'])
 
 // The YAML files of the hook managers whose installed hooks do not name the guard themselves.
 const MANAGER_FILES = ['lefthook.yml', 'lefthook.yaml', '.lefthook.yml', '.lefthook.yaml', '.pre-commit-config.yaml']
@@ -40,24 +44,29 @@ function isOwnHooksPath(value) {
   return value.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '') === HOOKS_PATH
 }
 
+/** Whether git runs the guard's call for one hook from the hooks folder. */
+function githooksHookActive(root, folder, name) {
+  const hook = readHookFile(join(folder, name))
+  if (hook === '') return false
+  if (hook.split(/\r?\n/).includes(`# resaledger: ${name} hook, managed by ResaLedger; do not edit`)) return true
+  const calls = new RegExp(`scripts/records\\.mjs"?\\s+${name}(?![\\w-])`)
+  if (calls.test(hook)) return true
+  // husky runs .husky/<hook> from its own scripts in .husky/_.
+  if (folder.replace(/\\/g, '/').replace(/\/+$/, '').endsWith('.husky/_') && calls.test(readHookFile(join(folder, '..', name)))) return true
+  return MANAGER_FILES.some((file) => calls.test(readHookFile(join(root, file))))
+}
+
 /**
- * True when git runs the guard's commit-msg check in this clone: the effective hooks folder
- * (core.hooksPath or the git folder's hooks, per worktree) holds the ResaLedger commit-msg
- * hook, or a hook manager's commit-msg hook is installed and its configuration calls the guard.
+ * True when git runs each of the guard's hooks (GIT_HOOKS) in this clone: for each, the
+ * effective hooks folder (core.hooksPath or the git folder's hooks, per worktree) holds the
+ * ResaLedger hook, or a hook manager's hook is installed and its configuration calls the guard.
+ * A clone set up before pre-merge-commit was shipped is not active until it is updated.
  */
 export function hooksActive() {
   const root = repositoryRoot()
   let folder = git('-C', root, 'rev-parse', '--git-path', 'hooks')
   if (!isAbsolute(folder)) folder = join(root, folder)
-  const hook = readHookFile(join(folder, 'commit-msg'))
-  if (hook === '') return false
-  if (hook.split(/\r?\n/).includes('# resaledger: commit-msg hook, managed by ResaLedger; do not edit')) return true
-  const calls = /scripts\/records\.mjs"?\s+commit-msg\b/
-  if (calls.test(hook)) return true
-  // husky runs .husky/<hook> from its own scripts in .husky/_.
-  if (folder.replace(/\\/g, '/').replace(/\/+$/, '').endsWith('.husky/_') && calls.test(readHookFile(join(folder, '..', 'commit-msg'))))
-    return true
-  return MANAGER_FILES.some((file) => calls.test(readHookFile(join(root, file))))
+  return GIT_HOOKS.every((name) => githooksHookActive(root, folder, name))
 }
 
 /**
@@ -101,7 +110,7 @@ function githooksBranchProblems(branch, config) {
       {
         file: '',
         line: 0,
-        message: `"${branch}" is a protected branch, so nothing is committed on it, not even a merge. Work in a lane branch, for example with "${guard} claim <id>", which creates one, and open a pull request`
+        message: `"${branch}" is a protected branch, so nothing is committed on it, not even a merge. Work in a lane branch, for example with "${guard} claim <id>", which creates one, and open a pull request. A fast-forward merge makes no commit, so no commit hook sees it; pre-push refuses it`
       }
     ]
   }
@@ -120,10 +129,10 @@ function githooksBranchProblems(branch, config) {
 /**
  * The ownership problems of the staged tasks (spec 6.2), compared by id with HEAD: a task that
  * exists on the base branch was deleted or had its id renamed, or a task another lane holds was
- * changed without a takeover. During a merge, a task staged exactly as the merged commit has it
+ * changed without a takeover. During a merge, a task staged exactly as a merged commit has it
  * is that lane's own change and passes.
  */
-function githooksOwnershipProblems(root, branch, config, head, headTasks, stagedTasks) {
+function githooksOwnershipProblems(root, branch, config, head, headTasks, stagedTasks, mergeHeads) {
   let kept = new Set(headTasks.keys())
   const deleted = [...headTasks.keys()].some((id) => !stagedTasks.has(id))
   const base = deleted && branch !== config.base ? githooksCommit(config.base) : null
@@ -136,9 +145,46 @@ function githooksOwnershipProblems(root, branch, config, head, headTasks, staged
     }
     if (mergeBase !== head) kept = new Set(taskRecordsById(treeReader({ kind: 'commit', rev: mergeBase, root }), config.dir).keys())
   }
-  const mergeHead = githooksCommit('MERGE_HEAD')
-  const accepted = mergeHead === null ? [] : [taskRecordsById(treeReader({ kind: 'commit', rev: mergeHead, root }), config.dir)]
+  const accepted = mergeHeads.map((rev) => taskRecordsById(treeReader({ kind: 'commit', rev, root }), config.dir))
   return ownershipProblems({ before: headTasks, after: stagedTasks, lane: branch, config, kept, accepted })
+}
+
+/**
+ * The commits a merge brings in. When `git commit` concludes a merge, MERGE_HEAD names them.
+ * git runs pre-merge-commit before it writes MERGE_HEAD, so there they are the commits that
+ * GIT_REFLOG_ACTION names ("merge <commit>…", as git merge sets it), and for FETCH_HEAD, as
+ * git pull merges, the fetched commits marked for merging. Empty for an ordinary commit, and
+ * when the merged commits cannot be found, so that no task change is taken as theirs.
+ */
+function githooksMergeHeads(root, hook) {
+  const commits = new Set()
+  if (hook !== 'pre-merge-commit') {
+    for (const line of readHookFile(githooksGitPath(root, 'MERGE_HEAD')).split(/\r?\n/)) {
+      const commit = line.trim() === '' ? null : githooksCommit(line.trim())
+      if (commit !== null) commits.add(commit)
+    }
+    return [...commits]
+  }
+  const [action = '', ...names] = (process.env.GIT_REFLOG_ACTION ?? '').trim().split(/\s+/)
+  if (action !== 'merge' && action !== 'pull') return []
+  if (action === 'pull' || names.includes('FETCH_HEAD')) {
+    for (const line of readHookFile(githooksGitPath(root, 'FETCH_HEAD')).split(/\r?\n/)) {
+      const [oid, mark] = line.split('\t')
+      const commit = mark === '' && oid ? githooksCommit(oid) : null
+      if (commit !== null) commits.add(commit)
+    }
+  }
+  for (const name of names) {
+    const commit = name === 'FETCH_HEAD' || name.startsWith('-') ? null : githooksCommit(name)
+    if (commit !== null) commits.add(commit)
+  }
+  return [...commits]
+}
+
+/** The absolute path of a file in the git folder, such as MERGE_HEAD, for this worktree. */
+function githooksGitPath(root, name) {
+  const path = git('-C', root, 'rev-parse', '--git-path', name)
+  return isAbsolute(path) ? path : join(root, path)
 }
 
 /**
@@ -169,13 +215,38 @@ function githooksStagedPaths() {
 }
 
 /**
- * The pre-commit hook, judged on the staged content (the index git names in GIT_INDEX_FILE,
- * which is a temporary one for `git commit -- <paths>`): the configuration, the branch rules,
- * the records, task ownership against HEAD, new ids against the other local branches and
- * worktrees, and the commit gates when code is staged.
+ * The configuration committed in a commit: { config, problems } as loadConfig gives it, or
+ * null when the commit is null or has no .resaledger.json.
+ */
+function githooksCommittedConfig(root, rev) {
+  if (rev === null) return null
+  const reader = treeReader({ kind: 'commit', rev, root })
+  return reader.exists(CONFIG_FILE) ? loadConfig(reader) : null
+}
+
+/**
+ * The configuration a change is judged by: its own (for dir, the records and the rest), with
+ * the rules taken from a committed configuration it cannot change (spec 12): the base, the
+ * protected branches, branchPattern and the gates. Without rules, its own hold.
+ */
+function githooksWithRules(config, rules) {
+  if (!rules) return config
+  const { base, branchPattern, branchRegex, gates } = rules
+  return { ...config, base, protected: rules.protected, branchPattern, branchRegex, gates }
+}
+
+/**
+ * The pre-commit hook, and pre-merge-commit, which git runs instead for a merge that commits
+ * by itself. Judged on the staged content (the index git names in GIT_INDEX_FILE, which is a
+ * temporary one for `git commit -- <paths>`): the configuration, the branch rules, the records,
+ * task ownership against HEAD, new ids against the other local branches and worktrees, and
+ * the commit gates when code is staged. The rules (githooksWithRules) are HEAD's committed
+ * ones, so staging a looser configuration does not loosen the commit that adds it; the index's
+ * hold only before the first commit, or when HEAD has no valid configuration yet.
+ * hook is the hook git runs, which tells where the merged commits of a merge are found.
  * A refusal prints every problem and exits 1; a pass prints only the gate lines.
  */
-export function preCommit() {
+export function preCommit(hook = 'pre-commit') {
   let root
   try {
     root = repositoryRoot()
@@ -183,16 +254,17 @@ export function preCommit() {
     fail('not inside a git repository')
   }
   const reader = treeReader({ kind: 'index', root })
-  const { config, problems: configProblems } = loadConfig(reader)
-  if (!config) githooksRefuse(configProblems)
+  const { config: staged, problems: configProblems } = loadConfig(reader)
+  if (!staged) githooksRefuse(configProblems)
+  const head = githooksCommit('HEAD')
+  const config = githooksWithRules(staged, githooksCommittedConfig(root, head)?.config)
 
   const branch = currentLane()
   const problems = githooksBranchProblems(branch, config)
-  problems.push(...checkWorkspace(loadWorkspace(reader, config), reader, config))
-  const head = githooksCommit('HEAD')
+  problems.push(...checkWorkspace(loadWorkspace(reader, staged), reader, staged))
   const headTasks = head === null ? new Map() : taskRecordsById(treeReader({ kind: 'commit', rev: head, root }), config.dir)
   const stagedTasks = taskRecordsById(reader, config.dir)
-  if (branch !== null && head !== null) problems.push(...githooksOwnershipProblems(root, branch, config, head, headTasks, stagedTasks))
+  if (branch !== null && head !== null) problems.push(...githooksOwnershipProblems(root, branch, config, head, headTasks, stagedTasks, githooksMergeHeads(root, hook)))
   problems.push(...githooksIdProblems(root, branch, config, headTasks, stagedTasks))
   if (problems.length > 0) githooksRefuse(problems)
 
@@ -467,7 +539,9 @@ function githooksPushStart(localOid, remoteOid, remote, branch, config) {
  * The pre-push hook, given git's lines on stdin and its arguments (the remote's name and URL).
  * For each pushed branch: no push to a protected branch and no deletion of one, and the
  * commits the push adds pass checkRange with the local branch as the lane. Tags are skipped.
- * The configuration is the pushed commit's own (HEAD's for a deletion).
+ * The rules (githooksWithRules) come from the remote's base branch as last fetched, else from
+ * local HEAD, so a pushed commit cannot loosen them. The rest of the configuration is the
+ * pushed commit's own; a pushed commit without one is judged by the rules' configuration.
  */
 export function prePush(input, args = []) {
   let root
@@ -477,32 +551,31 @@ export function prePush(input, args = []) {
     fail('not inside a git repository')
   }
   const remote = args[0] || process.env.PRE_COMMIT_REMOTE_NAME || ''
-  const configs = new Map()
-  const configAt = (rev) => {
-    if (!configs.has(rev)) {
-      const reader = treeReader({ kind: 'commit', rev, root })
-      configs.set(rev, reader.exists(CONFIG_FILE) ? loadConfig(reader) : { config: null, problems: [] })
-    }
-    return configs.get(rev)
-  }
+  const local = githooksCommittedConfig(root, githooksCommit('HEAD'))?.config ?? null
+  const tracked = remote ? githooksCommit(`refs/remotes/${remote}/${local?.base ?? DEFAULTS.base}`) : null
+  const rules = githooksCommittedConfig(root, tracked)?.config ?? local
   const problems = []
   for (const [localRef, localOid, remoteRef, remoteOid] of githooksPushLines(input, process.env)) {
     if (!remoteRef.startsWith('refs/heads/')) continue
     const branch = remoteRef.slice('refs/heads/'.length)
     const refuse = (message) => problems.push(`${branch}: ${message}`)
     const deletion = GITHOOKS_ZERO_OID.test(localOid)
-    const rev = githooksCommit(deletion ? 'HEAD' : localOid)
-    if (rev === null) continue
-    const { config, problems: configProblems } = configAt(rev)
-    if (!config) {
-      for (const { file, line, message } of configProblems) refuse(`${file}${line ? `:${line}` : ''}: ${message}`)
+    if (!deletion && githooksCommit(localOid) === null) continue
+    const own = deletion ? null : githooksCommittedConfig(root, localOid)
+    if (own && !own.config) {
+      for (const { file, line, message } of own.problems) refuse(`${file}${line ? `:${line}` : ''}: ${message}`)
       continue
     }
+    if (!own && !rules) {
+      if (!deletion) refuse(`the pushed commit has no ${CONFIG_FILE}, and neither has HEAD, so there are no rules to judge it by. Commit the configuration first`)
+      continue
+    }
+    const config = githooksWithRules(own?.config ?? rules, rules)
     if (config.protected.includes(branch)) {
       refuse(
         deletion
           ? `"${branch}" is a protected branch, so it is not deleted`
-          : `"${branch}" is a protected branch, so nothing is pushed to it directly. Push a lane branch and open a pull request`
+          : `"${branch}" is a protected branch, so nothing is pushed to it directly, not even a fast-forward merge, which no commit hook sees. Push a lane branch and open a pull request`
       )
       continue
     }

@@ -210,3 +210,64 @@ function spawnHook(r, variables) {
   })
   return { status: result.status, out: `${result.stdout}${result.stderr}` }
 }
+
+/** A team workspace whose main reached the remote past the hooks, as an administrator would set it up. */
+function teamWorkspace() {
+  const r = workspace({ config: { preset: 'team' }, push: false })
+  must(r.git('push', '-q', '--no-verify', 'origin', 'main'))
+  must(r.fetch())
+  return r
+}
+
+test('a fast-forward merge onto the protected base makes no commit, and pre-push refuses it', () => {
+  const r = teamWorkspace()
+  const setup = r.git('rev-parse', 'HEAD').out.trim()
+  lane(r)
+  r.git('checkout', '-q', 'main')
+  must(r.git('merge', '-q', 'lane'))
+  assert.notEqual(r.git('rev-parse', 'HEAD').out.trim(), setup, 'main moved without a commit hook')
+  refused(r.push('main'), /main: "main" is a protected branch, so nothing is pushed to it directly, not even a fast-forward merge, which no commit hook sees/)
+})
+
+test("a pushed configuration does not lift the remote base's protection", () => {
+  const r = teamWorkspace()
+  // A lane may commit a looser configuration; it never judges the push that carries it.
+  r.git('checkout', '-q', '-b', 'loosen')
+  r.write('.resaledger.json', '{ "version": 2, "preset": "team", "protected": [], "gates": { "commit": [], "verify": [] } }\n')
+  r.write('evil.js', 'evil\n')
+  must(r.commit('chore: loosen', 'Task: maintenance'))
+  r.git('checkout', '-q', 'main')
+  must(r.git('merge', '-q', 'loosen'))
+  refused(r.push('main'), /main: "main" is a protected branch/)
+  refused(r.push('loosen:main'), /main: "main" is a protected branch/)
+})
+
+test('without a remote base, the rules are local HEAD\'s', () => {
+  const r = workspace({ config: { protected: ['release'] }, push: false })
+  r.git('checkout', '-q', '-b', 'loosen')
+  r.write('.resaledger.json', '{ "version": 2, "protected": [] }\n')
+  must(r.commit('chore: loosen', 'Task: maintenance'))
+  r.git('checkout', '-q', 'main')
+  refused(r.push('loosen:release'), /release: "release" is a protected branch/)
+})
+
+test('a pushed commit without a configuration is judged by the rules, never skipped', () => {
+  const r = workspace()
+  r.git('checkout', '-q', '-b', 'lane')
+  r.git('rm', '-q', '.resaledger.json')
+  r.write('src/sneak.js', 'console.log(1)\n')
+  r.git('add', '-A')
+  must(r.git('commit', '-q', '--no-verify', '-m', 'feat: sneak'))
+  const sneak = r.git('log', '-1', '--format=%h').out.trim()
+  refused(r.push('lane'), new RegExp(`lane: ${sneak}: "feat: sneak" changes code but names no task`))
+})
+
+test('a push with no configuration anywhere is refused', () => {
+  const r = workspace({ push: false })
+  r.git('checkout', '-q', '--orphan', 'bare')
+  r.git('rm', '-q', '-r', '--cached', '.')
+  r.write('.gitignore', '*\n')
+  r.git('add', '-f', '.gitignore')
+  must(r.git('commit', '-q', '--no-verify', '-m', 'start'))
+  refused(r.push('bare'), /bare: the pushed commit has no \.resaledger\.json, and neither has HEAD, so there are no rules to judge it by/)
+})

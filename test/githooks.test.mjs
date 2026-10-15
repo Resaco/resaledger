@@ -304,7 +304,7 @@ test('the husky integration appends the guard\'s calls once and creates missing 
   mkdirSync(join(root, '.husky'))
   writeFileSync(join(root, '.husky', 'pre-commit'), 'npx lint-staged')
   const first = integrateHookManager(root, 'husky', 'ledger')
-  assert.deepEqual(first, { changed: ['.husky/pre-commit', '.husky/commit-msg', '.husky/pre-push'], instructions: null })
+  assert.deepEqual(first, { changed: ['.husky/pre-commit', '.husky/pre-merge-commit', '.husky/commit-msg', '.husky/pre-push'], instructions: null })
   assert.equal(
     readFileSync(join(root, '.husky', 'pre-commit'), 'utf8'),
     'npx lint-staged\n# resaledger: pre-commit call, managed by ResaLedger; do not edit\nnode "ledger/scripts/records.mjs" pre-commit\n'
@@ -322,7 +322,7 @@ test('hooksActive recognises the husky integration', () => {
   const r = repository()
   install(r)
   integrateHookManager(r.root, 'husky', 'ledger')
-  r.write('.husky/_/commit-msg', '#!/usr/bin/env sh\n. "$(dirname "$0")/h"\n')
+  for (const name of HOOK_NAMES) r.write(`.husky/_/${name}`, '#!/usr/bin/env sh\n. "$(dirname "$0")/h"\n')
   r.git('config', 'core.hooksPath', '.husky/_')
   assert.equal(inside(r.root, hooksActive), true)
   r.write('.husky/commit-msg', 'npx commitlint --edit "$1"\n')
@@ -351,6 +351,7 @@ test('the simple-git-hooks integration extends the hooks and keeps the rest of p
   assert.deepEqual(manifest['simple-git-hooks'], {
     'pre-commit': 'npx lint-staged && node "ledger/scripts/records.mjs" pre-commit',
     'post-merge': 'npm install',
+    'pre-merge-commit': 'node "ledger/scripts/records.mjs" pre-merge-commit',
     'commit-msg': 'node "ledger/scripts/records.mjs" commit-msg "$1"',
     'pre-push': 'node "ledger/scripts/records.mjs" pre-push "$@"'
   })
@@ -378,4 +379,41 @@ test('the lefthook and pre-commit integrations change nothing and return the sni
 
   assert.deepEqual(snapshot(root), before)
   assert.throws(() => integrateHookManager(root, 'overcommit', 'ledger'), /unknown hook manager/)
+})
+
+test('git runs pre-merge-commit, not pre-commit, for a merge that commits by itself', () => {
+  const r = repository()
+  install(r, RECORDER)
+  r.git('config', 'core.hooksPath', '.githooks')
+  assert.equal(r.commit('chore: start').status, 0)
+  r.git('checkout', '-q', '-b', 'lane')
+  r.write('notes.md', 'Notes.\n')
+  assert.equal(r.commit('docs: notes').status, 0)
+  r.git('checkout', '-q', 'main')
+  const before = calls(r).length
+  const merged = r.git('merge', '-q', '--no-ff', '-m', 'Merge lane', 'lane')
+  assert.equal(merged.status, 0, merged.out)
+  assert.deepEqual(
+    calls(r)
+      .slice(before)
+      .map((call) => call.args),
+    [['pre-merge-commit'], ['commit-msg', '.git/MERGE_MSG']]
+  )
+})
+
+test('a clone whose hooks predate pre-merge-commit is not active', () => {
+  const r = repository()
+  install(r)
+  r.git('config', 'core.hooksPath', '.githooks')
+  assert.equal(inside(r.root, hooksActive), true)
+  r.write('.githooks/pre-merge-commit', '#!/bin/sh\nexit 0\n')
+  assert.equal(inside(r.root, hooksActive), false)
+  // A hook manager whose configuration calls the guard for every hook is active.
+  r.git('config', 'core.hooksPath', '.lefthook-hooks')
+  for (const name of HOOK_NAMES) r.write(`.lefthook-hooks/${name}`, '#!/bin/sh\nlefthook run "$0"\n')
+  const snippet = integrateHookManager(r.root, 'lefthook', 'ledger').instructions
+  r.write('lefthook.yml', snippet.slice(snippet.indexOf('pre-commit:'), snippet.indexOf('\n\nThen')))
+  assert.equal(inside(r.root, hooksActive), true)
+  r.write('lefthook.yml', r.read('lefthook.yml').replace(/pre-merge-commit:[\s\S]*?(?=commit-msg:)/, ''))
+  assert.equal(inside(r.root, hooksActive), false)
 })

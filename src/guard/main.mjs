@@ -131,13 +131,14 @@ function hooksCommand(args) {
       console.error(`✖ core.hooksPath is already "${result.foreign}", so ResaLedger changed nothing.
   Call the guard from those hooks instead:
     ${guard} pre-commit            (pre-commit)
+    ${guard} pre-merge-commit      (pre-merge-commit)
     ${guard} commit-msg "$1"       (commit-msg)
     ${guard} pre-push "$@"         (pre-push, with its stdin)`)
       process.exit(1)
     }
   }
   if (hooksActive()) console.log('✔ the git hooks are active in this clone')
-  else if (activate) fail('.githooks/commit-msg is missing or is not the ResaLedger hook; run "npx resaledger update" to restore it')
+  else if (activate) fail('a hook in .githooks/ is missing or is not the ResaLedger hook; run "npx resaledger update" to restore it')
   else {
     console.error(`✖ the git hooks are not active in this clone; run "${guard} hooks --activate"`)
     process.exit(1)
@@ -159,7 +160,7 @@ export function main(argv) {
   else if (command === 'verify') verifyCommand(argv.slice(1))
   else if (command === 'handoff') handoffCommand(argv.slice(1))
   else if (command === 'hooks') hooksCommand(argv.slice(1))
-  else if (command === 'pre-commit') preCommit()
+  else if (command === 'pre-commit' || command === 'pre-merge-commit') preCommit(command)
   else if (command === 'commit-msg') {
     if (!argv[1]) fail('commit-msg needs the message file, as git passes it: commit-msg <file>')
     commitMsg(argv[1])

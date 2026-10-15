@@ -345,7 +345,7 @@ describe('migrate, from end to end', () => {
     assert.match(result.out, /✔ records valid: 4 tasks, 2 decisions, 3 log entries/)
     assert.match(
       result.out,
-      /git add -A && git add --chmod=\+x \.githooks\/pre-commit \.githooks\/commit-msg \.githooks\/pre-push && git commit -m "chore: migrate to ResaLedger 1\.0" -m "Task: maintenance"/
+      /git add -A && git add --chmod=\+x \.githooks\/pre-commit \.githooks\/pre-merge-commit \.githooks\/commit-msg \.githooks\/pre-push && git commit -m "chore: migrate to ResaLedger 1\.0" -m "Task: maintenance"/
     )
     assert.match(result.out, /git restore -- :\/ && git clean -fd -- :\/ && git config --unset core\.hooksPath/)
     const check = r.node(`${DIR}/scripts/records.mjs`, 'check')
@@ -931,7 +931,7 @@ describe('--dry-run', () => {
     const before = snapshot(r.root)
     const result = migrate(r, '--dry-run')
     assert.equal(result.status, 0, result.out)
-    assert.match(result.out, /Create \(\d+\):\n {2}\.resaledger\.json\n/)
+    assert.match(result.out, /Create \(\d+\):\n {2}\.githooks\/pre-merge-commit\n {2}\.resaledger\.json\n/)
     assert.match(result.out, /Delete \(7\):/)
     assert.match(result.out, /--dry-run: nothing was written\./)
     assert.deepEqual(snapshot(r.root), before)

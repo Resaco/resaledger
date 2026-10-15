@@ -74,7 +74,7 @@ describe('a solo setup off a terminal', () => {
   })
 
   test('writes the git hooks and turns them on', () => {
-    for (const name of ['pre-commit', 'commit-msg', 'pre-push']) {
+    for (const name of ['pre-commit', 'pre-merge-commit', 'commit-msg', 'pre-push']) {
       assert.match(r.read(`.githooks/${name}`), new RegExp(`"ledger/scripts/records\\.mjs" ${name}`))
       if (process.platform !== 'win32') assert.ok(statSync(join(r.root, '.githooks', name)).mode & 0o100)
     }
@@ -91,12 +91,12 @@ describe('a solo setup off a terminal', () => {
   })
 
   test('prints what it did and the next steps', () => {
-    assert.match(result.out, /Created \(7\):\n {2}\.githooks\/commit-msg\n {2}\.githooks\/pre-commit\n {2}\.githooks\/pre-push\n {2}\.resaledger\.json\n {2}AGENTS\.md\n {2}ledger\/README\.md\n {2}ledger\/scripts\/records\.mjs\n/)
+    assert.match(result.out, /Created \(8\):\n {2}\.githooks\/commit-msg\n {2}\.githooks\/pre-commit\n {2}\.githooks\/pre-merge-commit\n {2}\.githooks\/pre-push\n {2}\.resaledger\.json\n {2}AGENTS\.md\n {2}ledger\/README\.md\n {2}ledger\/scripts\/records\.mjs\n/)
     assert.match(result.out, /Write the project's own text in ledger\/README\.md .*\(Goal, Environments, Manual checks\)/)
     assert.match(result.out, /3\. Start working: node ledger\/scripts\/records\.mjs work/)
     assert.equal(
       printedCommit(result.out),
-      'git add .resaledger.json AGENTS.md ledger/README.md ledger/scripts/records.mjs && git add --chmod=+x .githooks/commit-msg .githooks/pre-commit .githooks/pre-push && git commit -m "chore: set up ResaLedger" -m "Task: maintenance"'
+      'git add .resaledger.json AGENTS.md ledger/README.md ledger/scripts/records.mjs && git add --chmod=+x .githooks/commit-msg .githooks/pre-commit .githooks/pre-merge-commit .githooks/pre-push && git commit -m "chore: set up ResaLedger" -m "Task: maintenance"'
     )
   })
 
@@ -119,7 +119,7 @@ describe('a solo setup off a terminal', () => {
     assert.equal(r.git('status', '--porcelain').out, '?? notes.txt\n')
     assert.match(r.git('log', '-1', '--format=%B').out, /^chore: set up ResaLedger\n\nTask: maintenance\n/)
     // The hooks are committed as executable on every platform, Windows included.
-    for (const name of ['pre-commit', 'commit-msg', 'pre-push']) assert.match(r.git('ls-files', '-s', `.githooks/${name}`).out, /^100755 /)
+    for (const name of ['pre-commit', 'pre-merge-commit', 'commit-msg', 'pre-push']) assert.match(r.git('ls-files', '-s', `.githooks/${name}`).out, /^100755 /)
   })
 
   test('a second init is refused as already set up and changes nothing', () => {
@@ -238,11 +238,11 @@ describe('hook managers', () => {
     assert.equal(lstatSync(join(r.root, '.githooks'), { throwIfNoEntry: false }), undefined)
     assert.match(r.read('.husky/pre-commit'), /^npm run lint\n# resaledger: pre-commit call, managed by ResaLedger; do not edit\nnode "ledger\/scripts\/records\.mjs" pre-commit\n$/)
     assert.match(r.read('.husky/commit-msg'), /node "ledger\/scripts\/records\.mjs" commit-msg "\$1"/)
-    assert.match(result.out, /Created \(6\):\n {2}\.husky\/commit-msg\n {2}\.husky\/pre-push\n {2}\.resaledger\.json\n {2}AGENTS\.md\n/)
+    assert.match(result.out, /Created \(7\):\n {2}\.husky\/commit-msg\n {2}\.husky\/pre-merge-commit\n {2}\.husky\/pre-push\n {2}\.resaledger\.json\n {2}AGENTS\.md\n/)
     assert.match(result.out, /! the git hooks do not run the guard in this clone yet; install husky's hooks with "npx husky"/)
     assert.match(result.out, /Changed \(1\):\n {2}\.husky\/pre-commit\n/)
     assert.match(result.out, /! husky manages the git hooks here, so core\.hooksPath was not changed/)
-    assert.match(printedCommit(result.out), /^git add \.husky\/commit-msg \.husky\/pre-commit \.husky\/pre-push \.resaledger\.json AGENTS\.md ledger\/README\.md ledger\/scripts\/records\.mjs && /)
+    assert.match(printedCommit(result.out), /^git add \.husky\/commit-msg \.husky\/pre-commit \.husky\/pre-merge-commit \.husky\/pre-push \.resaledger\.json AGENTS\.md ledger\/README\.md ledger\/scripts\/records\.mjs && /)
   })
 
   test('a dirty husky hook is refused', () => {
