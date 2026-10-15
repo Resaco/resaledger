@@ -300,7 +300,7 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: The run showed that real blocked tasks say what they wait for in their notes, so `migrate` now takes Waiting for from the first "Waits for …" or "Blocked on …" phrase and lists each one; spec section 14 says so. Free-text status lines in plans stay a 1.0 problem for the owner to fix before migrating, because rewriting them would be interpretation.
 
 ### M4 This repository moves to 1.0
-- Status: todo
+- Status: doing
 - Depends on: M3, T5, I3, H2, V3, A1, T5.1, T5.2, T3.1, T3.2
 - Plan: [M-migration.md](../plan/M-migration.md#m4-this-repository-moves-to-10)
 - Evidence: —

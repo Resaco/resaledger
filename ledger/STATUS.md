@@ -8,11 +8,11 @@ Building. Done: the foundation (F), the record format (R), the git hooks (H), th
 
 ## Active work
 
-[W5](work/ledger.md#w5-changes), [C2](work/ledger.md#c2-changes-to-enforcement) and [A2](work/ledger.md#a2-cursor-gemini-cli-and-github-copilot), with workers.
+[M4](work/ledger.md#m4-this-repository-moves-to-10), by the lead, and [W5](work/ledger.md#w5-changes), with a worker.
 
 ## Last verified
 
-- `npm test` passes with 754 of 754 tests on Node 24, 22 and 20 (2026-10-15). The history scan is clean.
+- `npm test` passes with 878 of 878 tests on Node 24, 22 and 20 (2026-10-15). The history scan is clean.
 - CI on GitHub passes on Linux and macOS with Node 20, 22 and 24. Windows has not been rechecked since its fixes; the next push shows it.
 
 ## Next step
