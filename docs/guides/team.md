@@ -23,7 +23,7 @@ git push -u origin resaledger-setup
 /.resaledger.json @your-org/maintainers
 /ledger/scripts/records.mjs @your-org/maintainers
 /.githooks/ @your-org/maintainers
-/.github/workflows/resaledger.yml @your-org/maintainers
+/.github/workflows/ @your-org/maintainers
 /.github/CODEOWNERS @your-org/maintainers
 ```
 
@@ -100,6 +100,8 @@ The check appears in the list only after the workflow has run once, on the setup
 
 CI judges each pull request with the base branch's rules, so a pull request cannot loosen the check that judges it. One file is beyond its reach: the workflow that runs the check, because GitHub runs a pull request's own copy of it. CODEOWNERS makes a change to that file, and to the other enforcement files, wait for a review from the people who own the rules.
 
+The lines cover the whole `.github/workflows/` folder, not only `resaledger.yml`. GitHub matches a required check by its name, so a second workflow file with a job called `resaledger` could report the check as passed.
+
 Write the lines `init` printed into `.github/CODEOWNERS`, with your own team or people in place of `@your-org/maintainers`. `main` is protected, so this goes through a pull request too:
 
 ```bash
@@ -109,7 +111,7 @@ cat > .github/CODEOWNERS <<'EOF'
 /.resaledger.json @bakery/maintainers
 /ledger/scripts/records.mjs @bakery/maintainers
 /.githooks/ @bakery/maintainers
-/.github/workflows/resaledger.yml @bakery/maintainers
+/.github/workflows/ @bakery/maintainers
 /.github/CODEOWNERS @bakery/maintainers
 EOF
 git add .github/CODEOWNERS
@@ -128,6 +130,26 @@ gh pr merge --merge
 git switch main
 git pull --ff-only
 ```
+
+## Pin the actions by commit SHA
+
+The workflow names the actions it uses by their major version tag: `actions/checkout@v5` and `actions/setup-node@v5`. A tag can be moved to other code by whoever controls the action's repository, and the job runs that code with its token. A commit SHA cannot be moved. If your organisation requires pinned actions, look up the commit of the release you want and put it in place of the tag, with the tag as a comment:
+
+<!-- not run: needs GitHub -->
+
+```bash
+git ls-remote --tags https://github.com/actions/checkout 'v5*'
+git ls-remote --tags https://github.com/actions/setup-node 'v5*'
+```
+
+```yaml
+      - name: Check out the head with its full history
+        uses: actions/checkout@<commit sha> # v5
+```
+
+Take the SHA from the action's own repository, never from a copy or a fork. ResaLedger ships the tag because a released template has one hash for every repository, and a pin goes stale with each release of the action.
+
+A pinned workflow is no longer the released template, so the check lists the change as weakening `workflow`, and the pull request needs a decision that names it. `npx resaledger update` then shows the workflow as changed by hand and keeps it; compare it with the new template yourself when you update.
 
 ## Keep the `Task:` line in squash merges
 
