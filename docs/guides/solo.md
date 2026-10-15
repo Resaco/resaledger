@@ -36,7 +36,9 @@ The checks it tries are `package.json`'s `lint`, `typecheck`, `check-types` and 
 
 If `npx` stops with `EOVERRIDE` or another npm error about the project's own dependencies, it failed before ResaLedger started: `npx` reads the project's `package.json` first. Run it with an empty folder as its prefix, which npm reads instead, and it still works in the current folder:
 
-```text
+<!-- not run: the same init as above, for a project whose dependencies npm cannot resolve -->
+
+```bash
 npx --prefix "$(mktemp -d)" resaledger init
 ```
 
