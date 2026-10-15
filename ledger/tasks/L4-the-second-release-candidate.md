@@ -10,8 +10,8 @@
   - `npm publish --dry-run --tag next --access public`: `resaledger@1.0.0-rc.2`, 48 files, 284.5 kB.
   - `node scripts/scan-history.mjs`: clean, after [L4.1](L4.1-the-hygiene-scan-accepts-the-reserved.md).
   - [The review](../evidence/p/review.md): nothing blocking; four findings fixed in [P9.1](P9.1-the-push-check-and-what-runs-before-it.md) and [P5.1](P5.1-urls-and-paths-keep-their-and-gh-in-the.md).
-  - The tag `v1.0.0-rc.2` is local; the owner's commands to publish it are kept outside the repository.
+  - Published by the owner on 2026-10-16: the tag's workflow staged the version and the owner approved it. `npm view resaledger@1.0.0-rc.2 dist.shasum`: `98381e56a73a4d5bda52614c149e87a518e6e6d3`, the same as `npm pack` of the tag here; dist-tag `next` is 1.0.0-rc.2; GitHub release https://github.com/Resaco/resaledger/releases/tag/v1.0.0-rc.2.
 
 ## Notes
 
-The release workflow now stages the version with `npm stage publish`, so it reaches users only after the owner approves it with two-factor authentication ([P11](P11-staged-publishing-in-the-release-guide.md)). Whether provenance survives the approval is checked on the package page after the first staged release.
+The release workflow now stages the version with `npm stage publish`, so it reaches users only after the owner approves it with two-factor authentication ([P11](P11-staged-publishing-in-the-release-guide.md)). Provenance survives the approval: the SLSA attestation of 1.0.0-rc.2 names `.github/workflows/release.yml` at `refs/tags/v1.0.0-rc.2` and the tag's commit.
