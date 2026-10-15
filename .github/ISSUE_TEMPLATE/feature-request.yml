@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest a change or an addition to ResaLedger.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Some things are left out of 1.0 on purpose; section 17 of the specification lists them with the reasons. If your idea is there, say what real use shows the need.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What goes wrong today, in your own work. One concrete case is worth more than a general wish.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: The command, option or behaviour you want, and how you would use it.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried instead
+      description: Workarounds or other tools, and why they are not enough.
+  - type: dropdown
+    id: format
+    attributes:
+      label: Does it change the record format?
+      description: A change to the format of task, decision or log files needs a major release (see docs/releasing.md).
+      options:
+        - "No"
+        - "Yes, an optional addition"
+        - "Yes, a breaking change"
+        - "I don't know"
+    validations:
+      required: true

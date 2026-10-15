@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Resaco/resaledger/security/advisories/new
+    about: Report security problems privately, as SECURITY.md describes. Do not open a public issue for them.
+  - name: Security policy
+    url: https://github.com/Resaco/resaledger/blob/main/SECURITY.md
+    about: What counts as a vulnerability, and which versions are supported.

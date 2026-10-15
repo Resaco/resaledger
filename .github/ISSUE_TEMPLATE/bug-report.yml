@@ -1,0 +1,46 @@
+name: Bug report
+description: Something in ResaLedger does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. A security problem, such as a way past the hooks or the CI check, goes through private reporting instead: see SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `npx resaledger version`, or the version line at the top of the guard.
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Node version (`node --version`), git version (`git --version`) and the agent, if one was involved.
+      placeholder: macOS 15, Node 22.12.0, git 2.47.0, Claude Code
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Commands that reproduce it, best in a fresh repository made with `git init` and `npx resaledger init --yes`.
+      render: sh
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: The exact output. Remove anything private from it first.
+      render: text
+    validations:
+      required: true
