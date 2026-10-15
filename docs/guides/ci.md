@@ -41,7 +41,7 @@ Its permissions are read-only, apart from `pull-requests: write` for its one job
 
 ### What you see
 
-The check writes the same Markdown to the job summary and, on a pull request from the same repository, to one comment that it updates on each run. It lists each task the pull request moves, with its evidence, and the result of each check. A pull request from a fork gets no comment, because its token cannot write; the job summary still has everything. A failure to comment prints a warning and never changes the result.
+The check writes the same Markdown to the job summary and, on a pull request from the same repository, to one comment that it updates on each run. It lists each task the pull request moves, with its evidence, and the result of each check. Titles and evidence show as written: code spans stay, and no record can add an image, a link or bold text to the comment. A pull request from a fork gets no comment, because its token cannot write; the job summary still has everything. A failure to comment prints a warning and never changes the result.
 
 Make the check required, and protect the workflow with CODEOWNERS: [the team guide](team.md#make-resaledger-a-required-status-check) shows both.
 
