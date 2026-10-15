@@ -193,14 +193,52 @@ test('each attribution trailer that names a model, an assistant or a vendor is r
   for (const trailer of trailers) refused(r.commit('docs: notes', trailer), new RegExp(`the trailer "${trailer.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}" names an AI model`))
 })
 
-test('every listed name is refused as a word', () => {
+test('every listed name is refused as a word, and every qualified name in each of its forms', () => {
   const r = workspace({ config: { aiAttribution: 'forbid' } })
   r.write('notes.md', 'Notes.\n')
   r.git('add', '-A')
-  for (const name of AI_ATTRIBUTION.names) {
+  const forms = AI_ATTRIBUTION.qualified.flatMap(({ forms }) => forms.map((form) => form.replace('<version>', '3.5').replace('<digit>', '2')))
+  for (const name of [...AI_ATTRIBUTION.names, ...forms]) {
     const result = commitMsg(r, `docs: notes\n\nAssisted-by: ${name.toLowerCase()}\n`)
     refused(result, /names an AI model/)
   }
+})
+
+test('an assistant whose name is also a first name is refused by its qualifier, domain or bot address', () => {
+  const r = workspace({ config: { aiAttribution: 'forbid' } })
+  r.write('notes.md', 'Notes.\n')
+  r.git('add', '-A')
+  const bot = (login) => `${login}[bot]${AT}users.noreply.github.com`
+  const trailers = [
+    `Co-Authored-By: Claude <noreply${AT}anthropic.com>`,
+    'Co-authored-by: Claude Opus 4.5',
+    'Co-authored-by: Claude 3.5 Sonnet',
+    'Assisted-by: Kimi K2',
+    `Co-authored-by: Kimi <bot${AT}moonshot.ai>`,
+    `Co-authored-by: Devin AI <${bot('devin-ai-integration')}>`,
+    `Co-authored-by: Devin <devin${AT}cognition.ai>`,
+    `Co-authored-by: google-labs-jules[bot] <${bot('161369871+google-labs-jules')}>`,
+    `Co-authored-by: Helper <${bot('123+kimi-helper')}>`
+  ]
+  for (const trailer of trailers) refused(commitMsg(r, `docs: notes\n\n${trailer}\n`), /names an AI model/)
+})
+
+test('people whose first name is also an assistant pass', () => {
+  const r = workspace({ config: { aiAttribution: 'forbid' } })
+  r.write('notes.md', 'Notes.\n')
+  passed(
+    r.commit(
+      'docs: notes',
+      [
+        `Signed-off-by: Kimi Virtanen <kimi${AT}example.com>`,
+        `Co-authored-by: Claude Dupont <claude${AT}example.com>`,
+        `Reviewed-by: Jules Martin <jules${AT}example.com>`,
+        `Co-authored-by: Devin Aiken <devin${AT}example.com>`,
+        `Co-authored-by: Kimi Aino <123+kimiaino${AT}users.noreply.github.com>`,
+        `Co-authored-by: Claude Codet <claude.codet${AT}example.org>`
+      ].join('\n')
+    )
+  )
 })
 
 test('near misses pass: a name inside another word, a name outside a trailer, other domains', () => {
@@ -209,7 +247,7 @@ test('near misses pass: a name inside another word, a name outside a trailer, ot
   passed(
     r.commit(
       'docs: a cursory look at grokking',
-      'Written after a chat with Claude about bread.',
+      'Written after a chat with Claude Code about bread.',
       `Reviewed-by: Cursory Reader <reader${AT}example.com>\nSigned-off-by: Jane Baker <jane${AT}example.org>\nCo-authored-by: Max <max${AT}x.aibakery.example>`
     )
   )
