@@ -50,11 +50,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: The working files stay in the private brand files. The interim README shows the cover until D4 writes the real one.
 
 ### G3 Animated explanations of how it works
-- Status: doing
+- Status: blocked
 - Depends on: G2
 - Plan: [G-brand.md](../plan/G-brand.md#g3-animated-explanations-of-how-it-works)
-- Evidence: —
-- Notes: The lead built one 11-second loop from the storyboard, in a dark and a light file, with a private generator next to the brand files; the owner saw it on 15 October. Next: commit the files with their check, then the owner decides between this one loop and three, and views it on GitHub after the next push.
+- Evidence: [how-it-works.test.mjs](../../test/how-it-works.test.mjs) passes on [the two files](../../docs/assets/how-it-works/how-it-works-dark.svg): each is under 75 KB, runs no script, loads nothing from outside and has a still frame for reduced motion. The lead stepped through the loop frame by frame in Chromium; the storyboard's six beats are there.
+- Notes: Waits for the owner: whether this one 11-second loop stays, or becomes three loops, one per promise, as the plan says; and a look at it in the README on GitHub after the next push, in Chrome, Firefox and Safari. The generator stays with the private brand files, as G2's tools do.
 
 ## F: Foundation
 
