@@ -1,5 +1,9 @@
 // The commit range check, spec 5.9: every commit in a range that changes code names a task that is
 // doing or done in that commit's own tree and held by the lane. Pre-push, handoff and CI all use it.
+//
+// Commits are never parsed out of formatted output, which a message could forge: the list comes
+// from git rev-list, each commit from git cat-file --batch (length-prefixed), and its paths from
+// git diff-tree --raw -z, keyed by hash. Anything that does not parse is an error, never a pass.
 import { spawnSync } from 'node:child_process'
 import { parseTask, TASK_ID } from './tasks.mjs'
 import { repositoryRoot } from './util.mjs'
@@ -7,18 +11,33 @@ import { isCode } from './workspace.mjs'
 
 const RANGE_MAX_BUFFER = 1024 * 1024 * 1024
 const RANGE_TRAILER = /^Task:(.*)$/
-const RANGE_REVERT = /^This reverts commit [0-9a-f]{7,64}\.$/m
-const RANGE_RELEASE = /^Release v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
+const RANGE_REVERT = /^This reverts commit ([0-9a-f]{7,64})\.$/gm
+const RANGE_HASH = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
+const RANGE_COMMITTER = /^committer .*<([^<>]*)> -?\d+ [+-]\d{4}$/
 // GitHub's own committer address, written in two parts so the hygiene scan sees no address.
 const RANGE_GITHUB_COMMITTER = ['noreply', 'github.com'].join('@')
 const RANGE_MAINTENANCE = 'maintenance'
+const RANGE_SHOWN_PATHS = 3
+// Options that make a diff the same whatever the user's diff configuration is.
+const RANGE_DIFF = ['--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--binary', '--src-prefix=a/', '--dst-prefix=b/']
+
+/** Runs git in a folder: { status, stdout } with stdout a Buffer; throws only when git cannot start. */
+function rangeRun(root, args, input) {
+  const result = spawnSync('git', args, { cwd: root, input, maxBuffer: RANGE_MAX_BUFFER, stdio: ['pipe', 'pipe', 'pipe'] })
+  if (result.error) throw result.error
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr.toString('utf8').trim() }
+}
 
 /** Runs git in a folder and returns stdout as a Buffer; throws with git's message when it fails. */
 function rangeGit(root, args, input) {
-  const result = spawnSync('git', args, { cwd: root, input, maxBuffer: RANGE_MAX_BUFFER, stdio: ['pipe', 'pipe', 'pipe'] })
-  if (result.error) throw result.error
-  if (result.status !== 0) throw new Error(`git ${args[0]} failed: ${result.stderr.toString('utf8').trim()}`)
+  const result = rangeRun(root, args, input)
+  if (result.status !== 0) throw new Error(`git ${args[0]} failed: ${result.stderr}`)
   return result.stdout
+}
+
+/** The error for a commit that cannot be read: the check refuses rather than passes. */
+function rangeUnreadable(what) {
+  return new Error(`cannot read ${what} from git, so the commits are not checked`)
 }
 
 /**
@@ -33,12 +52,13 @@ function rangeObjects(root, specs) {
   let at = 0
   for (const spec of unique) {
     const end = output.indexOf(10, at)
-    if (end === -1) break
+    if (end === -1) throw rangeUnreadable(`the object ${spec}`)
     const header = output.toString('utf8', at, end)
     at = end + 1
     if (header.endsWith(' missing') || header.endsWith(' ambiguous')) continue
     const [, type, size] = header.split(' ')
     const length = Number(size)
+    if (!Number.isSafeInteger(length) || at + length >= output.length || output[at + length] !== 10) throw rangeUnreadable(`the object ${spec}`)
     objects.set(spec, { type, data: output.subarray(at, at + length) })
     at += length + 1
   }
@@ -62,40 +82,225 @@ function rangeTreeEntries(data, hashBytes) {
   return entries
 }
 
+/** A raw commit object, parsed and validated: { parents, committer, subject, message }. */
+function rangeParseCommit(hash, data) {
+  const split = data.indexOf('\n\n')
+  if (split === -1) throw rangeUnreadable(`the commit ${hash}`)
+  const lines = data.toString('utf8', 0, split).split('\n')
+  if (!/^tree [0-9a-f]+$/.test(lines[0])) throw rangeUnreadable(`the commit ${hash}`)
+  const parents = []
+  let committer = null
+  for (const line of lines.slice(1)) {
+    if (line.startsWith('parent ')) {
+      const parent = line.slice('parent '.length)
+      if (!RANGE_HASH.test(parent)) throw rangeUnreadable(`the commit ${hash}`)
+      parents.push(parent)
+    } else if (line.startsWith('committer ')) {
+      const match = RANGE_COMMITTER.exec(line)
+      if (!match || committer !== null) throw rangeUnreadable(`the commit ${hash}`)
+      committer = match[1]
+    }
+  }
+  if (committer === null) throw rangeUnreadable(`the commit ${hash}`)
+  const message = data.toString('utf8', split + 2)
+  return { parents, committer, subject: message.split('\n')[0].trim(), message }
+}
+
 /**
- * The commits of a range, oldest first, from one `git log`:
- * [{ hash, short, parents, committer, subject, message, paths }]. paths are the files the commit
- * touches against its first parent (every file for a root commit), renames as both sides.
- * Without `from` the range is every ancestor of `to`.
+ * The commits `git rev-list <args>` lists, in its order, each read with `git cat-file --batch`:
+ * [{ hash, short, parents, committer, subject, message }]. short is read from git when asked
+ * for. Throws when git fails or any commit does not parse.
  */
-function rangeCommits(root, from, to) {
-  const range = from ? `${from}..${to}` : to
-  const output = rangeGit(root, [
-    'log',
-    '--reverse',
-    '--topo-order',
-    '--no-renames',
-    '--root',
-    '--name-only',
-    '-z',
-    '--format=%x01%H%x00%h%x00%P%x00%ce%x00%B',
-    range,
-    '--'
-  ]).toString('utf8')
+export function readCommits(root, revListArgs) {
+  const hashes = rangeGit(root, ['rev-list', ...revListArgs, '--'])
+    .toString('utf8')
+    .split('\n')
+    .filter((line) => line !== '')
+  if (hashes.length === 0) return []
+  if (!hashes.every((hash) => RANGE_HASH.test(hash))) throw rangeUnreadable('the list of commits')
+  const output = rangeGit(root, ['cat-file', '--batch'], `${hashes.join('\n')}\n`)
   const commits = []
-  for (const chunk of output.split('\x01')) {
-    if (chunk === '') continue
-    const [hash, short, parents, committer, message = '', ...rest] = chunk.split('\0')
-    const paths = rest.map((path, index) => (index === 0 ? path.replace(/^\n/, '') : path)).filter((path) => path !== '')
+  let at = 0
+  for (const hash of hashes) {
+    const end = output.indexOf(10, at)
+    const header = end === -1 ? '' : output.toString('utf8', at, end)
+    const [oid, type, size] = header.split(' ')
+    const length = Number(size)
+    at = end + 1
+    if (oid !== hash || type !== 'commit' || !/^\d+$/.test(size ?? '') || at + length >= output.length || output[at + length] !== 10) {
+      throw rangeUnreadable(`the commit ${hash}`)
+    }
+    const commit = rangeParseCommit(hash, output.subarray(at, at + length))
+    at += length + 1
+    let short = null
     commits.push({
       hash,
-      short,
-      parents: parents.split(' ').filter((parent) => parent !== ''),
-      committer,
-      subject: message.split('\n')[0].trim(),
-      message,
-      paths
+      get short() {
+        if (short === null) short = rangeGit(root, ['rev-parse', '--short', hash]).toString('utf8').trim()
+        return short
+      },
+      ...commit
     })
+  }
+  if (at !== output.length) throw rangeUnreadable('the list of commits')
+  return commits
+}
+
+/**
+ * The paths each commit touches against its parent (every file for a root commit), deletions
+ * included, from one `git diff-tree --stdin --raw -z`: a Map from hash to paths. Merges are not
+ * given here; see mergeOwnPaths.
+ */
+function rangePaths(root, hashes) {
+  const paths = new Map()
+  if (hashes.length === 0) return paths
+  const tokens = rangeGit(root, ['diff-tree', '--stdin', '-r', '--root', '--no-renames', '--raw', '-z', '--always'], `${hashes.join('\n')}\n`)
+    .toString('utf8')
+    .split('\0')
+  if (tokens.pop() !== '') throw rangeUnreadable('the paths of the commits')
+  let current = null
+  let next = 0
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]
+    if (token.startsWith(':')) {
+      // A raw entry is always followed by exactly one path, as renames are off.
+      const path = tokens[index + 1]
+      if (current === null || path === undefined || path === '') throw rangeUnreadable('the paths of the commits')
+      current.push(path)
+      index += 1
+    } else {
+      if (token !== hashes[next]) throw rangeUnreadable('the paths of the commits')
+      current = []
+      paths.set(token, current)
+      next += 1
+    }
+  }
+  if (next !== hashes.length) throw rangeUnreadable('the paths of the commits')
+  return paths
+}
+
+/** The paths one commit touches against its first parent, or every file for a root commit. */
+export function commitPaths(root, hash) {
+  return rangePaths(root, [hash]).get(hash)
+}
+
+/** The full id of a revision's commit, or null when it does not resolve. */
+function rangeResolve(root, rev) {
+  const { status, stdout } = rangeRun(root, ['rev-parse', '--verify', '-q', `${rev}^{commit}`])
+  const hash = stdout.toString('utf8').trim()
+  return status === 0 && RANGE_HASH.test(hash) ? hash : null
+}
+
+/** The id of the empty tree in this repository's hash. */
+function rangeEmptyTree(root) {
+  return rangeGit(root, ['hash-object', '-t', 'tree', '--stdin'], '').toString('utf8').trim()
+}
+
+/** The paths that differ between two tree-ish revisions; `to` null is the index (GIT_INDEX_FILE). */
+function rangeChanged(root, from, to) {
+  const args =
+    to === null
+      ? ['diff-index', '--cached', '-r', '--no-renames', '--name-only', '-z', from, '--']
+      : ['diff-tree', '-r', '--no-renames', '--name-only', '-z', from, to, '--']
+  return rangeGit(root, args)
+    .toString('utf8')
+    .split('\0')
+    .filter((path) => path !== '')
+}
+
+/** The merge bases of two commits, or the empty tree when their histories are unrelated. */
+function rangeMergeBases(root, a, b) {
+  const { status, stdout, stderr } = rangeRun(root, ['merge-base', '--all', a, b])
+  if (status !== 0 && status !== 1) throw new Error(`git merge-base failed: ${stderr}`)
+  const bases = stdout
+    .toString('utf8')
+    .split('\n')
+    .filter((line) => line !== '')
+  if (!bases.every((base) => RANGE_HASH.test(base))) throw rangeUnreadable(`the merge base of ${a} and ${b}`)
+  return bases.length > 0 ? bases : [rangeEmptyTree(root)]
+}
+
+/**
+ * The code paths a merge changes of its own, spec 5.9: for each parent, the code paths in
+ * diff(parent, merge) that no other parent's side changed, a side being diff(merge base, that
+ * parent). A clean merge, or one that only resolves conflicts, has none; any other code path
+ * (an "evil merge") makes it a code commit that needs its own Task: line. merge is a commit,
+ * or null for the index while a merge is being concluded.
+ */
+export function mergeOwnPaths(root, config, parents, merge) {
+  const own = new Set()
+  for (const [index, parent] of parents.entries()) {
+    const sides = new Set()
+    for (const [other, otherParent] of parents.entries()) {
+      if (other === index) continue
+      for (const base of rangeMergeBases(root, parent, otherParent)) {
+        for (const path of rangeChanged(root, base, otherParent)) sides.add(path)
+      }
+    }
+    for (const path of rangeChanged(root, parent, merge)) {
+      if (isCode(path, config) && !sides.has(path)) own.add(path)
+    }
+  }
+  return [...own].sort()
+}
+
+/** The patch id of a diff, or '' for an empty one. --verbatim keeps whitespace; older git falls back to --stable. */
+function rangePatchId(root, diff) {
+  if (diff.length === 0) return ''
+  let result = rangeRun(root, ['patch-id', '--verbatim'], diff)
+  if (result.status !== 0) result = rangeRun(root, ['patch-id', '--stable'], diff)
+  if (result.status !== 0) throw new Error(`git patch-id failed: ${result.stderr}`)
+  return result.stdout.toString('utf8').split(' ')[0].trim()
+}
+
+/** The diff from one revision to another; `to` null is the index. */
+function rangeDiff(root, from, to) {
+  return rangeGit(root, ['diff', ...RANGE_DIFF, ...(to === null ? ['--cached', from] : [from, to]), '--'])
+}
+
+/**
+ * Whether a commit is a real revert, spec 5.9: its message names, in git revert's "This reverts
+ * commit <hash>." line, a commit that resolves to an ancestor of `parent`, and its own change
+ * (from `parent` to `commit`, or to the index when commit is null) has the patch id of that
+ * commit's change inverted. The message alone exempts nothing.
+ */
+export function isRevert(root, message, parent, commit) {
+  if (parent === null) return false
+  for (const [, named] of String(message).matchAll(RANGE_REVERT)) {
+    const reverted = rangeResolve(root, named)
+    if (reverted === null) continue
+    if (rangeRun(root, ['merge-base', '--is-ancestor', reverted, parent]).status !== 0) continue
+    const before = rangeResolve(root, `${reverted}^`) ?? rangeEmptyTree(root)
+    const own = rangePatchId(root, rangeDiff(root, parent, commit))
+    if (own !== '' && own === rangePatchId(root, rangeDiff(root, reverted, before))) return true
+  }
+  return false
+}
+
+/**
+ * The commits of a range, oldest first: [{ hash, short, parents, committer, subject, message,
+ * paths, exemption }]. paths are the files a commit touches against its parent (every file for a
+ * root commit); for a merge, only the code paths it changes of its own (mergeOwnPaths).
+ * exemption is 'merge' for a merge with none, 'revert' for a real revert (isRevert), or null.
+ * Without `from` the range is every ancestor of `to`.
+ */
+function rangeCommits(root, config, from, to) {
+  const commits = readCommits(root, ['--reverse', '--topo-order', from ? `${from}..${to}` : to])
+  const paths = rangePaths(
+    root,
+    commits.filter((commit) => commit.parents.length < 2).map((commit) => commit.hash)
+  )
+  for (const commit of commits) {
+    commit.exemption = null
+    if (commit.parents.length > 1) {
+      commit.paths = mergeOwnPaths(root, config, commit.parents, commit.hash)
+      if (commit.paths.length === 0) commit.exemption = 'merge'
+      continue
+    }
+    commit.paths = paths.get(commit.hash)
+    if (commit.paths.some((path) => isCode(path, config)) && isRevert(root, commit.message, commit.parents[0] ?? null, commit.hash)) {
+      commit.exemption = 'revert'
+    }
   }
   return commits
 }
@@ -123,15 +328,15 @@ export function taskTrailers(message) {
 }
 
 /**
- * Why a commit is exempt from the trailer rules, or null: 'merge' (more than one parent),
- * 'revert' (made by git revert), 'release' (a "Release vX.Y.Z" subject), or 'github' (a commit
- * GitHub made when merging a pull request, only with context.skipGitHubMerges).
- * commit is { parents, committer, subject, message }.
+ * Why a commit is exempt from the trailer rules, or null: commit.exemption, which the caller
+ * found in git ('merge' for a merge that changes no code of its own, 'revert' for a real
+ * revert), or 'github' (a commit GitHub made when merging a pull request, only with
+ * context.skipGitHubMerges). The message alone never exempts a commit, and a release commit
+ * that changes code needs a Task: line like any other.
+ * commit is { committer, exemption }.
  */
 export function commitExemption(commit, context) {
-  if (commit.parents.length > 1) return 'merge'
-  if (RANGE_REVERT.test(commit.message)) return 'revert'
-  if (RANGE_RELEASE.test(commit.subject)) return 'release'
+  if (commit.exemption) return commit.exemption
   if (context.skipGitHubMerges && commit.committer.toLowerCase() === RANGE_GITHUB_COMMITTER) return 'github'
   return null
 }
@@ -148,7 +353,8 @@ export function taskFileFor(names, id) {
  * The trailer problems of one commit, spec 5.9, as { file: commit.short, line: 0, message }.
  * checkRange calls it for each commit of a range, and commit-msg for the commit being made.
  *
- * commit is { short, parents, committer, subject, message, paths }. context is { config, lane,
+ * commit is { short, parents, committer, subject, message, paths, exemption }: for a merge,
+ * paths are the code paths it changes of its own (mergeOwnPaths). context is { config, lane,
  * skipGitHubMerges, task, startLane }: task(id) is the parsed task in the commit's own tree,
  * or null when it has no file there; startLane(id) is the task's Lane where the range starts
  * (null when the task is not there, has no Lane, or there is no start). A task whose Lane is
@@ -163,6 +369,14 @@ export function checkCommit(commit, context) {
   const problems = []
   const problem = (message) => problems.push({ file: commit.short, line: 0, message: `"${commit.subject}" ${message}` })
   const { ids, maintenance } = taskTrailers(commit.message)
+  if (ids.length === 0 && !maintenance && commit.parents.length > 1) {
+    const shown = commit.paths.filter((path) => isCode(path, config))
+    const more = shown.length > RANGE_SHOWN_PATHS ? ` and ${shown.length - RANGE_SHOWN_PATHS} more` : ''
+    problem(
+      `is a merge that changes code neither side changed (${shown.slice(0, RANGE_SHOWN_PATHS).join(', ')}${more}), but names no task. Add a trailer line "Task: <id>" to the message body for the task that change belongs to, or make the change in its own commit`
+    )
+    return problems
+  }
   if (ids.length === 0 && !maintenance) {
     problem(
       'changes code but names no task. Add a trailer line "Task: <id>" to the message body for the task it belongs to, or "Task: maintenance" for a change with no behaviour change'
@@ -220,8 +434,8 @@ export function checkCommit(commit, context) {
  * GitHub made when merging a pull request are skipped (the CI push check); and the repository,
  * by default the one of the current folder.
  *
- * Each commit is judged by checkCommit, with its own tree and the tasks at `from`: merge
- * commits, commits made by git revert and release commits are skipped. A commit that
+ * Each commit is judged by checkCommit, with its own tree and the tasks at `from`: a merge
+ * that changes no code of its own and a real revert are skipped (rangeCommits). A commit that
  * changes code needs a Task: trailer; each id it names must be doing or done in that commit's
  * own tree, with a Lane there that is the lane or was set inside the range (not held by another
  * lane already at `from`). "maintenance" is allowed.
@@ -230,7 +444,7 @@ export function checkRange(from, to, context) {
   const { config } = context
   const root = context.root ?? repositoryRoot()
   const tasksFolder = `${config.dir}/tasks`
-  const commits = rangeCommits(root, from, to).filter(
+  const commits = rangeCommits(root, config, from, to).filter(
     (commit) => commitExemption(commit, context) === null && commit.paths.some((path) => isCode(path, config))
   )
   if (commits.length === 0) return []

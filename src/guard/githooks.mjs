@@ -7,7 +7,7 @@ import { runGates } from './gates.mjs'
 import { branchTaskFiles, idCollisions } from './ids.mjs'
 import { currentLane, localLanes } from './lanes.mjs'
 import { ownershipProblems, taskRecordsById } from './ownership.mjs'
-import { checkCommit, checkRange, commitExemption, taskFileFor } from './range.mjs'
+import { checkCommit, checkRange, commitExemption, commitPaths, isRevert, mergeOwnPaths, readCommits, taskFileFor } from './range.mjs'
 import { parseTask } from './tasks.mjs'
 import { fail, git, repositoryRoot } from './util.mjs'
 import { checkWorkspace, isCode, loadWorkspace, treeReader } from './workspace.mjs'
@@ -353,12 +353,57 @@ function githooksTaskIn(reader, dir, id) {
   return name === null ? null : parseTask(`${folder}${name}`, reader.read(`${folder}${name}`) ?? '')
 }
 
+/** The commits a merge being concluded brings in, from MERGE_HEAD (one per line), or [] when none is. */
+function githooksMergeHeads(root) {
+  let text
+  try {
+    const path = git('rev-parse', '--git-path', 'MERGE_HEAD')
+    text = readFileSync(isAbsolute(path) ? path : join(root, path), 'utf8')
+  } catch {
+    return []
+  }
+  const heads = text.split('\n').filter((line) => line.trim() !== '')
+  const resolved = heads.map((line) => githooksCommit(line.trim()))
+  if (resolved.includes(null)) fail('cannot read MERGE_HEAD, so this merge is not checked')
+  return resolved
+}
+
+/**
+ * What commit-msg judges, spec 5.9: { parents, paths, exemption }. While a merge is concluded,
+ * paths are the code paths the merge changes of its own, and none exempts it. Otherwise paths
+ * are the staged ones against HEAD; when nothing is staged and HEAD is not a merge (as in
+ * `commit --amend` with only a new message), HEAD's own paths against its parent are judged too,
+ * so dropping the trailer from a code commit is refused. A real revert is exempt.
+ */
+function githooksJudged(root, config, head, message) {
+  const mergeHeads = head === null ? [] : githooksMergeHeads(root)
+  if (mergeHeads.length > 0) {
+    const parents = [head, ...mergeHeads]
+    const paths = mergeOwnPaths(root, config, parents, null)
+    return { parents, paths, exemption: paths.length === 0 ? 'merge' : null }
+  }
+  let paths = githooksStagedPaths()
+  let parent = head
+  let target = null
+  if (head !== null && paths.length === 0) {
+    const [current] = readCommits(root, ['--no-walk', head])
+    if (current === undefined || current.hash !== head) fail('cannot read HEAD, so this commit is not checked')
+    if (current.parents.length < 2) {
+      paths = commitPaths(root, head)
+      parent = current.parents[0] ?? null
+      target = head
+    }
+  }
+  const revert = paths.some((path) => isCode(path, config)) && isRevert(root, message, parent, target)
+  return { parents: [], paths, exemption: revert ? 'revert' : null }
+}
+
 /**
  * The commit-msg hook, given the message file. The message is cleaned as git will store it,
- * then judged: attribution trailers when aiAttribution is "forbid" (on every commit), and,
- * unless the commit is a merge, a revert or a release, the Conventional Commits header when
- * commitStyle is "conventional" and the task trailers against the staged tree (the index in
- * GIT_INDEX_FILE), with the rules checkRange applies to one commit and HEAD as the start.
+ * then judged: attribution trailers when aiAttribution is "forbid" (on every commit), the
+ * Conventional Commits header when commitStyle is "conventional" (not on a merge or a real
+ * revert), and the task trailers against the staged tree (the index in GIT_INDEX_FILE), with
+ * the rules checkRange applies to one commit and HEAD as the start (see githooksJudged).
  */
 export function commitMsg(file) {
   let root
@@ -379,36 +424,32 @@ export function commitMsg(file) {
   if (!config) githooksRefuse(configProblems)
 
   const head = githooksCommit('HEAD')
-  const mergeHead = githooksCommit('MERGE_HEAD')
+  let judged
+  try {
+    judged = githooksJudged(root, config, head, message)
+  } catch (error) {
+    fail(`${error.message}; the commit is refused`)
+  }
   const subject = message.split('\n')[0]
-  const commit = {
-    short: '',
-    parents: mergeHead === null ? [] : [head, mergeHead],
-    committer: '',
-    subject,
-    message,
-    paths: githooksStagedPaths()
-  }
+  const commit = { short: '', committer: '', subject, message, ...judged }
   const problems = config.aiAttribution === 'forbid' ? githooksAttributionProblems(message) : []
-  if (commitExemption(commit, { skipGitHubMerges: false }) === null) {
-    if (config.commitStyle === 'conventional' && !GITHOOKS_CONVENTIONAL.test(subject)) {
-      problems.unshift({
-        file: '',
-        line: 0,
-        message: `the header "${subject}" does not follow Conventional Commits, and commitStyle is "conventional" in .resaledger.json. Write "type(scope): description", for example "feat(server): store documents"`
-      })
-    }
-    const headReader = head === null ? null : treeReader({ kind: 'commit', rev: head, root })
-    problems.push(
-      ...checkCommit(commit, {
-        config,
-        lane: currentLane(),
-        skipGitHubMerges: false,
-        task: (id) => githooksTaskIn(reader, config.dir, id),
-        startLane: (id) => (headReader === null ? null : (githooksTaskIn(headReader, config.dir, id)?.lane ?? null))
-      })
-    )
+  if (commit.parents.length < 2 && commitExemption(commit, { skipGitHubMerges: false }) === null && config.commitStyle === 'conventional' && !GITHOOKS_CONVENTIONAL.test(subject)) {
+    problems.unshift({
+      file: '',
+      line: 0,
+      message: `the header "${subject}" does not follow Conventional Commits, and commitStyle is "conventional" in .resaledger.json. Write "type(scope): description", for example "feat(server): store documents"`
+    })
   }
+  const headReader = head === null ? null : treeReader({ kind: 'commit', rev: head, root })
+  problems.push(
+    ...checkCommit(commit, {
+      config,
+      lane: currentLane(),
+      skipGitHubMerges: false,
+      task: (id) => githooksTaskIn(reader, config.dir, id),
+      startLane: (id) => (headReader === null ? null : (githooksTaskIn(headReader, config.dir, id)?.lane ?? null))
+    })
+  )
   if (problems.length > 0) githooksRefuse(problems)
 }
 

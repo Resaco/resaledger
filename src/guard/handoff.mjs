@@ -7,7 +7,7 @@ import { loadConfig } from './config.mjs'
 import { stampPath, verifiedStamp } from './gates.mjs'
 import { hooksActive } from './githooks.mjs'
 import { currentLane } from './lanes.mjs'
-import { checkRange, taskTrailers } from './range.mjs'
+import { checkRange, readCommits, taskTrailers } from './range.mjs'
 import { readmeMarkerProblems } from './records.mjs'
 import { fail, repositoryRoot } from './util.mjs'
 import { checkWorkspace, fingerprint, isCode, loadWorkspace, treeReader } from './workspace.mjs'
@@ -95,17 +95,14 @@ function handoffChosenStart(root, config, lane, currentStamp) {
   return { kind: 'recent', from: handoffCommit(root, `HEAD~${HANDOFF_FALLBACK_COMMITS}`) }
 }
 
-/** The commits of a log range, newest first, as [{ hash, short, ids }] with the ids of their Task: trailers. */
+/**
+ * The commits of a rev-list range, newest first, as [{ hash, short, ids }] with the ids of their
+ * Task: trailers. Read with readCommits, never from formatted output; throws when a commit
+ * cannot be read, so handoff refuses rather than passes.
+ */
 function handoffNamingCommits(root, rangeArgs) {
-  const { ok, out } = handoffGit(root, ['log', '--format=%x01%H%x00%h%x00%B', ...rangeArgs, '--'])
-  if (!ok) return []
-  return out
-    .split('\x01')
-    .filter((chunk) => chunk !== '')
-    .map((chunk) => {
-      const [hash, short, message = ''] = chunk.split('\0')
-      return { hash, short, ids: taskTrailers(message).ids }
-    })
+  // Object.assign keeps short as the lazy getter readCommits gives it.
+  return readCommits(root, rangeArgs).map((commit) => Object.assign(commit, { ids: taskTrailers(commit.message).ids }))
 }
 
 /**
