@@ -8,7 +8,7 @@ Building. The foundation (F), the record format (R), pre-commit (H1), the end-of
 
 ## Active work
 
-[H2](work/ledger.md#h2-commit-msg-and-pre-push) and [C1](work/ledger.md#c1-the-ci-check), with workers.
+[H2](work/ledger.md#h2-commit-msg-and-pre-push), [C1](work/ledger.md#c1-the-ci-check) and [I1](work/ledger.md#i1-init), with workers.
 
 ## Last verified
 
@@ -16,7 +16,7 @@ Building. The foundation (F), the record format (R), pre-commit (H1), the end-of
 
 ## Next step
 
-Start I1 with a worker, sharing the managed-block and guard-building code that `migrate` has. Review H2 and C1 when their workers report. Start G3 when a slot frees, then W2 and W3.
+Review H2, C1 and I1 when their workers report. Start G3 when a slot frees, then W2 and W3.
 
 ## Waiting for the owner
 

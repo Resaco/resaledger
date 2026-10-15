@@ -241,11 +241,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 ## I: The installer
 
 ### I1 `init`
-- Status: todo
+- Status: doing
 - Depends on: R1, R4, H3
 - Plan: [I-installer.md](../plan/I-installer.md#i1-init)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `i1-init` in its own worktree, sharing the managed-block, guard-building and hook-activation code with `migrate`. The `--agents`, `--no-run` and `--no-ci` flags come with A1, I2 and C3, which add their steps to `init`. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### I2 Detecting the gates
 - Status: todo
