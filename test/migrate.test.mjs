@@ -472,7 +472,7 @@ Screenshots go into [progress/](${DIR}/progress/).
   })
 
   test('CLAUDE.md as a separate file loses the pointer and imports AGENTS.md', () => {
-    assert.equal(read('CLAUDE.md'), '# Notes for Claude\n\nUse the test command.\n\n@AGENTS.md\n')
+    assert.equal(read('CLAUDE.md'), ['# Notes for Claude', '', 'Use the test command.', '', '@AGENTS.md', ''].join('\n'))
   })
 
   test('.claude/settings.json names the agent in its hook commands and keeps everything else', () => {
