@@ -589,6 +589,43 @@ describe('CLAUDE.md as a link to AGENTS.md', () => {
   })
 })
 
+describe('agent hooks after the migration', () => {
+  const WHY = 'Without agent hooks, agent.deny and the refusal of --no-verify before the command runs are not in use; git hooks and CI still hold.'
+  const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+  test('renewed hooks for every detected agent print no advice', () => {
+    const r = legacyRepository()
+    const result = migrate(r, '--dry-run')
+    assert.equal(result.status, 0, result.out)
+    assert.doesNotMatch(result.out, /Without agent hooks/)
+    assert.doesNotMatch(result.out, /update --agents/)
+  })
+
+  test('CLAUDE.md without a hook configuration ends the report with the command for claude', () => {
+    const r = legacyRepository({ files: { '.claude/settings.json': null } })
+    const result = migrate(r)
+    assert.equal(result.status, 0, result.out)
+    assert.match(result.out, new RegExp(`\\n${escape(WHY)} Add them with:\\n {2}npx resaledger update --agents claude\\n$`))
+    // The same advice in a dry run.
+    assert.equal(r.git('restore', '--', ':/').status, 0)
+    assert.equal(r.git('clean', '-fdq', '--', ':/').status, 0)
+    const dry = migrate(r, '--dry-run')
+    assert.match(dry.out, new RegExp(`${escape(WHY)} Add them with:\\n {2}npx resaledger update --agents claude\\n`))
+  })
+
+  test('an agent detected next to the renewed ones is named alone', () => {
+    const r = legacyRepository({ files: { '.cursor/rules/style.md': 'Short lines.\n', 'GEMINI.md': '# Gemini\n' } })
+    const result = migrate(r, '--dry-run')
+    assert.match(result.out, new RegExp(`${escape(WHY)} Add them with:\\n {2}npx resaledger update --agents cursor,gemini\\n`))
+  })
+
+  test('with no agent detected and none configured, the command names claude as an example', () => {
+    const r = legacyRepository({ claude: 'none', files: { '.claude/settings.json': null } })
+    const result = migrate(r, '--dry-run')
+    assert.match(result.out, new RegExp(`${escape(WHY)} Add them with, for example:\\n {2}npx resaledger update --agents claude\\n`))
+  })
+})
+
 describe('other shapes of a 0.x repository', () => {
   test('a pointer block changed by hand is removed and kept in the log entry, and no CLAUDE.md is created', () => {
     const pointer = POINTER.replace('Before you stop,', 'Read the plan too. Before you stop,')

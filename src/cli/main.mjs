@@ -12,7 +12,7 @@ import { recordCounts } from '../guard/util.mjs'
 import { detectCommitStyle, detectGates } from './detect.mjs'
 import { agentTrustLines, applyInit, commitCommand, initOptions, parseAgentsValue, parseInitArgs, planInit, presetFromAnswer } from './init.mjs'
 import { LEGACY_CONFIG_FILE } from './legacy.mjs'
-import { applyMigration, COMMIT_COMMAND, planMigration, UNDO_COMMAND } from './migrate.mjs'
+import { agentHooksAdvice, applyMigration, COMMIT_COMMAND, planMigration, UNDO_COMMAND } from './migrate.mjs'
 import { currentBranch, ensureGuard, GITATTRIBUTES_FILE, hooksNote, setupCommitSteps, turnOnHooks } from './setup.mjs'
 import { applyUpdate, planUpdate, UPDATE_COMMIT_MESSAGE } from './update.mjs'
 
@@ -137,6 +137,7 @@ export function migrateCommand(args) {
     process.exit(1)
   }
   if (options.dryRun) {
+    if (report.agentHooks) console.log(`\n${agentHooksAdvice(report.agentHooks)}`)
     console.log('\n--dry-run: nothing was written.')
     return
   }
@@ -186,6 +187,7 @@ ${steps.map((step, index) => `  ${index + 1}. ${step}`).join('\n')}
 Then run "node ${dir}/scripts/records.mjs verify" to write the first stamp.
 To undo everything instead:
   ${UNDO_COMMAND}${undoHooks}`)
+  if (report.agentHooks) console.log(`\n${agentHooksAdvice(report.agentHooks)}`)
   if (failed) process.exit(1)
 }
 

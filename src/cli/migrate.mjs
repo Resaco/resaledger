@@ -5,6 +5,7 @@
 import { spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, posix } from 'node:path'
+import { AGENT_NAMES, agentConfigFile, detectAgents, isLedgerHookCommand } from '../guard/agents.mjs'
 import { CONFIG_FILE, isSafeFolderPath, parseConfig, SAFE_FOLDER_RULE } from '../guard/config.mjs'
 import { readCommits, taskTrailers } from '../guard/range.mjs'
 import { slugify, taskFileName } from '../guard/tasks.mjs'
@@ -537,7 +538,7 @@ export function planMigration(root, options = {}) {
     renames: [],
     executable: new Set(),
     logEntry: null,
-    report: { created: [], changed: [], deleted: [], renamed: [], warnings: [], links: [], waiting: [], laneGiven: [], laneFromBranch: [], lane: null, unmappedKeys: [], attributes: [], counts: {} },
+    report: { created: [], changed: [], deleted: [], renamed: [], warnings: [], links: [], waiting: [], laneGiven: [], laneFromBranch: [], lane: null, unmappedKeys: [], attributes: [], agentHooks: null, counts: {} },
     problems: [],
     refusals: []
   }
@@ -977,6 +978,15 @@ ${logLines.join('\n\n')}
   plan.report.renamed = plan.renames.map(({ from, to }) => `${from} → ${to}`)
   plan.report.counts = { tasks: legacy.ledger.tasks.length, logEntries: legacy.log.entries.length, decisions: decisions.rows.length }
   plan.report.warnings.push(...unmergedBranchWarnings(unmerged, dir))
+  // The agents whose hook configuration holds ResaLedger's hooks afterwards, against those init would set up.
+  const configured = AGENT_NAMES.filter((agent) => {
+    const path = agentConfigFile(agent)
+    const text = final.get(path) ?? (existsSync(join(root, path)) ? readFileSync(join(root, path), 'utf8') : '')
+    return isLedgerHookCommand(text)
+  })
+  const missing = detectAgents(root).filter((agent) => !configured.includes(agent))
+  if (missing.length > 0) plan.report.agentHooks = { agents: missing, example: false }
+  else if (configured.length === 0) plan.report.agentHooks = { agents: ['claude'], example: true }
 
   // 6. Every write and deletion must stay inside what git tracks, so that the commit holds it
   // and the undo command brings back what was there.
@@ -1229,6 +1239,14 @@ function unmergedBranchWarnings(branches, dir) {
       `Merge or close it before migrating, or rebase it onto this branch afterwards and make again, in the 1.0 files, any change it made in ${dir}/`
     )
   })
+}
+
+/** The advice for a plan's report.agentHooks: why the agent hooks matter and the command that adds them. */
+export function agentHooksAdvice({ agents, example }) {
+  return (
+    'Without agent hooks, agent.deny and the refusal of --no-verify before the command runs are not in use; git hooks and CI still hold. ' +
+    `Add them with${example ? ', for example' : ''}:\n  npx resaledger update --agents ${agents.join(',')}`
+  )
 }
 
 /** Writes a plan: the files, their modes, the renames and the deletions. */

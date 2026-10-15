@@ -167,6 +167,8 @@ A2  Add a price list
 Next: the rye bread price.
 ```
 
+`migrate` renews the Claude Code hook entries that 0.x wrote, and no others. When an agent that `init` would detect, from its folder or instruction file, has no hook configuration afterwards, or when no agent has one, the report ends with the command that adds them, such as `npx resaledger update --agents claude`. Without agent hooks, `agent.deny` and the refusal of `--no-verify` before the command runs are not in use; the git hooks and CI still hold.
+
 The README now has `## Manual checks` with a `TODO(resaledger)` marker when `standards.md` listed none. Write the project's own text there; `handoff` asks for it. The 1.0 protocol is in the root `AGENTS.md`, and [the solo guide](solo.md) walks through it.
 
 ## What can go wrong
