@@ -277,11 +277,13 @@ A task cannot become `doing` while the plan file it links to says `proposal`. Th
 `verify` runs every gate, commit gates first, on the committed code. When all pass, it writes `verified/<first 16 hex digits of the fingerprint>.json`:
 
 ```json
-{ "version": 1, "fingerprint": "3f2a9c1e5b7d4a60…", "gates": ["npm run lint", "npm test", "npm run build"] }
+{ "version": 1, "fingerprint": "3f2a9c1e5b7d4a60…", "gates": "9b1d…" }
 ```
 
 - The **fingerprint** is a SHA-1 over the `git ls-files -s` entries (mode, blob id and path) of every tracked code file ([5.10](#510-what-counts-as-code)). It changes when code, the configuration, the guard or a hook changes, and not when a record changes.
+- `gates` is a SHA-256 over the fingerprint and the gate commands, so `verify` can tell whether the same gates passed. `records.mjs gates` lists the commands themselves.
 - The content is **deterministic**. Two lanes that verify the same code write identical files, which git merges without a conflict. Who verified and when is in git's history of the file.
+- Almost every byte depends on the fingerprint. Git's rename detection pairs a deleted file with an added one when more than half of their content is the same. If two stamps shared their gate list, two lanes that each replace the same old stamp would look to git like two renames of one file, and their merge would conflict.
 - `verify` is **idempotent**. If a stamp for the current fingerprint exists, it says so and runs nothing; `--force` reruns. In 0.3, refreshing the stamp reran the whole suite even when only the time changed.
 - `verify` **prunes**: it deletes every other stamp, because none of them describes this code. Stamps are only ever added and deleted, and git never conflicts on adding a uniquely named file or deleting one. A branch carries a stamp or two; the base branch carries at most one per lane merged since the last prune.
 - `handoff` requires a stamp for the current fingerprint whenever verify gates exist.
