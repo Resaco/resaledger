@@ -2,6 +2,7 @@
 // in this clone, and turning them on.
 import { readFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
+import { adoptionStart } from './adoption.mjs'
 import { CONFIG_FILE, DEFAULTS, loadConfig } from './config.mjs'
 import { runGates } from './gates.mjs'
 import { branchTaskFiles, idCollisions } from './ids.mjs'
@@ -425,8 +426,11 @@ function githooksTaskIn(reader, dir, id) {
   return name === null ? null : parseTask(`${folder}${name}`, reader.read(`${folder}${name}`) ?? '')
 }
 
-/** The commits a merge being concluded brings in, from MERGE_HEAD (one per line), or [] when none is. */
-function githooksMergeHeads(root) {
+/**
+ * The commits a merge being concluded brings in, from MERGE_HEAD (one per line), or [] when none
+ * is. Unlike githooksMergeHeads, a MERGE_HEAD that cannot be read stops commit-msg.
+ */
+function githooksConcludedMergeHeads(root) {
   let text
   try {
     const path = git('rev-parse', '--git-path', 'MERGE_HEAD')
@@ -448,7 +452,7 @@ function githooksMergeHeads(root) {
  * so dropping the trailer from a code commit is refused. A real revert is exempt.
  */
 function githooksJudged(root, config, head, message) {
-  const mergeHeads = head === null ? [] : githooksMergeHeads(root)
+  const mergeHeads = head === null ? [] : githooksConcludedMergeHeads(root)
   if (mergeHeads.length > 0) {
     const parents = [head, ...mergeHeads]
     const paths = mergeOwnPaths(root, config, parents, null)
@@ -554,8 +558,8 @@ function githooksPushLines(input, env) {
 /**
  * Where the commits a push adds start: the remote commit when git has it; otherwise the merge
  * base with the remote's base branch; otherwise, for a branch other than the base, the merge
- * base with the local base branch; otherwise the commit that added .resaledger.json, so an
- * adopting project is not judged on its history. null means every ancestor.
+ * base with the local base branch. null means every ancestor; prePush moves any start older
+ * than the commit that added .resaledger.json up to that commit (adoptionStart), as handoff does.
  */
 function githooksPushStart(localOid, remoteOid, remote, branch, config) {
   if (!GITHOOKS_ZERO_OID.test(remoteOid) && githooksCommit(remoteOid) !== null) return remoteOid
@@ -569,11 +573,7 @@ function githooksPushStart(localOid, remoteOid, remote, branch, config) {
     const start = localBase === null ? null : githooksMergeBase(localOid, localBase)
     if (start !== null) return start
   }
-  try {
-    return git('log', '--diff-filter=A', '--format=%H', localOid, '--', CONFIG_FILE).split('\n')[0] || null
-  } catch {
-    return null
-  }
+  return null
 }
 
 /**
@@ -622,7 +622,7 @@ export function prePush(input, args = []) {
     }
     if (deletion) continue
     const lane = localRef.startsWith('refs/heads/') ? localRef.slice('refs/heads/'.length) : branch
-    const from = githooksPushStart(localOid, remoteOid, remote, branch, config)
+    const from = adoptionStart(root, githooksPushStart(localOid, remoteOid, remote, branch, config), localOid)
     for (const { file, line, message } of checkRange(from, localOid, { config, lane, skipGitHubMerges: false, root })) {
       refuse(`${file}${line ? `:${line}` : ''}: ${message}`)
     }
