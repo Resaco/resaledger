@@ -20,6 +20,29 @@ Every task, decision and log entry is a Markdown file in the repository. Git hoo
 
 Three lanes work at once. Each commit carries the task it belongs to. A commit with no task stops at the gate. The lanes run together into `main` without crossing, and a stamp lands on the exact code that passed its checks.
 
+## Who it is for
+
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/use-cases-light.svg">
+  <img alt="Three ways to use ResaLedger: one person with three agents in worktrees; a team with pull requests and CI; an operations repository where content, ad data and decisions are records too." src="docs/assets/readme/use-cases-dark.svg">
+</picture>
+
+- **One person, three agents.** Each agent works in its own worktree and branch. None can commit without a task, and none edits another's.
+- **A team with pull requests.** Claims are pushed, so everyone sees them at once. CI judges every pull request by the rules of main.
+- **An operations repository.** Content, ad data and decisions are records too. Data passes its own checks before it lands.
+
+## Where a bad commit stops
+
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/layers-light.svg">
+  <img alt="Four layers: AGENTS.md teaches the protocol; agent hooks stop --no-verify, forced pushes and edits on a protected branch; git hooks refuse a commit with no task; CI judges each pull request by the rules of main." src="docs/assets/readme/layers-dark.svg">
+</picture>
+
+1. **`AGENTS.md`** teaches every agent the protocol when its session starts.
+2. **Agent hooks** stop `--no-verify`, forced pushes and edits on a protected branch before the command runs.
+3. **Git hooks** refuse a commit with no task, invalid records, or a change to another lane's task.
+4. **CI** judges each pull request by the rules of main, so whatever got past a hook stops there.
+
 ## License
 
 [MIT](LICENSE) © Resaco Oy

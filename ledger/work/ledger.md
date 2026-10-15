@@ -57,11 +57,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: The owner chose one loop over three and saw it play in the README on GitHub on 15 October. Not checked: Firefox and Safari. The generator stays with the private brand files, as G2's tools do.
 
 ### G4 More README graphics: use cases, and where a bad commit stops
-- Status: todo
+- Status: done
 - Depends on: G2
 - Plan: [G-brand.md](../plan/G-brand.md#g4-more-readme-graphics)
-- Evidence: —
-- Notes: The owner asked for more graphics on 15 October, after a look at what popular repositories' READMEs share.
+- Evidence: [how-it-works.test.mjs](../../test/how-it-works.test.mjs) checks [the four files](../../docs/assets/readme/use-cases-dark.svg): each is under 220 KB, has a title, runs no script and loads nothing from outside. The owner approved both images on 15 October, and the README shows them with the same information as text.
+- Notes: The generator stays with the private brand files, next to G3's.
 
 ## F: Foundation
 

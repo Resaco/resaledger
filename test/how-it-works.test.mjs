@@ -28,3 +28,17 @@ test('each loop is a small, self-contained animated SVG with a still frame for r
     assert.match(text, /@media \(prefers-reduced-motion:reduce\)\{\*\{animation:none!important\}/, `${name} has no still frame`)
   }
 })
+
+test('the README graphics are small, self-contained SVG files with a title', () => {
+  const folder = join(PACKAGE, 'docs', 'assets', 'readme')
+  for (const name of ['use-cases-dark.svg', 'use-cases-light.svg', 'layers-dark.svg', 'layers-light.svg']) {
+    const path = join(folder, name)
+    const text = readFileSync(path, 'utf8')
+    assert.ok(statSync(path).size < LIMIT, `${name} is ${statSync(path).size} bytes`)
+    assert.match(text, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" /, name)
+    assert.match(text, /<title>[^<]+<\/title>/, `${name} has no title`)
+    assert.doesNotMatch(text, /<script|\son[a-z]+=|javascript:/i, `${name} runs a script`)
+    for (const [, url] of text.matchAll(/\s(?:href|src)="([^"]*)"/g)) assert.match(url, /^data:image\/png;base64,/, `${name} loads ${url.slice(0, 40)}`)
+    assert.doesNotMatch(text, /@import|url\((?!#)/, `${name} loads a stylesheet or a file`)
+  }
+})
