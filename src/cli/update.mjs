@@ -1,12 +1,12 @@
 // `resaledger update`: renews the files ResaLedger manages (spec section 15): the guard, the
 // git hooks or the guard's calls in a hook manager, the managed block in the root AGENTS.md,
-// and ResaLedger's entries in the hook configurations of the agents in use. A file is replaced only when its content is a released version of it, or this
+// and ResaLedger's entries in the agents' hook configurations that hold them. A file is replaced only when its content is a released version of it, or this
 // package's own; a file changed by hand is shown and kept unless --force is given. The
 // README, the records, the configuration and the project's own text in AGENTS.md are never
 // touched. planUpdate() only reads; applyUpdate() writes.
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { detectAgents } from '../guard/agents.mjs'
+import { AGENT_NAMES, agentConfigured } from '../guard/agents.mjs'
 import { CONFIG_FILE, parseConfig } from '../guard/config.mjs'
 import { compareVersions, contentHash, normalizeManaged } from '../guard/managed.mjs'
 import { callMarker, detectHookManager, guardCall, HOOK_NAMES, integrateHookManager, renderHook } from './hooks.mjs'
@@ -130,8 +130,8 @@ function readOrNull(root, path) {
 const NEWER = `run "npx resaledger@latest update" instead`
 
 /**
- * Plans the update without writing anything. options is { force, released } (released
- * defaults to releasedHashes()). Returns { refusals, dir, manager, files, writes (path →
+ * Plans the update without writing anything. options is { force, released, agents } (released
+ * defaults to releasedHashes(); agents names agents whose configurations are added). Returns { refusals, dir, manager, files, writes (path →
  * text), executable, integrate, instructions }. files holds { path, state, from?, note?,
  * diff? } with state 'replaced', 'restored', 'kept', 'manual' or 'unchanged'. Nothing may be
  * written when refusals is not empty.
@@ -287,7 +287,10 @@ export function planUpdate(root, options = {}) {
   }
 
   // 4. ResaLedger's entries in the agents' hook configurations; the other entries are the project's.
-  const agentPlan = planAgentConfigs(root, detectAgents(root), dir, plan.writes)
+  // Only configurations that hold ResaLedger's entries are renewed: one a project deleted stays
+  // deleted, and "update --agents <names>" adds one.
+  const agents = AGENT_NAMES.filter((agent) => agentConfigured(root, agent) || (options.agents ?? []).includes(agent))
+  const agentPlan = planAgentConfigs(root, agents, dir, plan.writes)
   for (const file of agentPlan.files) {
     const state = file.created ? 'restored' : file.changed ? 'replaced' : 'unchanged'
     plan.files.push({ path: file.path, state, note: "ResaLedger's hook entries" })

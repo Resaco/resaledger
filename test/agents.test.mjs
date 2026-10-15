@@ -3,9 +3,15 @@
 // - Claude Code: the hooks reference (code.claude.com/docs/en/hooks), the common input fields
 //   and the SessionStart, PreToolUse (Bash, Edit, Write) and Stop sections;
 // - Codex: the hooks page (developers.openai.com/codex/hooks) and the Stop request in
-//   codex-rs/core/src/hook_runtime.rs; Bash and apply_patch both send tool_input.command.
-// Both block with exit code 2 and the reason on stderr; a Stop hook's exit 2 makes the agent
-// continue with that reason.
+//   codex-rs/core/src/hook_runtime.rs; Bash and apply_patch both send tool_input.command;
+// - Cursor: the hooks page (cursor.com/docs/agent/hooks), the common fields and the
+//   sessionStart, beforeShellExecution, preToolUse and stop sections;
+// - Gemini CLI: docs/hooks and packages/core/src/hooks, SessionStart, BeforeTool and AfterAgent;
+// - GitHub Copilot: the hooks reference, its camelCase sessionStart, preToolUse (toolArgs is a
+//   JSON text) and agentStop input.
+// All of them block a tool with exit code 2 and the reason on stderr (Copilot with any non-zero
+// exit). A Stop or AfterAgent hook's exit 2 makes Claude Code, Codex and Gemini CLI continue
+// with that reason; Cursor continues on followup_message and Copilot on decision "block".
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
@@ -60,6 +66,7 @@ function fixture(name, folder, changes = {}) {
   const input = JSON.parse(text)
   for (const [key, value] of Object.entries(changes)) {
     if (key === 'tool_input') input.tool_input = { ...input.tool_input, ...value }
+    else if (key === 'toolArgs') input.toolArgs = JSON.stringify({ ...JSON.parse(input.toolArgs), ...value })
     else input[key] = value
   }
   return JSON.stringify(input)
@@ -68,6 +75,12 @@ function fixture(name, folder, changes = {}) {
 /** Runs the repository's guard as an agent's hook would, from cwd (default the root), with input on stdin. */
 function hook(r, agent, event, input, cwd = r.root) {
   return run(cwd, process.execPath, [join(r.root, 'ledger', 'scripts', 'records.mjs'), 'hook', agent, event], input)
+}
+
+/** Like hook, with stdout and stderr apart: { status, stdout, stderr }. */
+function hookIO(r, agent, event, input, cwd = r.root) {
+  const result = spawnSync(process.execPath, [join(r.root, 'ledger', 'scripts', 'records.mjs'), 'hook', agent, event], { cwd, env: ENV, input, encoding: 'utf8' })
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr, out: `${result.stdout}${result.stderr}` }
 }
 
 /** A Bash call from Claude Code with this command. */
@@ -509,6 +522,106 @@ describe('the agents\' configurations', () => {
   })
 })
 
+// The configuration files' shapes, as each agent documents them.
+const CONFIG_FILES = { cursor: '.cursor/hooks.json', gemini: '.gemini/settings.json', copilot: '.github/hooks/resaledger.json' }
+const CURSOR_EVENTS = ['sessionStart', 'sessionEnd', 'preToolUse', 'postToolUse', 'postToolUseFailure', 'subagentStart', 'subagentStop', 'beforeShellExecution', 'afterShellExecution', 'beforeMCPExecution', 'afterMCPExecution', 'beforeReadFile', 'afterFileEdit', 'beforeSubmitPrompt', 'preCompact', 'stop', 'afterAgentResponse', 'afterAgentThought']
+const GEMINI_EVENTS = ['SessionStart', 'SessionEnd', 'BeforeAgent', 'AfterAgent', 'BeforeModel', 'AfterModel', 'BeforeToolSelection', 'BeforeTool', 'AfterTool', 'PreCompress', 'Notification']
+const COPILOT_EVENTS = ['sessionStart', 'sessionEnd', 'userPromptSubmitted', 'userPromptTransformed', 'preToolUse', 'postToolUse', 'postToolUseFailure', 'permissionRequest', 'agentStop', 'subagentStart', 'subagentStop', 'errorOccurred', 'preCompact', 'notification']
+
+/** Checks an agent's configuration text against its documented shape, and returns it parsed. */
+function validConfiguration(agent, text) {
+  const config = JSON.parse(text)
+  const own = (handler) => isLedgerHookCommand(handler.command ?? handler.bash)
+  if (agent === 'cursor') {
+    assert.equal(config.version, 1)
+    for (const [event, handlers] of Object.entries(config.hooks)) {
+      assert.ok(CURSOR_EVENTS.includes(event), event)
+      for (const handler of handlers) {
+        assert.equal(typeof handler.command, 'string')
+        for (const key of Object.keys(handler)) assert.ok(['command', 'matcher', 'failClosed', 'loop_limit', 'timeout'].includes(key), key)
+      }
+    }
+    const ours = Object.fromEntries(Object.entries(config.hooks).map(([event, handlers]) => [event, handlers.filter(own)]).filter(([, handlers]) => handlers.length > 0))
+    assert.deepEqual(Object.keys(ours).sort(), ['beforeShellExecution', 'preToolUse', 'sessionStart', 'stop'])
+    assert.equal(ours.beforeShellExecution[0].failClosed, true)
+    assert.equal(ours.preToolUse[0].failClosed, true)
+    assert.equal(ours.stop[0].loop_limit, 1)
+    for (const [event, handlers] of Object.entries(ours)) assert.match(handlers[0].command, new RegExp(`^node ledger/scripts/records\\.mjs hook cursor ${event === 'sessionStart' ? 'session-start' : event === 'stop' ? 'stop' : 'pre-tool'}$`))
+  } else if (agent === 'gemini') {
+    for (const [event, groups] of Object.entries(config.hooks)) {
+      assert.ok(GEMINI_EVENTS.includes(event), event)
+      for (const group of groups) {
+        if (group.matcher !== undefined) new RegExp(group.matcher)
+        for (const handler of group.hooks) {
+          assert.equal(handler.type, 'command')
+          assert.equal(typeof handler.command, 'string')
+          if (handler.timeout !== undefined) assert.ok(Number.isInteger(handler.timeout) && handler.timeout >= 1000, 'a timeout in milliseconds')
+        }
+      }
+    }
+    const before = config.hooks.BeforeTool.find((group) => group.hooks.some(own))
+    for (const tool of ['run_shell_command', 'write_file', 'replace']) assert.ok(new RegExp(`^(?:${before.matcher})$`).test(tool), tool)
+    assert.equal(new RegExp(`^(?:${before.matcher})$`).test('read_file'), false)
+    for (const event of ['SessionStart', 'BeforeTool', 'AfterAgent']) assert.ok(config.hooks[event].some((group) => group.hooks.some(own)), event)
+  } else {
+    assert.equal(config.version, 1)
+    for (const [event, handlers] of Object.entries(config.hooks)) {
+      assert.ok(COPILOT_EVENTS.includes(event), event)
+      for (const handler of handlers) {
+        assert.equal(handler.type, 'command')
+        assert.equal(typeof handler.bash, 'string', 'the cloud agent runs only "bash"')
+        assert.ok(Number.isInteger(handler.timeoutSec) && handler.timeoutSec > 0, 'a timeout in seconds')
+      }
+    }
+    assert.deepEqual(Object.keys(config.hooks), ['sessionStart', 'preToolUse', 'agentStop'])
+  }
+  return config
+}
+
+describe('the configurations of Cursor, Gemini CLI and Copilot', () => {
+  for (const agent of ['cursor', 'gemini', 'copilot']) {
+    test(`${agent}: a new file has the documented shape, merges idempotently, and the snippet matches`, () => {
+      const merged = mergeAgentConfig(agent, null, 'ledger')
+      validConfiguration(agent, merged.text)
+      assert.equal(mergeAgentConfig(agent, merged.text, 'ledger').changed, false)
+      assert.deepEqual(JSON.parse(agentConfigSnippet(agent, 'ledger')), JSON.parse(merged.text))
+      // An older entry of ours is replaced in its place, not added twice.
+      const old = JSON.parse(merged.text)
+      const [first] = Object.keys(old.hooks)
+      if (agent === 'gemini') old.hooks[first][0].hooks[0].timeout = 5000
+      else old.hooks[first][0][agent === 'copilot' ? 'timeoutSec' : 'failClosed'] = 1
+      assert.equal(mergeAgentConfig(agent, JSON.stringify(old), 'ledger').text, merged.text)
+    })
+  }
+
+  test('the command lines never name a version, and run the bundled guard through a shell', () => {
+    const r = workspace({ preset: 'team' })
+    const sub = join(r.root, 'src')
+    const shell = (command, cwd, input) => {
+      const result = spawnSync('sh', ['-c', command], { cwd, env: { ...ENV, GEMINI_PROJECT_DIR: r.root }, input, encoding: 'utf8' })
+      return { status: result.status, out: `${result.stdout}${result.stderr}` }
+    }
+    const runs = {
+      // Cursor runs project hooks from the project's root; Copilot's CLI may run them in a subfolder.
+      cursor: { cwd: r.root, start: 'sessionStart', tool: ['beforeShellExecution', 'cursor/before-shell', { command: 'git push --force' }], stop: 'stop' },
+      gemini: { cwd: sub, start: 'SessionStart', tool: ['BeforeTool', 'gemini/before-tool-shell', { tool_input: { command: 'git push --force' } }], stop: 'AfterAgent' },
+      copilot: { cwd: sub, start: 'sessionStart', tool: ['preToolUse', 'copilot/pre-tool-bash', { toolArgs: { command: 'git push --force' } }], stop: 'agentStop' }
+    }
+    for (const [agent, { cwd, start, tool, stop }] of Object.entries(runs)) {
+      const entries = agentHookEntries(agent, 'ledger')
+      const command = (name) => {
+        const entry = entries[name]
+        const text = entry.hooks ? entry.hooks[0].command : (entry.command ?? entry.bash)
+        assert.doesNotMatch(text, /\d+\.\d+/)
+        return text
+      }
+      allowed(shell(command(start), cwd, fixture(NEW_AGENTS[agent].start, r.root)))
+      refused(shell(command(tool[0]), cwd, fixture(tool[1], r.root, tool[2])), /forced push/)
+      allowed(shell(command(stop), cwd, fixture(NEW_AGENTS[agent].stop, r.root)))
+    }
+  })
+})
+
 describe('init and update write the agents\' configurations', () => {
   /** A repository with one commit holding the given files. */
   function project(files = {}) {
@@ -574,14 +687,335 @@ describe('init and update write the agents\' configurations', () => {
     settings.hooks.Stop[0].hooks[0].timeout = 1
     settings.hooks.Stop.push({ hooks: [{ type: 'command', command: './notify.sh' }] })
     r.write('.claude/settings.json', `${JSON.stringify(settings, null, 2)}\n`)
-    mkdirSync(join(r.root, '.codex'))
     const result = r.node(CLI, 'update')
     assert.equal(result.status, 0, result.out)
     assert.match(result.out, /\.claude\/settings\.json: ResaLedger's hook entries/)
     const after = JSON.parse(r.read('.claude/settings.json'))
     assert.deepEqual(after.hooks.Stop, [agentHookEntries('claude', 'ledger').Stop, { hooks: [{ type: 'command', command: './notify.sh' }] }])
-    assert.ok(existsSync(join(r.root, '.codex', 'hooks.json')))
     const again = r.node(CLI, 'update')
     assert.match(again.out, /Unchanged[\s\S]*\.claude\/settings\.json/)
+  })
+
+  test('update adds no configuration for an agent found later, nor one deleted on purpose; update --agents adds it', () => {
+    const r = project({ 'CLAUDE.md': '# Notes\n', '.cursor/rules/shop.mdc': 'Bake bread.\n' })
+    assert.equal(r.node(CLI, 'init', '--yes').status, 0)
+    r.commit('chore: set up', 'Task: maintenance')
+    r.git('rm', '-q', '.cursor/hooks.json')
+    r.commit('chore: no Cursor hooks', 'Task: maintenance')
+    mkdirSync(join(r.root, '.codex'))
+    const result = r.node(CLI, 'update')
+    assert.equal(result.status, 0, result.out)
+    assert.equal(existsSync(join(r.root, '.cursor', 'hooks.json')), false)
+    assert.equal(existsSync(join(r.root, '.codex', 'hooks.json')), false)
+    assert.doesNotMatch(result.out, /\.cursor\/hooks\.json|\.codex\/hooks\.json/)
+    const added = r.node(CLI, 'update', '--agents', 'codex,cursor')
+    assert.equal(added.status, 0, added.out)
+    assert.match(added.out, /Restored[\s\S]*\.codex\/hooks\.json[\s\S]*\.cursor\/hooks\.json/)
+    assert.deepEqual(JSON.parse(r.read('.cursor/hooks.json')).hooks.stop, [agentHookEntries('cursor', 'ledger').stop])
+    assert.match(r.node(CLI, 'update', '--agents', 'emacs').out, /unknown agent "emacs"/)
+  })
+
+  test('init finds Cursor, Gemini CLI and Copilot, and writes configurations of the documented shape', () => {
+    const r = project({ '.cursorrules': 'Bake bread.\n', 'GEMINI.md': '# Shop\n', '.github/copilot-instructions.md': '# Shop\n' })
+    const result = r.node(CLI, 'init', '--yes')
+    assert.equal(result.status, 0, result.out)
+    assert.match(result.out, /Agent hooks for: cursor, gemini, copilot/)
+    for (const agent of ['cursor', 'gemini', 'copilot']) validConfiguration(agent, r.read(CONFIG_FILES[agent]))
+    const command = result.out.match(/^\s+(git add .*)$/m)[1]
+    assert.equal(r.run('sh', ['-c', command]).status, 0)
+    assert.equal(r.git('status', '--porcelain').out, '')
+    // Found by their folders as well.
+    const folders = project({ '.cursor/rules/shop.mdc': 'x\n', '.gemini/styleguide.md': 'x\n', '.github/instructions/shop.instructions.md': 'x\n' })
+    assert.match(folders.node(CLI, 'init', '--yes').out, /Agent hooks for: cursor, gemini, copilot/)
+    // A plain .github folder is not Copilot.
+    const plain = project({ '.github/workflows/ci.yml': 'on: push\n' })
+    assert.equal(plain.node(CLI, 'init', '--yes').status, 0)
+    assert.equal(existsSync(join(plain.root, '.github', 'hooks')), false)
+  })
+
+  test('init merges into an existing .gemini/settings.json and .cursor/hooks.json, keeping the foreign keys', () => {
+    const gemini = { context: { fileName: ['GEMINI.md'] }, model: { name: 'pro' }, hooks: { BeforeTool: [{ matcher: 'write_file', hooks: [{ name: 'lint', type: 'command', command: './lint.sh' }] }] } }
+    const cursor = { version: 1, hooks: { afterFileEdit: [{ command: './format.sh' }], stop: [{ command: './notify.sh' }] }, extra: true }
+    const r = project({ '.gemini/settings.json': JSON.stringify(gemini, null, 2), '.cursor/hooks.json': JSON.stringify(cursor, null, 2) })
+    const result = r.node(CLI, 'init', '--yes')
+    assert.equal(result.status, 0, result.out)
+    const geminiAfter = validConfiguration('gemini', r.read('.gemini/settings.json'))
+    assert.deepEqual(geminiAfter.context, gemini.context)
+    assert.deepEqual(geminiAfter.model, gemini.model)
+    assert.deepEqual(geminiAfter.hooks.BeforeTool, [gemini.hooks.BeforeTool[0], agentHookEntries('gemini', 'ledger').BeforeTool])
+    const cursorAfter = validConfiguration('cursor', r.read('.cursor/hooks.json'))
+    assert.equal(cursorAfter.extra, true)
+    assert.deepEqual(cursorAfter.hooks.afterFileEdit, cursor.hooks.afterFileEdit)
+    assert.deepEqual(cursorAfter.hooks.stop, [{ command: './notify.sh' }, agentHookEntries('cursor', 'ledger').stop])
+  })
+})
+
+// Cursor, Gemini CLI and GitHub Copilot: each one's recorded input for each event.
+const NEW_AGENTS = {
+  cursor: {
+    start: 'cursor/session-start',
+    shells: [['cursor/before-shell', (command) => ({ command })], ['cursor/pre-tool-shell', (command) => ({ tool_input: { command } })]],
+    edits: ['cursor/pre-tool-write'],
+    stop: 'cursor/stop',
+    session: (id) => ({ conversation_id: id, session_id: id }),
+    context: (output) => output.additional_context,
+    denied: (output) => output.permission === 'deny' && /ResaLedger/.test(output.agent_message)
+  },
+  gemini: {
+    start: 'gemini/session-start',
+    shells: [['gemini/before-tool-shell', (command) => ({ tool_input: { command } })]],
+    edits: ['gemini/before-tool-write', 'gemini/before-tool-replace'],
+    stop: 'gemini/after-agent',
+    session: (id) => ({ session_id: id }),
+    context: (output) => output.hookSpecificOutput.additionalContext,
+    denied: (output) => output.decision === 'deny' && /ResaLedger/.test(output.reason)
+  },
+  copilot: {
+    start: 'copilot/session-start',
+    shells: [['copilot/pre-tool-bash', (command) => ({ toolArgs: { command } })]],
+    edits: ['copilot/pre-tool-edit', 'copilot/pre-tool-create'],
+    stop: 'copilot/agent-stop',
+    session: (id) => ({ sessionId: id }),
+    context: (output) => output.additionalContext,
+    denied: (output) => output.permissionDecision === 'deny' && /ResaLedger/.test(output.permissionDecisionReason)
+  }
+}
+
+describe('Cursor, Gemini CLI and Copilot: recorded input for every event', () => {
+  for (const [agent, events] of Object.entries(NEW_AGENTS)) {
+    test(`${agent}: session start turns the git hooks on and gives work as JSON context`, () => {
+      const r = workspace()
+      const result = hookIO(r, agent, 'session-start', fixture(events.start, r.root))
+      assert.equal(result.status, 0, result.out)
+      assert.equal(r.git('config', 'core.hooksPath').out.trim(), '.githooks')
+      const context = events.context(JSON.parse(result.stdout))
+      assert.match(context, /git hooks turned on/)
+      assert.match(context, /Bakery shop|Build a small web shop/)
+    })
+
+    test(`${agent}: a harmless shell command is allowed with nothing on stdout, and a forced push refused`, () => {
+      const r = workspace({ preset: 'team' })
+      for (const [name, command] of events.shells) {
+        const harmless = hookIO(r, agent, 'pre-tool', fixture(name, r.root))
+        assert.equal(harmless.status, 0, harmless.out)
+        assert.equal(harmless.stdout, '')
+        const forced = hookIO(r, agent, 'pre-tool', fixture(name, r.root, command('git push --force origin S1-lane')))
+        refused(forced, /forced push/)
+        assert.match(forced.stderr, /✖ ResaLedger: a forced push/)
+        assert.ok(events.denied(JSON.parse(forced.stdout)), forced.stdout)
+        refused(hookIO(r, agent, 'pre-tool', fixture(name, r.root, command('echo x > src/app.js'))), /files are not edited on it \(src\/app\.js\)/)
+      }
+    })
+
+    test(`${agent}: file edits on a lane are allowed, and refused on a protected branch`, () => {
+      const r = workspace({ preset: 'team' })
+      for (const name of events.edits) refused(hook(r, agent, 'pre-tool', fixture(name, r.root)), /"main" is a protected branch, so files are not edited on it \(src\//)
+      r.git('switch', '-q', '-c', 'S1-lane')
+      for (const name of events.edits) allowed(hook(r, agent, 'pre-tool', fixture(name, r.root)))
+    })
+
+    test(`${agent}: the end of a turn that changed nothing passes`, () => {
+      const r = workspace()
+      allowed(hook(r, agent, 'session-start', fixture(events.start, r.root)))
+      const result = hookIO(r, agent, 'stop', fixture(events.stop, r.root))
+      assert.equal(result.status, 0, result.out)
+      assert.equal(result.stdout, '')
+    })
+  }
+
+  test('cursor: in a cloud agent, without sessionStart, the first shell call turns the git hooks on', () => {
+    const r = workspace()
+    assert.notEqual(r.git('config', 'core.hooksPath').out.trim(), '.githooks')
+    // A tool call that is not a shell call leaves them as they are.
+    allowed(hook(r, 'cursor', 'pre-tool', fixture('cursor/pre-tool-write', r.root, { conversation_id: 'cloud' })))
+    allowed(hook(r, 'cursor', 'pre-tool', fixture('cursor/before-shell', r.root, { conversation_id: 'cloud-2' })))
+    assert.equal(r.git('config', 'core.hooksPath').out.trim(), '.githooks')
+    // Turned off later in the same session, they stay off: only the session's first shell call turns them on.
+    r.git('config', '--unset', 'core.hooksPath')
+    allowed(hook(r, 'cursor', 'pre-tool', fixture('cursor/before-shell', r.root, { conversation_id: 'cloud-2' })))
+    assert.equal(r.git('config', 'core.hooksPath').out.trim(), '')
+  })
+
+  test('cursor: the folder of a beforeShellExecution call comes from its cwd, or else the workspace root', () => {
+    const r = workspace({ preset: 'team' })
+    refused(hook(r, 'cursor', 'pre-tool', fixture('cursor/before-shell', r.root, { cwd: join(r.root, 'src'), command: 'echo x > app.js' }), temporary()), /src\/app\.js/)
+    refused(hook(r, 'cursor', 'pre-tool', fixture('cursor/before-shell', r.root, { cwd: '', command: 'echo x > src/app.js' }), temporary()), /src\/app\.js/)
+  })
+
+  test('gemini: a shell command runs in its dir_path', () => {
+    const r = workspace({ preset: 'team' })
+    refused(hook(r, 'gemini', 'pre-tool', fixture('gemini/before-tool-shell', r.root, { tool_input: { command: 'echo x > app.js', dir_path: 'src' } })), /src\/app\.js/)
+  })
+
+  test('copilot: a shell call in Claude Code\'s shape, as the CLI sends for .claude/settings.json, is read too', () => {
+    const r = workspace({ preset: 'team' })
+    refused(hook(r, 'copilot', 'pre-tool', fixture('claude-pre-tool-bash', r.root, { tool_input: { command: 'git push --force' } })), /forced push/)
+    refused(hook(r, 'copilot', 'pre-tool', JSON.stringify({ sessionId: 'x', cwd: r.root, toolName: 'bash', toolArgs: { command: 'git push --force' } })), /forced push/)
+  })
+})
+
+describe('Cursor, Gemini CLI and Copilot: input the adapter does not recognise is allowed', () => {
+  const r = workspace({ preset: 'team' })
+  const file = join(r.root, 'src', 'app.js')
+  const inputs = {
+    cursor: ['{}', JSON.stringify({ cwd: r.root, tool_name: 'Read', tool_input: { file_path: file } }), JSON.stringify({ cwd: r.root, tool_name: 'Write', tool_input: 'not json' }), JSON.stringify({ cwd: r.root, tool_name: 'Shell', tool_input: { command: 7 } })],
+    gemini: ['{}', JSON.stringify({ cwd: r.root, tool_name: 'read_file', tool_input: { file_path: file } }), JSON.stringify({ cwd: r.root, tool_name: 'run_shell_command', tool_input: {} }), JSON.stringify({ cwd: r.root, tool_name: 'mcp_shop_order', tool_input: { command: 'git push --force' } })],
+    copilot: ['{}', JSON.stringify({ cwd: r.root, toolName: 'view', toolArgs: JSON.stringify({ path: file }) }), JSON.stringify({ cwd: r.root, toolName: 'bash', toolArgs: 'not json' }), JSON.stringify({ cwd: r.root, toolName: 'edit', toolArgs: '{}' })]
+  }
+  for (const [agent, list] of Object.entries(inputs)) {
+    for (const input of list) {
+      test(`${agent}: ${input.slice(0, 70)}`, () => {
+        const result = hookIO(r, agent, 'pre-tool', input)
+        assert.equal(result.status, 0, result.out)
+        assert.equal(result.stdout, '')
+      })
+    }
+  }
+})
+
+describe('Cursor, Gemini CLI and Copilot: the end-of-turn reminder', () => {
+  test('gemini: AfterAgent runs after every turn, and the reminder still fires once per session', () => {
+    const r = workspace()
+    const session = NEW_AGENTS.gemini.session('turns')
+    allowed(hook(r, 'gemini', 'session-start', fixture('gemini/session-start', r.root, session)))
+    allowed(hook(r, 'gemini', 'stop', fixture('gemini/after-agent', r.root, session)))
+    r.write('src/app.js', 'console.log("changed")\n')
+    refused(hook(r, 'gemini', 'stop', fixture('gemini/after-agent', r.root, session)), /does not pass yet/)
+    allowed(hook(r, 'gemini', 'stop', fixture('gemini/after-agent', r.root, { ...session, stop_hook_active: true })))
+    r.write('src/app.js', 'console.log("changed again")\n')
+    for (let turn = 0; turn < 3; turn++) allowed(hook(r, 'gemini', 'stop', fixture('gemini/after-agent', r.root, session)))
+  })
+
+  test('cursor: the reminder is a followup_message, once', () => {
+    const r = workspace()
+    const session = NEW_AGENTS.cursor.session('follow')
+    allowed(hook(r, 'cursor', 'session-start', fixture('cursor/session-start', r.root, session)))
+    r.write('src/app.js', 'console.log("changed")\n')
+    const first = hookIO(r, 'cursor', 'stop', fixture('cursor/stop', r.root, session))
+    assert.equal(first.status, 0, first.out)
+    assert.match(JSON.parse(first.stdout).followup_message, /ResaLedger: this session changed the repository[\s\S]*tell the user exactly what is left/)
+    const second = hookIO(r, 'cursor', 'stop', fixture('cursor/stop', r.root, { ...session, loop_count: 1 }))
+    assert.equal(second.status, 0, second.out)
+    assert.equal(second.stdout, '')
+  })
+
+  for (const order of [['copilot', 'claude'], ['claude', 'copilot']]) {
+    test(`copilot with Claude: the CLI calls both configurations, and the reminder fires once (${order.join(' first, then ')})`, () => {
+      const r = workspace()
+      const id = `both-${order[0]}`
+      const inputs = {
+        copilot: (name) => fixture(name === 'start' ? 'copilot/session-start' : 'copilot/agent-stop', r.root, { sessionId: id }),
+        claude: (name) => fixture(name === 'start' ? 'claude-session-start' : 'claude-stop', r.root, { session_id: id })
+      }
+      for (const agent of order) allowed(hook(r, agent, 'session-start', inputs[agent]('start')))
+      r.write('src/app.js', 'console.log("changed")\n')
+      const [first, second] = order.map((agent) => ({ agent, result: hookIO(r, agent, 'stop', inputs[agent]('stop')) }))
+      if (first.agent === 'copilot') {
+        assert.equal(first.result.status, 0, first.result.out)
+        const output = JSON.parse(first.result.stdout)
+        assert.equal(output.decision, 'block')
+        assert.match(output.reason, /does not pass yet/)
+      } else refused(first.result, /does not pass yet/)
+      assert.equal(second.result.status, 0, second.result.out)
+      assert.equal(second.result.stdout, '')
+    })
+  }
+})
+
+describe('commands that throw work away', () => {
+  const r = workspace({ preset: 'team' })
+  r.write('src/app.js', 'console.log("unsaved work")\n')
+  const discards = [
+    'git reset --hard',
+    'git reset --hard HEAD~1',
+    'git clean -fd',
+    'git clean -xdf',
+    'git clean --force src',
+    'git checkout -- src/app.js',
+    'git checkout HEAD -- src',
+    'git checkout .',
+    'git checkout src/app.js',
+    'git checkout HEAD src/app.js',
+    'git checkout -f',
+    'git restore src/app.js',
+    'git restore --source HEAD~1 .',
+    'git restore --staged --worktree src/app.js',
+    'git restore -SW .',
+    'git switch -f S1-lane',
+    'git switch --discard-changes S1-lane',
+    'npm test && git reset --hard',
+    'bash -c "git clean -fdx"',
+    'sudo git reset --hard'
+  ]
+  for (const command of discards) test(`refused on a protected branch: ${JSON.stringify(command)}`, () => refused(bash(r, command), /in the checkout of the protected branch "main"/))
+
+  const kept = [
+    'git reset --soft HEAD~1',
+    'git reset HEAD src/app.js',
+    'git restore --staged src/app.js',
+    'git clean -n',
+    'git clean -fn',
+    'git clean --dry-run -f',
+    'git checkout -b S2-lane',
+    'git switch -c S2-lane',
+    'git status && git diff'
+  ]
+  for (const command of kept) test(`allowed, as it keeps the work: ${JSON.stringify(command)}`, () => allowed(bash(r, command)))
+
+  const quoted = [
+    'echo "git reset --hard"',
+    "printf '%s\\n' 'git clean -fdx' 'git checkout .'",
+    'git log --grep="git restore src" --oneline',
+    'bash -c \'echo "git switch -f main"\'',
+    'cat <<EOF\ngit reset --hard HEAD~1\nEOF'
+  ]
+  for (const command of quoted) test(`text inside quotes is not a command: ${JSON.stringify(command)}`, () => allowed(bash(r, command)))
+
+  test('on the session\'s own lane, in its own worktree, they are allowed', () => {
+    const lane = workspace({ preset: 'team' })
+    lane.git('switch', '-q', '-c', 'S1-lane')
+    for (const command of discards.filter((text) => !text.includes('switch'))) allowed(bash(lane, command))
+    allowed(bash(lane, 'git switch -f main'))
+  })
+
+  test('a checkout of a protected branch earlier in the same script counts, as in the incident', () => {
+    const lane = workspace({ preset: 'team' })
+    lane.git('switch', '-q', '-c', 'S1-lane')
+    refused(bash(lane, 'git status; git checkout main; git reset --hard HEAD~1'), /protected branch "main"/)
+    refused(bash(lane, 'git switch main && git clean -fd'), /protected branch "main"/)
+    refused(bash(lane, 'git checkout main && echo x > src/app.js'), /"main" is a protected branch, so files are not edited/)
+    allowed(bash(lane, 'git checkout main; git checkout S1-lane; git reset --hard'))
+    allowed(bash(lane, 'echo x > src/app.js; git checkout main'))
+  })
+
+  test('another lane\'s worktree, through cd or git -C, is refused; its own is not', () => {
+    const solo = workspace()
+    const own = solo.worktree('own', 'S1-own')
+    const other = solo.worktree('other', 'S2-other')
+    const session = (command) => bash(own, command, 'lanes')
+    refused(session(`git -C ${JSON.stringify(other.root)} reset --hard`), /in another worktree \(.*other, branch "S2-other"\), not this session's own/)
+    refused(session(`cd ${JSON.stringify(other.root)} && git clean -fd`), /in another worktree/)
+    refused(session(`cd ${JSON.stringify(solo.root)} && git checkout .`), /in another worktree/)
+    allowed(session(`cd ${JSON.stringify(other.root)} && git status`))
+    allowed(session(`git -C ${JSON.stringify(own.root)} reset --hard`))
+    allowed(session('git reset --hard'))
+    // A repository of its own, such as a scratch one, is not this repository's lane.
+    const scratch = repository()
+    allowed(session(`cd ${JSON.stringify(scratch.root)} && git reset --hard`))
+  })
+
+  test('a session is judged by the worktree it started in, even after its folder moved', () => {
+    const solo = workspace()
+    const own = solo.worktree('own', 'S1-own')
+    allowed(hook(own, 'claude', 'session-start', fixture('claude-session-start', own.root, { session_id: 'moved' })))
+    refused(hook(own, 'claude', 'pre-tool', fixture('claude-pre-tool-bash', solo.root, { session_id: 'moved', tool_input: { command: 'git reset --hard' } })), /in another worktree/)
+    allowed(hook(solo, 'claude', 'pre-tool', fixture('claude-pre-tool-bash', solo.root, { session_id: 'main-session', tool_input: { command: 'git reset --hard' } })))
+  })
+
+  test('every agent refuses them', () => {
+    refused(hook(r, 'codex', 'pre-tool', fixture('codex-pre-tool-bash', r.root, { tool_input: { command: 'git reset --hard' } })), /protected branch "main"/)
+    for (const [agent, events] of Object.entries(NEW_AGENTS)) {
+      for (const [name, command] of events.shells) refused(hook(r, agent, 'pre-tool', fixture(name, r.root, command('git clean -fd'))), /protected branch "main"/)
+    }
   })
 })

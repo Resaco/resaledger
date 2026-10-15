@@ -8,7 +8,7 @@ import { createInterface } from 'node:readline/promises'
 import { CONFIG_FILE, DEFAULTS, isSafeFolderPath, parseConfig } from '../guard/config.mjs'
 import { hooksActive } from '../guard/githooks.mjs'
 import { SETUP_MARKER } from '../guard/records.mjs'
-import { applyInit, commitCommand, initOptions, parseInitArgs, planInit, presetFromAnswer } from './init.mjs'
+import { applyInit, commitCommand, initOptions, parseAgentsValue, parseInitArgs, planInit, presetFromAnswer } from './init.mjs'
 import { LEGACY_CONFIG_FILE } from './legacy.mjs'
 import { applyMigration, COMMIT_COMMAND, planMigration, UNDO_COMMAND } from './migrate.mjs'
 import { currentBranch, ensureGuard, hooksNote, setupCommitSteps, turnOnHooks } from './setup.mjs'
@@ -25,21 +25,23 @@ Commands:
             set ResaLedger up in this repository: the configuration, the
             workspace README, the guard, the git hooks, the AGENTS.md block
             and the hook configurations of the agents in use (found by their
-            folder or instruction file, such as .claude/, CLAUDE.md or
-            .codex/); --team chooses the team preset, --dir names the
-            workspace folder (default ledger), --agents claude,codex names
-            the agents instead (none for no agent), --yes asks nothing and
-            takes the defaults
+            folder or instruction file, such as .claude/, CLAUDE.md, .codex/,
+            .cursor/, .gemini/, GEMINI.md or .github/copilot-instructions.md);
+            --team chooses the team preset, --dir names the workspace folder
+            (default ledger), --agents claude,codex,cursor,gemini,copilot
+            names the agents instead (none for no agent), --yes asks nothing
+            and takes the defaults
   migrate [--dry-run] [--force] [--accept-problems]
             convert an agent-ledger 0.x workspace to ResaLedger 1.0 in place;
             --dry-run only shows the plan, --force replaces 0.x git hooks that
             were changed by hand, --accept-problems writes even when the result
             breaks a 1.0 rule and lists those problems as work to do
-  update [--force]
+  update [--force] [--agents <names>]
             renew the guard, the git hooks and the AGENTS.md block when they
             are a released version, and ResaLedger's entries in the agents'
-            hook configurations; a file changed by hand is shown and kept,
-            unless --force replaces it. The README, the records, the
+            hook configurations that hold them; a file changed by hand is
+            shown and kept, unless --force replaces it. --agents adds the
+            named agents' configurations. The README, the records, the
             configuration and your own text in AGENTS.md are never touched
   version   print the version
   help      print this help
@@ -255,13 +257,22 @@ function gitRoot() {
   return top.stdout.trim()
 }
 
-/** update [--force], in the repository of the current folder. */
+/** update [--force] [--agents <names>], in the repository of the current folder. */
 export function updateCommand(args) {
   let force = false
-  for (const arg of args) {
+  let agents = []
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]
     if (arg === '--force') force = true
-    else {
-      console.error(`resaledger: unknown option "${arg}" for update; use --force`)
+    else if (arg === '--agents' || arg.startsWith('--agents=')) {
+      const parsed = parseAgentsValue(arg === '--agents' ? args[++index] : arg.slice('--agents='.length))
+      if (parsed.error) {
+        console.error(`resaledger: ${parsed.error}`)
+        process.exit(1)
+      }
+      agents = parsed.agents
+    } else {
+      console.error(`resaledger: unknown option "${arg}" for update; use --force or --agents <names>`)
       process.exit(1)
     }
   }
@@ -270,7 +281,7 @@ export function updateCommand(args) {
     console.error('resaledger: the guard could not be built')
     process.exit(1)
   }
-  const plan = planUpdate(root, { force })
+  const plan = planUpdate(root, { force, agents })
   if (plan.refusals.length > 0) {
     console.error('✖ resaledger update changed nothing:')
     for (const message of plan.refusals) console.error(`  ✖ ${message}`)

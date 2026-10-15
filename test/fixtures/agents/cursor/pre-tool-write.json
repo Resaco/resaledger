@@ -1,0 +1,14 @@
+{
+  "conversation_id": "c7a1e0b2-5d3f-4c1e-9a8b-2f6d4e0c1a3b",
+  "generation_id": "0b9e8d7c-6a5f-4e3d-8c2b-1a0f9e8d7c6b",
+  "model": "default",
+  "hook_event_name": "preToolUse",
+  "cursor_version": "2.4.0",
+  "workspace_roots": ["/home/user/project"],
+  "tool_name": "Write",
+  "tool_use_id": "tool_4d5e6f",
+  "tool_input": {
+    "file_path": "/home/user/project/src/app.js",
+    "content": "console.log(\"shop\")\n"
+  }
+}
