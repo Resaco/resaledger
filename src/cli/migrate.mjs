@@ -1142,7 +1142,10 @@ function dropLine(planned, wanted) {
   }
 }
 
-/** Branches not merged into HEAD that change files in the workspace folder, as warnings. */
+/**
+ * Branches with commits that HEAD does not have, as warnings. Those commits stay in the 0.x
+ * format, and the 1.0 range check judges each commit by its own tree, where no task file is.
+ */
 function unmergedBranchWarnings(root, dir) {
   const warnings = []
   const refs = gitOut(root, ['for-each-ref', '--format=%(refname)%00%(symref)', 'refs/heads', 'refs/remotes'])
@@ -1153,11 +1156,15 @@ function unmergedBranchWarnings(root, dir) {
     .map(([ref]) => ref)
   for (const ref of refs) {
     if (runGit(root, ['merge-base', '--is-ancestor', ref, 'HEAD']).status === 0) continue
-    const changed = runGit(root, ['diff', '--name-only', `HEAD...${ref}`, '--', dir])
-    if (changed.status !== 0 || !changed.stdout.trim()) continue
-    const count = changed.stdout.trim().split('\n').length
+    const counted = runGit(root, ['rev-list', '--count', `HEAD..${ref}`])
+    const count = counted.status === 0 ? Number(counted.stdout.trim()) : 0
+    if (!count) continue
     const name = ref.replace(/^refs\/(heads|remotes)\//, '')
-    warnings.push(`the unmerged branch ${name} changes ${count} file${count === 1 ? '' : 's'} in ${dir}/; its 0.x records will not merge into the 1.0 files. Migrate when no lane is open`)
+    const its = count === 1 ? 'Its commit stays' : `Its ${count} commits stay`
+    warnings.push(
+      `the branch ${name} is not merged. ${its} in the 0.x format, and the 1.0 range check judges each commit by its own tree, where no task file is, so merged as it is it fails handoff and CI. ` +
+        `Merge or close it before migrating, or rebase it onto this branch afterwards and make again, in the 1.0 files, any change it made in ${dir}/`
+    )
   }
   return warnings
 }
