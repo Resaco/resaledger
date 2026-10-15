@@ -449,6 +449,17 @@ describe('slugify and taskFileName', () => {
     assert.equal(taskFileName('ledger', 'S4', 'Store projects'), 'ledger/tasks/S4-store-projects.md')
     assert.equal(taskFileName('ledger', 'S4.1', '???'), 'ledger/tasks/S4.1.md')
   })
+
+  test('adds "-task" to a name that Windows reserves, in any case', () => {
+    assert.equal(taskFileName('ledger', 'COM1', '???'), 'ledger/tasks/COM1-task.md')
+    assert.equal(taskFileName('ledger', 'nul', ''), 'ledger/tasks/nul-task.md')
+    assert.equal(taskFileName('ledger', 'LPT9', undefined), 'ledger/tasks/LPT9-task.md')
+    assert.equal(taskFileName('ledger', 'COM1.2', '???'), 'ledger/tasks/COM1.2-task.md')
+    assert.equal(taskFileName('ledger', 'COM1', 'Open the port'), 'ledger/tasks/COM1-open-the-port.md')
+    assert.equal(taskFileName('ledger', 'nul', 'Empty'), 'ledger/tasks/nul-empty.md')
+    assert.equal(taskFileName('ledger', 'LPT9', 'Print it'), 'ledger/tasks/LPT9-print-it.md')
+    assert.equal(taskFileName('ledger', 'COM10', '???'), 'ledger/tasks/COM10.md')
+  })
 })
 
 test('an anchor in any link into a Markdown file must be a heading there', () => {
