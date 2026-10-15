@@ -15,15 +15,18 @@ The records become one file per record. The text of each record is kept word for
 | `DECISIONS.md`, one table row per decision | `decisions/<date>-<slug>.md`, with Decided by from the third column. |
 | `STATUS.md` | Its Phase and Waiting for the owner go to the README under `## At migration`. |
 | The workspace `README.md` | Stays. What is being built becomes Goal. |
-| `standards.md` | Its manual gates go to the README's Manual checks, and any section the 0.x template did not have goes to the README under its own heading. |
-| The workspace `AGENTS.md` | Its Project rules, and any section the 0.x template did not have, go into the root `AGENTS.md`, above the managed block. |
+| `standards.md` | Its manual gates go to the README's Manual checks, and any section the 0.x template did not have, or whose template text the project edited, goes to the README under its own heading. |
+| The workspace `AGENTS.md` | Its Project rules, and any section the 0.x template did not have or whose template text the project edited, go into the root `AGENTS.md`, above the managed block. |
 | `work/verified.json` | Removed. Run `verify` for a new stamp. |
 | `plan/`, `progress/` and every other file in the folder | Unchanged, where they are. |
 | `.agent-ledger.json` | `.resaledger.json`, format version 2, with the solo preset. Gates, code paths, commit style, AI attribution, deny rules, protected branches and `requirePushed` are kept. |
 | The guard, the git hooks, the `AGENTS.md` pointer block, the Claude Code hook entries | Replaced by 1.0's. |
 | The `.gitattributes` union rules | Removed. The file gets `.githooks/* text eol=lf`. |
+| A `.gitattributes` rule for `.agent-ledger.json`, such as `export-ignore` | Names `.resaledger.json`, with its attributes kept, and the report lists it. A longer pattern that only contains the old name is listed as a warning and left for you to change. |
 
-Whatever has no place in 1.0 is kept word for word in one log entry, `log/<today>-migrated-to-resaledger-1-0.md`: the ledger's preamble and phase headings, the whole `STATUS.md`, the template sections of `standards.md` and the workspace `AGENTS.md`, and configuration keys with no 1.0 meaning.
+Whatever has no place in 1.0 is kept word for word in one log entry, `log/<today>-migrated-to-resaledger-1-0.md`: the ledger's preamble and phase headings, the whole `STATUS.md`, the template sections of `standards.md` and the workspace `AGENTS.md` that are as a 0.x release wrote them, and configuration keys with no 1.0 meaning.
+
+A template section is compared with the text that agent-ledger 0.1, 0.2 and 0.3 wrote, with this workspace's folder and settings filled in; whitespace and line endings do not count, and neither do the manual gates you listed under Quality gates. A section with any other edit stays active where the project's own sections go, and `migrate` warns about each one. Review those sections after the migration: they may describe 0.x files and commands, such as `STATUS.md` or `work/verified.json`, that 1.0 does not have.
 
 Links into the ledger, the log and `DECISIONS.md` are rewritten to the new files. Anything it cannot rewrite is listed. [The format reference](../format.md) describes the 1.0 files.
 
@@ -54,12 +57,13 @@ Delete (6):
 build/work/ledger.md
 Lanes taken from the one unmerged branch whose commits name the task (1):
 A2: Lane: a2-prices
-Warnings (1):
+Warnings (2):
+! build/standards.md: the section "Commits" came from the 0.x template and has project edits, so it moves to build/README.md; review it, since it may describe 0.x commands
 ! the branch a2-prices is not merged. Its commit stays in the 0.x format, and the 1.0 range check judges each commit by its own tree, where no task file is, so merged as it is it fails handoff and CI. Merge or close it before migrating, or rebase it onto this branch afterwards and make again, in the 1.0 files, any change it made in build/
 --dry-run: nothing was written.
 ```
 
-`--dry-run` shows the whole plan and writes nothing. Merge the lane, or close it, before you migrate:
+`--dry-run` shows the whole plan and writes nothing. This project rewrote the template's Commits section in `standards.md`, so it stays active in the README. Merge the lane, or close it, before you migrate:
 
 ```bash
 git merge --no-edit a2-prices
@@ -165,6 +169,8 @@ In progress in this lane
 A2  Add a price list
 Next: the rye bread price.
 ```
+
+`migrate` renews the Claude Code hook entries that 0.x wrote, and no others. When an agent that `init` would detect, from its folder or instruction file, has no hook configuration afterwards, or when no agent has one, the report ends with the command that adds them, such as `npx resaledger update --agents claude`. Without agent hooks, `agent.deny` and the refusal of `--no-verify` before the command runs are not in use; the git hooks and CI still hold.
 
 The README now has `## Manual checks` with a `TODO(resaledger)` marker when `standards.md` listed none. Write the project's own text there; `handoff` asks for it. The 1.0 protocol is in the root `AGENTS.md`, and [the solo guide](solo.md) walks through it.
 

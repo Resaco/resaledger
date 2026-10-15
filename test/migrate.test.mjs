@@ -2,6 +2,7 @@
 // a whole migration that passes, every refusal, a hand-edited hook, an injected loss,
 // --dry-run, a 1.0 problem, a second run, and this repository's own 0.x workspace.
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
@@ -170,54 +171,34 @@ A small tool for counting things, for one team.
 Local only.
 `
 
-const STANDARDS = `# Working standards
+/** A workspace AGENTS.md or standards.md as agent-ledger 0.1 or 0.3 init wrote it for DIR, with AI attribution forbidden. */
+function releasedTemplate(version, name) {
+  const values = {
+    name: 'Sample',
+    dir: DIR,
+    guard: GUARD,
+    attribution: 'Commits carry no AI attribution: no co-author, sign-off or assisted-by trailer naming a model or a vendor.'
+  }
+  return readFileSync(new URL(`fixtures/legacy-templates/${version}/${name}`, import.meta.url), 'utf8').replace(/\{\{(\w+)\}\}/g, (match, key) => values[key] ?? match)
+}
 
-The session protocol is in [AGENTS.md](AGENTS.md).
-
-## Who owns what
-
-| File | Owns |
-| --- | --- |
-| [STATUS.md](STATUS.md) | Live state |
-
-## Commits
-
-Conventional Commits with a \`Task: <id>\` trailer.
-
-## Quality gates
-
-Before a task is \`done\`, two kinds of gates pass.
-
-**Gates that need eyes or judgement** are listed here:
-
-1. **The page looks right.** Compared at 375 and 1280 px.
+// The 0.3 templates with what a project fills in: its manual gates and project rules, and a section of its own in each.
+const STANDARDS = `${releasedTemplate('0.3', 'standards.md').replace(
+  /^TODO\(agent-ledger\): the project's manual gates.*$/m,
+  `1. **The page looks right.** Compared at 375 and 1280 px.
    Passing: no overflow.
-2. **The data comes out unchanged.** Passing: the diff is empty.
-
-The last gate is always the same: \`${GUARD} handoff\` passes.
-
+2. **The data comes out unchanged.** Passing: the diff is empty.`
+)}
 ## Release checklist
 
 Tag only from main, after the owner says so.
 `
 
-const AGENTS = `# Sample workspace: agent rules
-
-These rules bind every agent.
-
-## Start here, every session
-
-1. Read [STATUS.md](STATUS.md).
-
-## Project rules
-
-1. **Tuotantoon ei kirjoiteta ilman lupaa.** Syy: asiakkaan tiedot ovat siellä.
-2. **Kaikki siirrot tehdään skriptillä.** Syy: käsin tehty vaihe unohtuu.
-
-## Working agreements
-
-- Records are written in English.
-
+const AGENTS = `${releasedTemplate('0.3', 'AGENTS.md').replace(
+  /^TODO\(agent-ledger\): the rules only this project has.*$/m,
+  `1. **Tuotantoon ei kirjoiteta ilman lupaa.** Syy: asiakkaan tiedot ovat siellä.
+2. **Kaikki siirrot tehdään skriptillä.** Syy: käsin tehty vaihe unohtuu.`
+)}
 ## Local conventions
 
 Screenshots go into [progress/](progress/).
@@ -302,6 +283,23 @@ function legacyRepository({ claude = 'file', files = {} } = {}) {
 }
 
 const migrate = (r, ...args) => r.node(CLI, 'migrate', ...args)
+
+/** The paths in a tar archive: the name field of each header, with the ustar prefix. */
+function tarNames(buffer) {
+  const names = []
+  for (let at = 0; at + 512 <= buffer.length; ) {
+    const header = buffer.subarray(at, at + 512)
+    if (header.every((byte) => byte === 0)) break
+    const field = (start, length) => header.subarray(start, start + length).toString('utf8').replace(/\0.*$/s, '')
+    const prefix = field(345, 155)
+    const name = `${prefix ? `${prefix}/` : ''}${field(0, 100)}`
+    const size = parseInt(field(124, 12).trim() || '0', 8)
+    // Pax headers ("g" and "x") describe the next entry; they are not entries themselves.
+    if (header[156] !== 0x67 && header[156] !== 0x78) names.push(name.replace(/\/$/, ''))
+    at += 512 + Math.ceil(size / 512) * 512
+  }
+  return names
+}
 
 /** Every file under root except .git, as path → content (a link as "-> target"). */
 function snapshot(root) {
@@ -518,7 +516,7 @@ Screenshots go into [progress/](${DIR}/progress/).
       '# Decisions\n\nDecisions the owner made.\n\nRows before March were reconstructed.',
       STATUS.trimEnd(),
       '## Who owns what',
-      '## Commits\n\nConventional Commits with a `Task: <id>` trailer.',
+      '## Commits\n\n- Conventional Commits: `type(scope): summary`',
       '## Start here, every session',
       '## Working agreements\n\n- Records are written in English.',
       '"gates.skipPaths": [\n    "docs"\n  ]',
@@ -568,6 +566,98 @@ describe('CLAUDE.md as a link to AGENTS.md', () => {
     assert.match(r.read('CLAUDE.md'), /<!-- resaledger:start/)
     assert.doesNotMatch(r.read('CLAUDE.md'), /@AGENTS\.md/)
     assert.doesNotMatch(result.out, /^ {2}CLAUDE\.md$/m)
+  })
+})
+
+describe('0.x template sections the project edited', () => {
+  const templateSections = (text) =>
+    [...text.matchAll(/^## (.+)\n\n([\s\S]*?)\n*(?=^## |(?![\s\S]))/gm)].map(([, heading, body]) => ({ heading, body: body.trimEnd() }))
+
+  test('untouched template sections go to the log entry, word for word, and nothing warns', () => {
+    const r = legacyRepository()
+    const plan = planMigration(r.root)
+    assert.deepEqual(plan.refusals, [])
+    assert.ok(!plan.report.warnings.some((warning) => /template section/.test(warning)), plan.report.warnings.join('\n'))
+    const own = ['Project rules', 'Local conventions', 'Release checklist']
+    for (const { heading, body } of [...templateSections(AGENTS), ...templateSections(STANDARDS)].filter(({ heading }) => !own.includes(heading))) {
+      assert.ok(plan.logEntry.text.includes(`## ${heading}\n\n${body}`), heading)
+      assert.ok(!plan.writes.get('AGENTS.md').includes(`## ${heading}\n`), heading)
+      assert.ok(!plan.writes.get(`${DIR}/README.md`).includes(`## ${heading}\n`), heading)
+    }
+  })
+
+  test('an edited sentence keeps its section in the root AGENTS.md, and the report names it', () => {
+    const agents = AGENTS.replace('Never push.', 'Never push; the owner pushes after review.')
+    assert.notEqual(agents, AGENTS)
+    const r = legacyRepository({ files: { [`${DIR}/AGENTS.md`]: agents } })
+    const result = migrate(r)
+    assert.equal(result.status, 0, result.out)
+    assert.match(
+      result.out,
+      /! project\/AGENTS\.md: the section "Session protocol" came from the 0\.x template and has project edits, so it moves to AGENTS\.md; review it, since it may describe 0\.x commands/
+    )
+    const root = r.read('AGENTS.md')
+    assert.ok(root.includes('## Project rules\n\n1. **Tuotantoon'), root)
+    assert.ok(root.includes('5. **Commit.** A Conventional Commits header and a `Task: <id>` trailer. Never push; the owner pushes after review.'), root)
+    // In the order of the workspace file, after the project rules, and its links rewritten.
+    assert.ok(root.indexOf('## Session protocol') > root.indexOf('## Project rules') && root.indexOf('## Session protocol') < root.indexOf('## Local conventions'), root)
+    assert.ok(root.includes('the manual [quality gates](project/README.md#manual-checks)'), root)
+    const name = readdirSync(join(r.root, DIR, 'log')).find((file) => file.includes('migrated-to-resaledger'))
+    const entry = r.read(`${DIR}/log/${name}`)
+    assert.ok(!entry.includes('## Session protocol'), entry)
+    assert.ok(entry.includes('## Non-negotiables'), entry)
+    assert.equal(r.commit('chore: migrate to ResaLedger 1.0', 'Task: maintenance').status, 0)
+  })
+
+  test('an edited standards.md section goes to the README', () => {
+    const standards = STANDARDS.replace('- Never commit a broken state.\n', '- Never commit a broken state.\n- Squash a lane before it merges.\n')
+    assert.notEqual(standards, STANDARDS)
+    const r = legacyRepository({ files: { [`${DIR}/standards.md`]: standards } })
+    const result = migrate(r)
+    assert.equal(result.status, 0, result.out)
+    assert.match(result.out, /! project\/standards\.md: the section "Commits" came from the 0\.x template and has project edits, so it moves to project\/README\.md; review it/)
+    const readme = r.read(`${DIR}/README.md`)
+    assert.match(readme, /\n## Commits\n\n- Conventional Commits: .*\n[\s\S]*- Squash a lane before it merges\.\n/)
+    assert.ok(readme.indexOf('## Commits') < readme.indexOf('## Release checklist'), readme)
+    const name = readdirSync(join(r.root, DIR, 'log')).find((file) => file.includes('migrated-to-resaledger'))
+    assert.ok(!r.read(`${DIR}/log/${name}`).includes('## Commits'))
+  })
+})
+
+describe('agent hooks after the migration', () => {
+  const WHY = 'Without agent hooks, agent.deny and the refusal of --no-verify before the command runs are not in use; git hooks and CI still hold.'
+  const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+  test('renewed hooks for every detected agent print no advice', () => {
+    const r = legacyRepository()
+    const result = migrate(r, '--dry-run')
+    assert.equal(result.status, 0, result.out)
+    assert.doesNotMatch(result.out, /Without agent hooks/)
+    assert.doesNotMatch(result.out, /update --agents/)
+  })
+
+  test('CLAUDE.md without a hook configuration ends the report with the command for claude', () => {
+    const r = legacyRepository({ files: { '.claude/settings.json': null } })
+    const result = migrate(r)
+    assert.equal(result.status, 0, result.out)
+    assert.match(result.out, new RegExp(`\\n${escape(WHY)} Add them with:\\n {2}npx resaledger update --agents claude\\n$`))
+    // The same advice in a dry run.
+    assert.equal(r.git('restore', '--', ':/').status, 0)
+    assert.equal(r.git('clean', '-fdq', '--', ':/').status, 0)
+    const dry = migrate(r, '--dry-run')
+    assert.match(dry.out, new RegExp(`${escape(WHY)} Add them with:\\n {2}npx resaledger update --agents claude\\n`))
+  })
+
+  test('an agent detected next to the renewed ones is named alone', () => {
+    const r = legacyRepository({ files: { '.cursor/rules/style.md': 'Short lines.\n', 'GEMINI.md': '# Gemini\n' } })
+    const result = migrate(r, '--dry-run')
+    assert.match(result.out, new RegExp(`${escape(WHY)} Add them with:\\n {2}npx resaledger update --agents cursor,gemini\\n`))
+  })
+
+  test('with no agent detected and none configured, the command names claude as an example', () => {
+    const r = legacyRepository({ claude: 'none', files: { '.claude/settings.json': null } })
+    const result = migrate(r, '--dry-run')
+    assert.match(result.out, new RegExp(`${escape(WHY)} Add them with, for example:\\n {2}npx resaledger update --agents claude\\n`))
   })
 })
 
@@ -811,6 +901,35 @@ describe('the LF rule for the hooks and a protected base', () => {
     const r = legacyRepository({ files: { '.gitattributes': `* text=auto eol=lf\n${UNION}` } })
     assert.equal(migrate(r).status, 0)
     assert.equal(r.read('.gitattributes'), '* text=auto eol=lf\n')
+  })
+
+  test('a rule for the old configuration file names the new one, and git archive leaves the configuration out', () => {
+    const attributes = `* text=auto\n.agent-ledger.json export-ignore\n/.agent-ledger.json  -diff\nbackup/.agent-ledger.json export-ignore\n${UNION}`
+    const r = legacyRepository({ files: { '.gitattributes': attributes } })
+    const dry = migrate(r, '--dry-run')
+    assert.equal(dry.status, 0, dry.out)
+    const listed = /Lines rewritten in \.gitattributes \(2\):\n {2}\.gitattributes:2: \.agent-ledger\.json export-ignore → \.resaledger\.json export-ignore\n {2}\.gitattributes:3: \/\.agent-ledger\.json {2}-diff → \/\.resaledger\.json {2}-diff\n/
+    assert.match(dry.out, listed)
+    const result = migrate(r)
+    assert.equal(result.status, 0, result.out)
+    assert.match(result.out, listed)
+    // A longer pattern that only contains the old name is reported, not rewritten.
+    assert.match(result.out, /! \.gitattributes:4: the pattern "backup\/\.agent-ledger\.json" contains \.agent-ledger\.json, so migrate left the line as it is; change it by hand if it should name \.resaledger\.json/)
+    assert.equal(r.read('.gitattributes'), '* text=auto\n.resaledger.json export-ignore\n/.resaledger.json  -diff\nbackup/.agent-ledger.json export-ignore\n.githooks/* text eol=lf\n')
+    assert.equal(r.commit('chore: migrate to ResaLedger 1.0', 'Task: maintenance').status, 0)
+    const archive = spawnSync('git', ['archive', '--format=tar', 'HEAD'], { cwd: r.root, maxBuffer: 1024 * 1024 * 1024 })
+    assert.equal(archive.status, 0, String(archive.stderr))
+    const names = tarNames(archive.stdout)
+    assert.ok(names.includes(`${DIR}/README.md`), names.join('\n'))
+    assert.ok(!names.includes('.resaledger.json'), names.join('\n'))
+  })
+
+  test('a CRLF .gitattributes keeps its line endings when the old name is rewritten', () => {
+    const r = legacyRepository({ files: { '.gitattributes': '.agent-ledger.json export-ignore\r\n.githooks/* text eol=lf\r\n' } })
+    const plan = planMigration(r.root)
+    assert.deepEqual(plan.refusals, [])
+    assert.equal(plan.writes.get('.gitattributes'), '.resaledger.json export-ignore\r\n.githooks/* text eol=lf\r\n')
+    assert.deepEqual(plan.report.attributes, [{ line: 1, from: '.agent-ledger.json export-ignore', to: '.resaledger.json export-ignore' }])
   })
 
   test('on a protected base, the printed steps commit the migration on a setup branch and push it', () => {

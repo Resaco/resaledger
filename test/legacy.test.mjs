@@ -5,6 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { describe, test } from 'node:test'
 import {
+  editedLegacyTemplateSection,
   LEGACY_FILES,
   legacyDecisionsLines,
   legacyLedgerLines,
@@ -33,6 +34,13 @@ import { legacyClone, temporary } from './helpers.mjs'
 const LEGACY = legacyClone()
 
 const crlf = (text) => text.replace(/\n/g, '\r\n')
+
+/** A workspace AGENTS.md or standards.md as agent-ledger 0.1 or 0.3 init wrote it for dir. */
+function releasedTemplate(version, name, { dir, forbid = true }) {
+  const attribution = forbid ? 'Commits carry no AI attribution: no co-author, sign-off or assisted-by trailer naming a model or a vendor.' : 'Commits may carry an AI co-author trailer.'
+  const values = { name: 'Sample', dir, guard: `node ${dir}/scripts/records.mjs`, attribution }
+  return readFileSync(new URL(`fixtures/legacy-templates/${version}/${name}`, import.meta.url), 'utf8').replace(/\{\{(\w+)\}\}/g, (match, key) => values[key] ?? match)
+}
 
 const LEDGER = `# Task ledger
 
@@ -471,6 +479,48 @@ describe('README, standards.md and AGENTS.md', () => {
     )
     assertLossless(AGENTS, legacySectionsLines(agents))
     assert.equal(legacyProjectRules(parseLegacyAgents('# x\n')), null)
+  })
+
+  test('every section of the released 0.x templates, filled in for a workspace, is recognised as untouched', () => {
+    for (const version of ['0.1', '0.3'])
+      for (const [file, name, parse] of [
+        ['agents', 'AGENTS.md', parseLegacyAgents],
+        ['standards', 'standards.md', parseLegacyStandards]
+      ])
+        for (const dir of ['project', 'work', 'docs/build'])
+          for (const forbid of [true, false]) {
+            const text = releasedTemplate(version, name, { dir, forbid })
+            for (const variant of [text, crlf(text), text.replace(/\n\n/g, '\n  \n\n')]) {
+              const parsed = parse(variant)
+              assert.ok(parsed.sections.size >= 6, `${version} ${name}`)
+              for (const [key, section] of parsed.sections)
+                assert.equal(editedLegacyTemplateSection(file, key, section.text, dir), false, `${version} ${name} ${dir} ## ${key}`)
+            }
+          }
+  })
+
+  test('one edited sentence makes a template section edited; a section that is not the template is never', () => {
+    const agents = parseLegacyAgents(releasedTemplate('0.3', 'AGENTS.md', { dir: 'project' }))
+    const protocol = agents.sections.get('Session protocol').text
+    assert.equal(editedLegacyTemplateSection('agents', 'Session protocol', protocol.replace('Never push.', 'Push only to your own branch.'), 'project'), true)
+    // The workspace values are compared as placeholders only where the template had them.
+    assert.equal(editedLegacyTemplateSection('agents', 'Session protocol', protocol.replaceAll('node project/', 'node build/'), 'project'), true)
+    assert.equal(editedLegacyTemplateSection('agents', 'Local conventions', 'Anything.', 'project'), false)
+    assert.equal(editedLegacyTemplateSection('agents', 'Project rules', 'Anything.', 'project'), false)
+  })
+
+  test('Quality gates: the filled-in manual gates do not count as an edit, other text does', () => {
+    for (const version of ['0.1', '0.3']) {
+      const standards = parseLegacyStandards(releasedTemplate(version, 'standards.md', { dir: 'project' }))
+      const gates = standards.sections.get('Quality gates').text
+      const filled = gates.replace(/^TODO\(agent-ledger\).*$/m, '1. **The page looks right.** Compared at 375 and 1280 px.\n   Passing: no overflow.\n\nAnd a sentence of the project.')
+      assert.notEqual(filled, gates)
+      assert.equal(editedLegacyTemplateSection('standards', 'Quality gates', filled, 'project'), false, version)
+      const none = gates.replace(/^TODO\(agent-ledger\).*$/m, 'None.')
+      assert.equal(editedLegacyTemplateSection('standards', 'Quality gates', none, 'project'), false, version)
+      const edited = `${gates}\n\nRun the linter twice.`
+      assert.equal(editedLegacyTemplateSection('standards', 'Quality gates', edited, 'project'), true, version)
+    }
   })
 
   test('a repeated section heading is kept under a numbered key', () => {

@@ -4,6 +4,7 @@
 // function that renders the parsed result back into lines, and lostLegacyLines() compares
 // those with the input, so a test or migrate can prove that no line was dropped.
 // Package side: the published package has no src/guard, so this file imports only node:.
+import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -537,6 +538,73 @@ export function parseLegacyAgents(text, file = LEGACY_FILES.agents) {
 
 function sectionText(parsed, name) {
   return parsed?.sections.get(name)?.text ?? null
+}
+
+// ── The released 0.x template sections ─────────────────────────────────────────────
+
+// The sentences 0.x init wrote for {{attribution}}, by --forbid-ai-attribution.
+const LEGACY_ATTRIBUTIONS = [
+  'Commits carry no AI attribution: no co-author, sign-off or assisted-by trailer naming a model or a vendor.',
+  'Commits may carry an AI co-author trailer.'
+]
+const MANUAL_GATES_MARKER = /gates that need eyes or judge?ment/i
+const LAST_GATE = /^The last gate is always the same/
+
+/**
+ * A section of the workspace AGENTS.md or standards.md as it is compared with the released
+ * templates: the workspace's own values back as the templates' placeholders ({{guard}},
+ * {{dir}}, {{attribution}}) and every run of whitespace, line ends included, as one space.
+ * In Quality gates, the manual gates (after the "Gates that need eyes or judgement" line, or
+ * in 0.1 after the section's first line, up to "The last gate …") are the project's to fill
+ * in and move to the README's Manual checks, so they count as one placeholder.
+ */
+export function legacyTemplateComparable(heading, text, dir) {
+  let lines = text.replace(/\r\n?/g, '\n').split('\n')
+  if (heading === 'Quality gates') {
+    const marker = lines.findIndex((line) => MANUAL_GATES_MARKER.test(line))
+    const start = marker === -1 ? lines.findIndex((line) => line.trim()) : marker
+    const end = lines.findIndex((line, index) => index > start && LAST_GATE.test(line))
+    lines = [...lines.slice(0, start + 1), '{{manual gates}}', ...(end === -1 ? [] : lines.slice(end))]
+  }
+  let comparable = lines.join('\n').replaceAll(`node ${dir}/scripts/records.mjs`, '{{guard}}').replaceAll(`\`${dir}/\``, '`{{dir}}/`')
+  for (const sentence of LEGACY_ATTRIBUTIONS) comparable = comparable.replaceAll(sentence, '{{attribution}}')
+  return comparable.replace(/\s+/g, ' ').trim()
+}
+
+// SHA-256 of legacyTemplateComparable() for each section of the workspace AGENTS.md and
+// standards.md that agent-ledger 0.1.0, 0.2.0 and 0.3.0 wrote (0.2.0 and 0.3.0 share their
+// templates), by heading. Project rules is not here: it is always the project's own.
+const LEGACY_TEMPLATE_HASHES = {
+  agents: {
+    'Start here, every session': ['413ea91e39d00f6c03b242a895db3a767cdd6e6aacbe75369338f09e019dfe17'],
+    'Session protocol': ['37467ceb6f73f907fb75d70fc0ebcdf02d9ee4704db15b91a5431b952395119d', 'aa5e5c1fcc5073fabe152f29b6faf0714b0e35298eb367ba2aa76fce3843e721'],
+    'Non-negotiables': ['cec7210dca00b7df4128ce79ff41e12b2edde2dae7426fc53c9156e5e1ea2b10', 'd9c4bca48ccc77b601a63bd1363d60d0679ab84ca2f9aabda342861ab442df10'],
+    'Orchestrated work': ['3af9a79afd34e7f21e0b0453727fac1969375e63f6aa45ab6ef4d92ff6bb59b1'],
+    'Working agreements': ['ba70a26b31b52c588e47aa1b85a0a8dd9387f8c4e067404513f2a40bf0547545']
+  },
+  standards: {
+    'Who owns what': ['bf89644ed021adbbaee59e2ba413beb88fa867f6d61b0ca3c887c777463b0fe9'],
+    'STATUS.md': ['b6264953f71c43fdc52273223f10c2bfdd2b95283ef0de68cd7c39493a567bf5'],
+    'The task ledger': ['ca1abf381304fe40b18bcd8ee34c4e469f329bb81dc60468ea83c154cddee1f9'],
+    Plans: ['d6c5997264e4105a666e3c00c65aecddf5aeaf4c74321e1acad7f1fdeb044bfd'],
+    Commits: ['1cee6859739ec1d6ce255ae27dc860fcb065d7268cb1df0f8f3ff54d23a64487'],
+    'Quality gates': ['0eb712fc6defbd3ff0002438531b1860ae29246a3847803b86b87a7d72e95bdc', 'b7b69a83d2cdb42ed537155fa0c9c6aff3a24e668c76f333a94a0436fc675928']
+  }
+}
+
+/** The SHA-256 of a section's comparable text, as LEGACY_TEMPLATE_HASHES holds it. */
+export function legacyTemplateHash(heading, text, dir) {
+  return createHash('sha256').update(legacyTemplateComparable(heading, text, dir)).digest('hex')
+}
+
+/**
+ * Whether a section of the workspace AGENTS.md ('agents') or standards.md ('standards') is a
+ * 0.x template section that the project edited: its heading is a template's, and its text is
+ * none of the released texts. Whitespace and line ends do not count.
+ */
+export function editedLegacyTemplateSection(file, heading, text, dir) {
+  const hashes = LEGACY_TEMPLATE_HASHES[file]?.[heading]
+  return hashes !== undefined && !hashes.includes(legacyTemplateHash(heading, text, dir))
 }
 
 /** What spec 14 takes from the workspace README: each section's text, or null when it is missing. */
