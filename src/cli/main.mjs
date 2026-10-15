@@ -21,11 +21,15 @@ const HELP = `ResaLedger ${version}
 Usage: npx resaledger <command>
 
 Commands:
-  init [--team] [--dir <name>] [--yes]
+  init [--team] [--dir <name>] [--agents <names>] [--yes]
             set ResaLedger up in this repository: the configuration, the
-            workspace README, the guard, the git hooks and the AGENTS.md block;
-            --team chooses the team preset, --dir names the workspace folder
-            (default ledger), --yes asks nothing and takes the defaults
+            workspace README, the guard, the git hooks, the AGENTS.md block
+            and the hook configurations of the agents in use (found by their
+            folder or instruction file, such as .claude/, CLAUDE.md or
+            .codex/); --team chooses the team preset, --dir names the
+            workspace folder (default ledger), --agents claude,codex names
+            the agents instead (none for no agent), --yes asks nothing and
+            takes the defaults
   migrate [--dry-run] [--force] [--accept-problems]
             convert an agent-ledger 0.x workspace to ResaLedger 1.0 in place;
             --dry-run only shows the plan, --force replaces 0.x git hooks that
@@ -33,7 +37,8 @@ Commands:
             breaks a 1.0 rule and lists those problems as work to do
   update [--force]
             renew the guard, the git hooks and the AGENTS.md block when they
-            are a released version; a file changed by hand is shown and kept,
+            are a released version, and ResaLedger's entries in the agents'
+            hook configurations; a file changed by hand is shown and kept,
             unless --force replaces it. The README, the records, the
             configuration and your own text in AGENTS.md are never touched
   version   print the version
@@ -161,7 +166,7 @@ function refuseInit(messages) {
   process.exit(1)
 }
 
-/** init [--team] [--dir <name>] [--yes], in the repository of the current folder. */
+/** init [--team] [--dir <name>] [--agents <names>] [--yes], in the repository of the current folder. */
 export async function initCommand(args) {
   const { flags, error } = parseInitArgs(args)
   if (error) {
@@ -187,6 +192,7 @@ export async function initCommand(args) {
   list('Created', result.created)
   list('Changed', result.changed)
   list('Warnings', plan.warnings.map((warning) => `! ${warning}`))
+  if (plan.agents.length > 0) console.log(`\nAgent hooks for: ${plan.agents.join(', ')}. Each agent asks you to trust the project's hooks once; run its /hooks command to review them.`)
   console.log(`\n${hooksNote(result.hooks, dir)}`)
   if (result.instructions) console.log(`\n${result.instructions}`)
   const active = hooksActive()

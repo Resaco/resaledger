@@ -320,15 +320,15 @@ describe('refusals', () => {
 
   test('an unknown option', () => {
     const r = project()
-    const result = init(r, '--agents')
+    const result = init(r, '--ci')
     assert.equal(result.status, 1)
-    assert.match(result.out, /unknown option "--agents" for init/)
+    assert.match(result.out, /unknown option "--ci" for init; use --team, --dir <name>, --agents <names> or --yes/)
   })
 
   test('the plan lists every refusal before anything is written', () => {
     const r = project({ 'ledger/x.md': 'x\n', 'AGENTS.md': '# Rules\n' })
     r.append('AGENTS.md', 'more\n')
-    const plan = planInit(r.root, { preset: 'solo', dir: 'ledger', goal: '' })
+    const plan = planInit(r.root, { preset: 'solo', dir: 'ledger', goal: '', agents: null })
     assert.equal(plan.refusals.length, 2, plan.refusals.join('\n'))
     assert.match(plan.refusals[0], /^ledger\/ exists/)
     assert.match(plan.refusals[1], /uncommitted changes.*AGENTS\.md/)
@@ -378,8 +378,12 @@ describe('the project name', () => {
 
 describe('the answers', () => {
   test('parseInitArgs reads the flags', () => {
-    assert.deepEqual(parseInitArgs(['--team', '--dir', 'records', '--yes']), { flags: { team: true, dir: 'records', yes: true }, error: null })
-    assert.deepEqual(parseInitArgs([]).flags, { team: false, dir: null, yes: false })
+    assert.deepEqual(parseInitArgs(['--team', '--dir', 'records', '--yes']), { flags: { team: true, dir: 'records', yes: true, agents: null }, error: null })
+    assert.deepEqual(parseInitArgs([]).flags, { team: false, dir: null, yes: false, agents: null })
+    assert.deepEqual(parseInitArgs(['--agents', 'codex,claude']).flags.agents, ['codex', 'claude'])
+    assert.deepEqual(parseInitArgs(['--agents=none']).flags.agents, [])
+    assert.match(parseInitArgs(['--agents', 'emacs']).error, /unknown agent "emacs"/)
+    assert.match(parseInitArgs(['--agents']).error, /--agents needs a list/)
     assert.match(parseInitArgs(['--dir']).error, /--dir needs a folder name/)
     assert.match(parseInitArgs(['--no-ci']).error, /unknown option "--no-ci"/)
   })
@@ -392,9 +396,9 @@ describe('the answers', () => {
 
   test('initOptions turns the answers into options', () => {
     const flags = { team: false, dir: null, yes: false }
-    assert.deepEqual(initOptions(flags), { preset: 'solo', dir: 'ledger', goal: '' })
-    assert.deepEqual(initOptions(flags, { preset: 'team', goal: '  A shop for\n vinyl records.  ' }), { preset: 'team', dir: 'ledger', goal: 'A shop for vinyl records.' })
-    assert.deepEqual(initOptions({ ...flags, team: true, dir: 'records' }, { goal: '' }), { preset: 'team', dir: 'records', goal: '' })
+    assert.deepEqual(initOptions(flags), { preset: 'solo', dir: 'ledger', goal: '', agents: null })
+    assert.deepEqual(initOptions(flags, { preset: 'team', goal: '  A shop for\n vinyl records.  ' }), { preset: 'team', dir: 'ledger', goal: 'A shop for vinyl records.', agents: null })
+    assert.deepEqual(initOptions({ ...flags, team: true, dir: 'records' }, { goal: '' }), { preset: 'team', dir: 'records', goal: '', agents: null })
   })
 
   test('a goal sentence replaces the goal marker, and the next steps do not ask for it', () => {
