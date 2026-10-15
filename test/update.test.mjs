@@ -84,7 +84,7 @@ describe('an update from a released version', () => {
   test('the release script records the older version', () => {
     assert.equal(released.status, 0, released.out)
     const table = JSON.parse(readFileSync(join(old, 'templates', 'released.json'), 'utf8'))
-    assert.deepEqual(Object.keys(table).sort(), ['agents-block', 'guard', 'hooks/commit-msg', 'hooks/pre-commit', 'hooks/pre-merge-commit', 'hooks/pre-push'])
+    assert.deepEqual(Object.keys(table).sort(), ['agents-block', 'guard', 'hooks/commit-msg', 'hooks/pre-commit', 'hooks/pre-merge-commit', 'hooks/pre-push', 'workflow'])
     for (const versions of Object.values(table)) assert.deepEqual(Object.keys(versions), ['0.9.0'])
     const check = run(old, process.execPath, [join(old, 'scripts', 'release-hashes.mjs'), '--check'])
     assert.equal(check.status, 0, check.out)

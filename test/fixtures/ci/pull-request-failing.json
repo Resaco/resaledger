@@ -1,0 +1,37 @@
+{
+  "event": "pull_request",
+  "source": "github",
+  "base": "1111111111111111111111111111111111111111",
+  "head": "2222222222222222222222222222222222222222",
+  "lane": "lane-b",
+  "fork": false,
+  "ref": null,
+  "before": null,
+  "mergeBase": "3333333333333333333333333333333333333333",
+  "from": null,
+  "rules": { "from": "base", "commit": "1111111111111111111111111111111111111111", "adds": false },
+  "checks": [
+    { "name": "records", "ok": true, "problems": [], "counts": { "tasks": 4, "decisions": 0, "logs": 0 }, "note": null },
+    { "name": "commits", "ok": false, "problems": [{ "file": "", "line": 0, "message": "4444444 \"feat: bake\" changes code but names no task" }], "counts": { "commits": 2 }, "note": null },
+    { "name": "ownership", "ok": true, "problems": [], "counts": { "changed": 0 }, "note": null },
+    { "name": "ids", "ok": true, "problems": [], "counts": { "added": 0, "branches": 1 }, "note": null },
+    { "name": "moved", "ok": true, "problems": [], "counts": { "moved": 0 }, "note": null },
+    { "name": "gates", "ok": false, "problems": [{ "file": "", "line": 0, "message": "the gate \"npm test && npm run e2e\" failed with 1 on 2222222" }], "counts": { "gates": 2 }, "note": null },
+    { "name": "enforcement", "ok": false, "problems": [{ "id": "wip", "file": ".resaledger.json", "line": 0, "message": "wip raised from 3 to 5: this weakens enforcement, and no decision this pull request adds names it. Add one in ledger/decisions/ with the line \"- Weakens: wip\"" }], "counts": { "changes": 2, "weakening": 1 }, "note": null }
+  ],
+  "moved": [],
+  "gates": {
+    "mode": "run",
+    "ranOn": "2222222222222222222222222222222222222222",
+    "passed": [{ "command": "npm run lint", "seconds": 3 }],
+    "failure": { "command": "npm test && npm run e2e", "status": 1 },
+    "stamp": null
+  },
+  "enforcement": [
+    { "id": "gates.commit", "kind": "listed", "file": ".resaledger.json", "what": "gates.commit: added \"npm run lint\"", "decidedBy": null },
+    { "id": "wip", "kind": "weakening", "file": ".resaledger.json", "what": "wip raised from 3 to 5", "decidedBy": null }
+  ],
+  "release": null,
+  "skipped": null,
+  "ok": false
+}

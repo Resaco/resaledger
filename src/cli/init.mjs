@@ -6,12 +6,19 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSyn
 import { basename, join } from 'node:path'
 import { AGENT_NAMES, agentConfigFile, agentConfigSnippet, detectAgents, mergeAgentConfig } from '../guard/agents.mjs'
 import { CONFIG_FILE, CONFIG_VERSION, DEFAULTS, isSafeFolderPath, parseConfig, SAFE_FOLDER_RULE } from '../guard/config.mjs'
+import { ENFORCEMENT_WORKFLOW } from '../guard/enforcement.mjs'
 import { SETUP_MARKER } from '../guard/records.mjs'
 import { detectHookManager, HOOK_NAMES, integrateHookManager, renderHook } from './hooks.mjs'
 import { LEGACY_CONFIG_FILE } from './legacy.mjs'
 import { agentsBlock, BUILT_GUARD, claudeFile, detectBase, GITATTRIBUTES_FILE, hasAgentsImport, HOOKS_FOLDER, realRelative, turnOnHooks, withAgentsBlock, withHooksEolRule } from './setup.mjs'
 
 const README_TEMPLATE = new URL('../../templates/readme.md', import.meta.url)
+const WORKFLOW_TEMPLATE = new URL('../../templates/workflow.yml', import.meta.url)
+const PULL_REQUEST_TEMPLATE = new URL('../../templates/pull_request_template.md', import.meta.url)
+const CODEOWNERS_TEMPLATE = new URL('../../templates/codeowners', import.meta.url)
+export const PULL_REQUEST_FILE = '.github/pull_request_template.md'
+// The places GitHub reads a pull request template from; init writes one only when none exists.
+const PULL_REQUEST_FILES = [PULL_REQUEST_FILE, '.github/PULL_REQUEST_TEMPLATE.md', '.github/PULL_REQUEST_TEMPLATE', 'pull_request_template.md', 'PULL_REQUEST_TEMPLATE.md', 'docs/pull_request_template.md', 'docs/PULL_REQUEST_TEMPLATE.md']
 export const GOAL_MARKER = `${SETUP_MARKER}: what is being built, for whom, and what counts as finished, in one or two sentences.`
 export const INIT_COMMIT_MESSAGE = ['chore: set up ResaLedger', 'Task: maintenance']
 
@@ -134,6 +141,11 @@ export function projectName(root) {
   return basename(root)
 }
 
+/** The CODEOWNERS lines that protect the enforcement files, for the team preset to print. */
+export function codeownersSnippet(dir) {
+  return readFileSync(CODEOWNERS_TEMPLATE, 'utf8').replaceAll('{{dir}}', dir)
+}
+
 /** The workspace README from the template, with the goal sentence or the goal's marker. */
 export function renderReadme(name, goal) {
   const values = { name, goal: goal || GOAL_MARKER }
@@ -178,8 +190,9 @@ export function planAgentConfigs(root, agents, dir, writes) {
 /**
  * Plans the setup without writing anything. options is { preset, dir, goal, guardPath, agents };
  * agents null finds the agents in use. Returns { refusals, writes (path → text), executable,
- * created, changed, managerFiles, manager, instructions, warnings, dir, preset, config, goalMarker, agents }. Nothing may be written when
- * refusals is not empty.
+ * created, changed, managerFiles, manager, instructions, warnings, dir, preset, config, goalMarker, agents, codeowners }.
+ * The team preset adds the CI workflow, a pull request template when the project has none, and
+ * codeowners, the CODEOWNERS lines to print. Nothing may be written when refusals is not empty.
  */
 export function planInit(root, options = {}) {
   const plan = {
@@ -196,7 +209,8 @@ export function planInit(root, options = {}) {
     preset: options.preset ?? 'solo',
     config: null,
     goalMarker: !options.goal,
-    agents: []
+    agents: [],
+    codeowners: null
   }
   const refuse = (message) => plan.refusals.push(message)
 
@@ -261,6 +275,20 @@ export function planInit(root, options = {}) {
   if (existsSync(guardPath)) {
     plan.writes.set(`${dir}/scripts/records.mjs`, readFileSync(guardPath, 'utf8'))
     plan.executable.add(`${dir}/scripts/records.mjs`)
+  }
+
+  // 3b. The team preset's CI workflow and pull request template.
+  if (plan.preset === 'team') {
+    const workflow = readFileSync(WORKFLOW_TEMPLATE, 'utf8')
+    const current = readText(root, ENFORCEMENT_WORKFLOW)
+    if (current !== null && current.replace(/\r\n?/g, '\n') !== workflow) {
+      refuse(`${ENFORCEMENT_WORKFLOW} exists and is not ResaLedger's workflow, so init would replace it; move or rename it first`)
+    }
+    plan.writes.set(ENFORCEMENT_WORKFLOW, workflow)
+    const template = PULL_REQUEST_FILES.find((path) => lstatSync(join(root, path), { throwIfNoEntry: false }))
+    if (template) plan.warnings.push(`${template} exists, so init did not write a pull request template; add a "Task: <id>" line at its end`)
+    else plan.writes.set(PULL_REQUEST_FILE, readFileSync(PULL_REQUEST_TEMPLATE, 'utf8'))
+    plan.codeowners = codeownersSnippet(dir)
   }
 
   // 4. The root AGENTS.md and CLAUDE.md.

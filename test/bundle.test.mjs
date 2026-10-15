@@ -144,4 +144,5 @@ test('the bundle embeds the released hashes, without its own guard, so a rebuild
   assert.deepEqual(released.guard, { '0.1.0': 'a'.repeat(64) })
   assert.equal(released['agents-block'], undefined, 'only the files CI judges are embedded')
   assert.match(released['hooks/pre-commit'][version], /^[0-9a-f]{64}$/)
+  assert.match(released.workflow[version], /^[0-9a-f]{64}$/, 'this version\'s workflow template is released with it')
 })

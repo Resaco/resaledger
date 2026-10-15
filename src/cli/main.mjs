@@ -23,7 +23,8 @@ Usage: npx resaledger <command>
 Commands:
   init [--team] [--dir <name>] [--agents <names>] [--yes]
             set ResaLedger up in this repository: the configuration, the
-            workspace README, the guard, the git hooks, the AGENTS.md block
+            workspace README, the guard, the git hooks, the AGENTS.md block,
+            in the team preset the CI workflow and the pull request template,
             and the hook configurations of the agents in use (found by their
             folder or instruction file, such as .claude/, CLAUDE.md, .codex/,
             .cursor/, .gemini/, GEMINI.md or .github/copilot-instructions.md);
@@ -36,13 +37,14 @@ Commands:
             --dry-run only shows the plan, --force replaces 0.x git hooks that
             were changed by hand, --accept-problems writes even when the result
             breaks a 1.0 rule and lists those problems as work to do
-  update [--force] [--agents <names>]
-            renew the guard, the git hooks and the AGENTS.md block when they
-            are a released version, and ResaLedger's entries in the agents'
-            hook configurations that hold them; a file changed by hand is
-            shown and kept, unless --force replaces it. --agents adds the
-            named agents' configurations. The README, the records, the
-            configuration and your own text in AGENTS.md are never touched
+  update [--force] [--workflow] [--agents <names>]
+            renew the guard, the git hooks, the CI workflow and the AGENTS.md
+            block when they are a released version, and ResaLedger's entries
+            in the agents' hook configurations that hold them; a file changed
+            by hand is shown and kept, unless --force replaces it. --workflow
+            adds the CI workflow, which the team preset has already; --agents
+            adds the named agents' configurations. The README, the records,
+            the configuration and your own text in AGENTS.md are never touched
   version   print the version
   help      print this help
 
@@ -243,6 +245,10 @@ export async function initCommand(args) {
   steps.push(`Write the project's own text in ${dir}/README.md where a ${SETUP_MARKER} marker is (${sections.join(', ')}); "handoff" asks for it.`)
   steps.push(...setupCommitSteps(currentBranch(root), plan.config, commitCommand(files)))
   steps.push(`Start working: node ${dir}/scripts/records.mjs work`)
+  if (plan.codeowners) {
+    const lines = plan.codeowners.trimEnd().split('\n').map((line) => `       ${line}`).join('\n')
+    steps.push(`Protect the enforcement files: add these lines to .github/CODEOWNERS, with your own owners, and make "resaledger" a required status check:\n${lines}`)
+  } else steps.push('Optional: check pull requests in CI as well with "npx resaledger update --workflow", and commit the workflow it writes.')
   console.log(`\nNext steps:\n${steps.map((step, index) => `  ${index + 1}. ${step}`).join('\n')}`)
   if (check.status !== 0) process.exit(1)
 }
@@ -260,10 +266,12 @@ function gitRoot() {
 /** update [--force] [--agents <names>], in the repository of the current folder. */
 export function updateCommand(args) {
   let force = false
+  let workflow = false
   let agents = []
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]
     if (arg === '--force') force = true
+    else if (arg === '--workflow') workflow = true
     else if (arg === '--agents' || arg.startsWith('--agents=')) {
       const parsed = parseAgentsValue(arg === '--agents' ? args[++index] : arg.slice('--agents='.length))
       if (parsed.error) {
@@ -272,7 +280,7 @@ export function updateCommand(args) {
       }
       agents = parsed.agents
     } else {
-      console.error(`resaledger: unknown option "${arg}" for update; use --force or --agents <names>`)
+      console.error(`resaledger: unknown option "${arg}" for update; use --force, --workflow or --agents <names>`)
       process.exit(1)
     }
   }
@@ -281,7 +289,7 @@ export function updateCommand(args) {
     console.error('resaledger: the guard could not be built')
     process.exit(1)
   }
-  const plan = planUpdate(root, { force, agents })
+  const plan = planUpdate(root, { force, agents, workflow })
   if (plan.refusals.length > 0) {
     console.error('✖ resaledger update changed nothing:')
     for (const message of plan.refusals) console.error(`  ✖ ${message}`)

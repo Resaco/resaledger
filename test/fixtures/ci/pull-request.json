@@ -1,0 +1,41 @@
+{
+  "event": "pull_request",
+  "source": "github",
+  "base": "1111111111111111111111111111111111111111",
+  "head": "2222222222222222222222222222222222222222",
+  "lane": "lane-a",
+  "fork": false,
+  "ref": null,
+  "before": null,
+  "mergeBase": "3333333333333333333333333333333333333333",
+  "from": null,
+  "rules": { "from": "base", "commit": "1111111111111111111111111111111111111111", "adds": false },
+  "checks": [
+    { "name": "records", "ok": true, "problems": [], "counts": { "tasks": 12, "decisions": 3, "logs": 1 }, "note": null },
+    { "name": "commits", "ok": true, "problems": [], "counts": { "commits": 6 }, "note": null },
+    { "name": "ownership", "ok": true, "problems": [], "counts": { "changed": 2 }, "note": null },
+    { "name": "ids", "ok": true, "problems": [], "counts": { "added": 1, "branches": 3 }, "note": null },
+    { "name": "moved", "ok": true, "problems": [], "counts": { "moved": 2 }, "note": null },
+    { "name": "gates", "ok": true, "problems": [], "counts": { "gates": 3 }, "note": null },
+    { "name": "enforcement", "ok": true, "problems": [], "counts": { "changes": 0, "weakening": 0 }, "note": null }
+  ],
+  "moved": [
+    { "id": "S4", "title": "Store the orders of the bakery shop", "file": "ledger/tasks/S4.md", "from": "doing", "to": "done", "evidence": "`npm test -- server/storage`: 14 of 14 · storage.md" },
+    { "id": "S4.1", "title": "Fix the flaky <upload> test", "file": "ledger/tasks/S4.1.md", "from": null, "to": "todo", "evidence": null }
+  ],
+  "gates": {
+    "mode": "run",
+    "ranOn": "2222222222222222222222222222222222222222",
+    "passed": [
+      { "command": "npm run lint", "seconds": 4 },
+      { "command": "npm test", "seconds": 41 },
+      { "command": "npm run build", "seconds": 18 }
+    ],
+    "failure": null,
+    "stamp": null
+  },
+  "enforcement": [],
+  "release": null,
+  "skipped": null,
+  "ok": true
+}
