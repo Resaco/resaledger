@@ -142,11 +142,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: During a merge, a held task staged exactly as the merged commit has it passes, because it is that lane's own change. The check that ids are unique across locally visible branches (spec section 9) moved to C1, which builds it for CI and adds it to pre-commit.
 
 ### H2 commit-msg and pre-push
-- Status: doing
+- Status: done
 - Depends on: V2
 - Plan: [H-hooks.md](../plan/H-hooks.md#h2-commit-msg-and-pre-push)
-- Evidence: —
-- Notes: A worker builds it on branch `h2-commit-msg-pre-push` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs` on `main` after the merges: 507 of 507 on Node 24.18.0, 22.23.3 and 20.20.2. [commitmsg.test.mjs](../../test/commitmsg.test.mjs) commits through git for every exemption, style, attribution and trailer rule, including people named Claude, Devin, Jules or Kimi, who pass; [prepush.test.mjs](../../test/prepush.test.mjs) pushes to a bare remote, and a commit made with `--no-verify` and no trailer is refused when it is pushed. Not verified: Windows (CI).
+- Notes: Known gaps: with `--amend` the staged diff is taken against HEAD, not the amended commit's parent; and the pre-commit framework runs no hook when a branch is deleted, so deleting a protected branch is not caught under it. On review the lead had the four assistant names that are also first names matched only in forms no person has.
 
 ### H3 Hook scripts and activation
 - Status: done
@@ -165,11 +165,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: The verification state is not shown yet; the lead adds it once V1's stamps merge. A lane that exists only as a remote-tracking branch shows as a stale claim until W2 adds remote lanes.
 
 ### W2 `work --all` across pushed branches
-- Status: todo
+- Status: doing
 - Depends on: W1
 - Plan: [W-work.md](../plan/W-work.md#w2-work---all-across-pushed-branches)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `w2-work-all` in its own worktree, and moves pre-commit's fix for git's hook variables into `localLanes`. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### W3 `task` and `new`
 - Status: doing
@@ -241,11 +241,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 ## I: The installer
 
 ### I1 `init`
-- Status: doing
+- Status: done
 - Depends on: R1, R4, H3
 - Plan: [I-installer.md](../plan/I-installer.md#i1-init)
-- Evidence: —
-- Notes: A worker builds it on branch `i1-init` in its own worktree, sharing the managed-block, guard-building and hook-activation code with `migrate`. The `--agents`, `--no-run` and `--no-ci` flags come with A1, I2 and C3, which add their steps to `init`. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs` on `main` after the merges: 507 of 507 on Node 24.18.0, 22.23.3 and 20.20.2; the 39 tests in [init.test.mjs](../../test/init.test.mjs) set up real repositories in the solo and team presets, with `--yes` and off a terminal, with `--dir`, an existing `ledger/`, `AGENTS.md` and `CLAUDE.md`, husky, a dirty file and a 0.x workspace, and run the printed commit command through the installed hooks. Not verified: Windows (CI); the interactive questions on a real terminal.
+- Notes: `init` and `migrate` share the managed block, the guard build and turning the hooks on (`src/cli/setup.mjs`). `init` also refuses to overwrite a `.githooks/` hook that is not ResaLedger's. The `--agents`, `--no-run` and `--no-ci` flags come with A1, I2 and C3, which add their steps.
 
 ### I2 Detecting the gates
 - Status: todo
@@ -278,11 +278,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: On review the lead made the undo command use root pathspecs, so it is whole when run from a subfolder, and made `migrate` count untracked files that `status.showUntrackedFiles` hides, because the undo's `git clean` would delete them. This workspace's own records must stay valid under the 1.0 rules until M4, or the self-migration test fails.
 
 ### M3 Verification on real workspaces
-- Status: todo
+- Status: doing
 - Depends on: M2
 - Plan: [M-migration.md](../plan/M-migration.md#m3-verification-on-real-workspaces)
 - Evidence: —
-- Notes: —
+- Notes: The lead runs it on copies of private 0.x workspaces in a temporary folder outside this repository; their names, paths and numbers stay in private notes. Next: migrate each copy, check it, read a sample, record the outcome.
 
 ### M4 This repository moves to 1.0
 - Status: todo
