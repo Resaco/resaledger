@@ -1,0 +1,12 @@
+{
+  "session_id": "8f2c4a6e-1b3d-4f5a-9c7e-0d2b4f6a8c1e",
+  "transcript_path": "/home/user/transcripts/session-2026-10-15T09-00-8f2c4a6e.json",
+  "cwd": "/home/user/project",
+  "hook_event_name": "BeforeTool",
+  "timestamp": "2026-10-15T09:01:00.000Z",
+  "tool_name": "run_shell_command",
+  "tool_input": {
+    "command": "npm test",
+    "description": "Run the tests"
+  }
+}

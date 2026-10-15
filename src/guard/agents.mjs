@@ -21,9 +21,10 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { DEFAULTS, loadConfig } from './config.mjs'
 import { handoffProblems } from './handoff.mjs'
+import { activateHooks } from './githooks.mjs'
 import { currentLane } from './lanes.mjs'
 
-export const AGENT_NAMES = Object.freeze(['claude', 'codex'])
+export const AGENT_NAMES = Object.freeze(['claude', 'codex', 'cursor', 'gemini', 'copilot'])
 export const AGENT_EVENTS = Object.freeze(['session-start', 'pre-tool', 'stop'])
 
 // How long a session's state is kept under .git, in days.
@@ -59,17 +60,48 @@ function agentsArgvCommand(argv) {
   return argv.map((word) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`)).join(' ')
 }
 
-const AGENT_ADAPTERS = {
-  claude: {
-    tool(input) {
-      const args = input.tool_input
-      if (!agentsIsObject(args)) return null
-      if (input.tool_name === 'Bash') return typeof args.command === 'string' ? { kind: 'shell', command: args.command } : null
-      if (['Edit', 'Write', 'MultiEdit'].includes(input.tool_name)) return typeof args.file_path === 'string' ? { kind: 'edit', paths: [args.file_path] } : null
-      if (input.tool_name === 'NotebookEdit') return typeof args.notebook_path === 'string' ? { kind: 'edit', paths: [args.notebook_path] } : null
+/** A tool's arguments as an object: the object itself, or a JSON text of one; null otherwise. */
+function agentsToolArgs(args) {
+  if (typeof args === 'string') {
+    try {
+      args = JSON.parse(args)
+    } catch {
       return null
     }
-  },
+  }
+  return agentsIsObject(args) ? args : null
+}
+
+/** The first of the named fields of args that holds a non-empty string, or null. */
+function agentsStringField(args, names) {
+  const name = names.find((key) => typeof args[key] === 'string' && args[key] !== '')
+  return name === undefined ? null : args[name]
+}
+
+const AGENTS_PATH_FIELDS = ['file_path', 'path', 'target_file', 'filePath']
+
+/**
+ * Claude Code's tool input, which the Copilot CLI also sends when it runs the hooks of
+ * .claude/settings.json: tool_name and tool_input, with Claude's tool names.
+ */
+function agentsClaudeTool(input) {
+  const args = input.tool_input
+  if (!agentsIsObject(args)) return null
+  if (input.tool_name === 'Bash') return typeof args.command === 'string' ? { kind: 'shell', command: args.command } : null
+  if (['Edit', 'Write', 'MultiEdit'].includes(input.tool_name)) return typeof args.file_path === 'string' ? { kind: 'edit', paths: [args.file_path] } : null
+  if (input.tool_name === 'NotebookEdit') return typeof args.notebook_path === 'string' ? { kind: 'edit', paths: [args.notebook_path] } : null
+  return null
+}
+
+// Each adapter may also have:
+//   session(input)       { id, cwd } from the agent's own field names;
+//   startOutput(text)    what session start prints, for an agent whose stdout must be JSON;
+//   deny(message)        the agent's JSON for a refused tool, printed besides exit code 2;
+//   remind(message)      the agent's JSON for the end-of-turn reminder, when exit code 2 is
+//                        not how that agent's end-of-turn hook continues the agent;
+//   turnsOnHooks(input)  true for a call that turns on the git hooks when it is the session's first.
+const AGENT_ADAPTERS = {
+  claude: { tool: agentsClaudeTool },
   codex: {
     tool(input) {
       const args = input.tool_input
@@ -80,6 +112,71 @@ const AGENT_ADAPTERS = {
       if (['Bash', 'shell', 'local_shell', 'exec_command'].includes(input.tool_name)) return { kind: 'shell', command }
       return null
     }
+  },
+  cursor: {
+    // Every Cursor hook sends conversation_id; sessionStart also sends session_id.
+    session: (input) => ({
+      id: input.conversation_id ?? input.session_id,
+      cwd: typeof input.cwd === 'string' && input.cwd !== '' ? input.cwd : Array.isArray(input.workspace_roots) ? input.workspace_roots[0] : undefined
+    }),
+    tool(input) {
+      // beforeShellExecution sends the command and its folder at the top level.
+      if (typeof input.command === 'string' && input.tool_name === undefined) return { kind: 'shell', command: input.command }
+      const args = agentsToolArgs(input.tool_input)
+      if (args === null || typeof input.tool_name !== 'string') return null
+      if (/^(?:shell|terminal|run_terminal_cmd|run_terminal_command)$/i.test(input.tool_name)) {
+        return typeof args.command === 'string' ? { kind: 'shell', command: args.command, cwd: agentsStringField(args, ['cwd', 'working_directory']) } : null
+      }
+      if (/^(?:write|edit|strreplace|str_replace|multiedit|search_replace|edit_file|delete|delete_file)$/i.test(input.tool_name)) {
+        const path = agentsStringField(args, AGENTS_PATH_FIELDS)
+        return path === null ? null : { kind: 'edit', paths: [path] }
+      }
+      return null
+    },
+    turnsOnHooks: (input) => typeof input.command === 'string' && input.tool_name === undefined,
+    startOutput: (text) => JSON.stringify({ additional_context: text }),
+    deny: (message) => ({ permission: 'deny', user_message: message, agent_message: message }),
+    remind: (message) => ({ followup_message: message })
+  },
+  gemini: {
+    tool(input) {
+      const args = agentsToolArgs(input.tool_input)
+      if (args === null) return null
+      if (input.tool_name === 'run_shell_command') {
+        return typeof args.command === 'string' ? { kind: 'shell', command: args.command, cwd: agentsStringField(args, ['dir_path', 'directory']) } : null
+      }
+      if (['write_file', 'replace'].includes(input.tool_name)) {
+        const path = agentsStringField(args, AGENTS_PATH_FIELDS)
+        return path === null ? null : { kind: 'edit', paths: [path] }
+      }
+      return null
+    },
+    startOutput: (text) => JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } }),
+    deny: (message) => ({ decision: 'deny', reason: message })
+  },
+  copilot: {
+    session: (input) => ({ id: input.sessionId ?? input.session_id, cwd: input.cwd }),
+    tool(input) {
+      // Claude Code's shape, which Copilot sends to hooks under Claude's event names.
+      if (input.tool_name !== undefined) return agentsClaudeTool(input)
+      if (typeof input.toolName !== 'string') return null
+      const name = input.toolName.toLowerCase()
+      if (name === 'apply_patch') {
+        const patch = typeof input.toolArgs === 'string' && input.toolArgs.includes('*** Begin Patch') ? input.toolArgs : agentsStringField(agentsToolArgs(input.toolArgs) ?? {}, ['input', 'patch'])
+        return patch === null ? null : { kind: 'edit', paths: patchPaths(patch) }
+      }
+      const args = agentsToolArgs(input.toolArgs)
+      if (args === null) return null
+      if (name === 'bash' || name === 'shell') return typeof args.command === 'string' ? { kind: 'shell', command: args.command } : null
+      if (['edit', 'create', 'write', 'str_replace', 'str_replace_editor'].includes(name)) {
+        const path = agentsStringField(args, AGENTS_PATH_FIELDS)
+        return path === null ? null : { kind: 'edit', paths: [path] }
+      }
+      return null
+    },
+    startOutput: (text) => JSON.stringify({ additionalContext: text }),
+    deny: (message) => ({ permissionDecision: 'deny', permissionDecisionReason: message }),
+    remind: (message) => ({ decision: 'block', reason: message })
   }
 }
 
@@ -396,6 +493,11 @@ const AGENTS_GIT_VALUE_OPTIONS = {
   push: ['-o', '--push-option', '--repo', '--receive-pack', '--exec'],
   merge: ['-m', '-F', '-s', '-X', '--message', '--file', '--strategy', '--strategy-option', '--into-name'],
   rebase: ['-s', '-X', '-x', '--onto', '--strategy', '--strategy-option', '--exec'],
+  checkout: ['-b', '-B', '--orphan', '--conflict', '--pathspec-from-file'],
+  switch: ['-c', '-C', '--create', '--force-create', '--orphan', '--conflict'],
+  restore: ['-s', '--source', '--conflict', '--pathspec-from-file'],
+  reset: ['--pathspec-from-file'],
+  clean: ['-e', '--exclude'],
   default: ['-m', '-F', '--message', '--file']
 }
 const AGENTS_COMMIT_SHORT_VALUES = 'mFcCt'
@@ -448,8 +550,11 @@ function agentsPushBranch(destination, current) {
   return destination
 }
 
-/** The refusal for a git command, or null. context holds the configuration and the folder it runs in. */
-function agentsGitRefusal(args, context, cwd) {
+/**
+ * A git command line read up to its subcommand: { folder, settings, sub, rest }. folder is
+ * where it runs after any -C, settings the -c and --config-env values, rest the words after sub.
+ */
+function agentsGitInvocation(args, cwd) {
   let index = 1
   let folder = cwd
   const settings = []
@@ -471,15 +576,96 @@ function agentsGitRefusal(args, context, cwd) {
     else if (value.startsWith('-')) index++
     else break
   }
+  return { folder, settings, sub: args[index], rest: args.slice(index + 1) }
+}
+
+/** True when a short-option word (such as -fd, not --force) holds the letter. */
+function agentsShortHas(option, letter) {
+  return /^-[A-Za-z]+$/.test(option) && option.slice(1).includes(letter)
+}
+
+/** True when a local branch of that name exists, seen from folder. */
+function agentsLocalBranch(folder, name) {
+  return agentsGit(folder, ['rev-parse', '--verify', '-q', `refs/heads/${name}`]) !== null
+}
+
+/**
+ * What a git command throws away, as words for the refusal, or null when it keeps the work:
+ * reset --hard, clean -f, checkout of paths or forced, restore of the worktree, switch -f.
+ */
+function agentsDiscards(sub, options, positionals, folder) {
+  const has = (...names) => options.some((option) => names.includes(option))
+  if (sub === 'reset') return has('--hard') ? 'throws away uncommitted changes' : null
+  if (sub === 'clean') {
+    const force = options.some((option) => option === '--force' || agentsShortHas(option, 'f'))
+    const dryRun = options.some((option) => option === '--dry-run' || agentsShortHas(option, 'n'))
+    return force && !dryRun ? 'deletes untracked files' : null
+  }
+  if (sub === 'switch') return options.some((option) => ['--force', '--discard-changes'].includes(option) || agentsShortHas(option, 'f')) ? 'throws away uncommitted changes' : null
+  if (sub === 'restore') {
+    const worktree = options.some((option) => option === '--worktree' || agentsShortHas(option, 'W'))
+    const staged = options.some((option) => option === '--staged' || agentsShortHas(option, 'S'))
+    return worktree || !staged ? 'throws away uncommitted changes to files' : null
+  }
+  if (sub === 'checkout') {
+    if (options.some((option) => option === '--force' || agentsShortHas(option, 'f'))) return 'throws away uncommitted changes'
+    if (agentsCheckoutPaths(options, positionals, folder)) return 'throws away uncommitted changes to files'
+  }
+  return null
+}
+
+/**
+ * True when a checkout restores paths rather than switching branches: paths after "--", a ".",
+ * a tree-ish and paths, or one word that names an existing path and no local branch.
+ */
+function agentsCheckoutPaths(options, positionals, folder) {
+  if (options.some((option) => ['-b', '-B', '--orphan', '-p', '--patch'].includes(option))) return positionals.some((item) => item.afterDashes)
+  if (positionals.some((item) => item.afterDashes || item.value === '.' || item.value === './')) return true
+  if (positionals.length > 1) return true
+  const [only] = positionals
+  return only !== undefined && only.value !== '-' && existsSync(resolve(folder, only.value)) && !agentsLocalBranch(folder, only.value)
+}
+
+/**
+ * The branch a checkout or switch moves its worktree to: a name, null for a detached HEAD, or
+ * undefined when it does not move it or the guard cannot tell.
+ */
+function agentsSwitchTarget(sub, rest, options, positionals, folder) {
+  const created = rest.findIndex((word) => (sub === 'switch' ? ['-c', '-C', '--create', '--force-create', '--orphan'] : ['-b', '-B', '--orphan']).includes(word))
+  if (created !== -1) return rest[created + 1]
+  if (options.includes('--detach') || (sub === 'switch' && options.includes('-d'))) return null
+  if (sub === 'checkout' && agentsCheckoutPaths(options, positionals, folder)) return undefined
+  const target = positionals[0]?.value
+  if (target === undefined || target === '-' || target.startsWith('@{')) return undefined
+  if (agentsLocalBranch(folder, target)) return target
+  // A commit checks out a detached HEAD; any other name makes a branch from a remote one.
+  if (sub === 'checkout' && agentsGit(folder, ['rev-parse', '--verify', '-q', `${target}^{commit}`]) !== null) return null
+  return target
+}
+
+/** The refusal for a git command, or null. context holds the configuration and the folder it runs in. */
+function agentsGitRefusal(args, context, cwd) {
+  const { folder, settings, sub, rest } = agentsGitInvocation(args, cwd)
   if (settings.some((setting) => AGENTS_HOOKS_PATH.test(setting.split('=')[0]))) {
     return 'this git command changes core.hooksPath for its run, which turns the git hooks off. The hooks stay on; fix what they report instead'
   }
-  const sub = args[index]
   if (sub === undefined) return null
-  const { options, positionals } = agentsGitArguments(sub, args.slice(index + 1))
+  const { options, positionals } = agentsGitArguments(sub, rest)
 
   if (options.some((option) => AGENTS_NO_VERIFY.test(option)) || (sub === 'commit' && agentsCommitSkipsHooks(options))) {
     return `"git ${sub}" with --no-verify skips the git hooks. Never bypass them: fix what the hook reports, or tell the user what blocks you`
+  }
+
+  const discards = agentsDiscards(sub, options, positionals, folder)
+  if (discards) {
+    const worktree = agentsWorktreeOf(context, folder)
+    const branch = worktree ? agentsBranchOf(context, worktree) : null
+    if (branch && context.config.protected.includes(branch)) {
+      return `"git ${sub}" here ${discards} in the checkout of the protected branch "${branch}". Run it only in your own lane's worktree, on your lane's branch`
+    }
+    if (worktree && worktree.top !== agentsOwnTop(context)) {
+      return `"git ${sub}" here ${discards} in another worktree (${worktree.top}${branch ? `, branch "${branch}"` : ''}), not this session's own. Leave other lanes' work to their owners; run it only in your own worktree`
+    }
   }
 
   if (sub === 'config') {
@@ -640,8 +826,41 @@ function agentsWorktreeOf(context, folder) {
   return found
 }
 
+/** A worktree's branch, after any checkout or switch the script ran in it before this command. */
+function agentsBranchOf(context, worktree) {
+  return context.switched.has(worktree.top) ? context.switched.get(worktree.top) : worktree.branch
+}
+
 function agentsBranchAt(context, folder) {
-  return agentsWorktreeOf(context, folder)?.branch ?? null
+  const worktree = agentsWorktreeOf(context, folder)
+  return worktree ? agentsBranchOf(context, worktree) : null
+}
+
+/**
+ * The top of the session's own worktree: where its start was recorded, so that a session whose
+ * folder moved since is still judged by where it started; else the worktree of its folder.
+ */
+function agentsOwnTop(context) {
+  if (context.ownTop !== undefined) return context.ownTop
+  let top = null
+  const file = agentsSessionFile(context, 'start')
+  try {
+    const recorded = JSON.parse(readFileSync(file, 'utf8')).top
+    if (typeof recorded === 'string') top = recorded
+  } catch {}
+  context.ownTop = top ?? agentsWorktreeOf(context, context.cwd)?.top ?? null
+  return context.ownTop
+}
+
+/** Notes the branch a checkout or switch leaves its worktree on, for the commands after it. */
+function agentsTrackSwitch(args, context, cwd) {
+  const { folder, sub, rest } = agentsGitInvocation(args, cwd)
+  if (sub !== 'checkout' && sub !== 'switch') return
+  const worktree = agentsWorktreeOf(context, folder)
+  if (!worktree) return
+  const { options, positionals } = agentsGitArguments(sub, rest)
+  const target = agentsSwitchTarget(sub, rest, options, positionals, folder)
+  if (target !== undefined) context.switched.set(worktree.top, target)
 }
 
 /** The refusal for file edits at the given absolute paths, or null. */
@@ -650,21 +869,23 @@ function agentsEditRefusal(paths, context) {
     if (path.startsWith('/dev/')) continue
     const real = agentsRealPath(path)
     const worktree = agentsWorktreeOf(context, resolve(real, '..'))
-    if (!worktree || !worktree.branch || !context.config.protected.includes(worktree.branch)) continue
+    const branch = worktree ? agentsBranchOf(context, worktree) : null
+    if (!branch || !context.config.protected.includes(branch)) continue
     const inside = relative(worktree.top, real).replace(/\\/g, '/')
     if (inside === '' || inside.startsWith('../') || inside === '..' || inside === '.git' || inside.startsWith('.git/')) continue
     const ignored = spawnSync('git', ['-C', worktree.top, 'check-ignore', '-q', '--', inside], { stdio: 'ignore' })
     if (ignored.status === 0) continue
-    return `"${worktree.branch}" is a protected branch, so files are not edited on it (${inside}). Work in a lane branch: "${context.guard} claim <id>" creates one, or "git switch -c <branch>"`
+    return `"${branch}" is a protected branch, so files are not edited on it (${inside}). Work in a lane branch: "${context.guard} claim <id>" creates one, or "git switch -c <branch>"`
   }
   return null
 }
 
-/** The refusal for a shell command, or null. */
-function agentsShellRefusal(text, context) {
+/** The refusal for a shell command run in folder (default the session's), or null. */
+function agentsShellRefusal(text, context, folder = context.cwd) {
   const commands = shellCommands(text)
-  let cwd = context.cwd
-  const edits = []
+  let cwd = folder
+  // An edit is judged by the branch at its point in the script; its refusal comes after agent.deny's.
+  let editRefusal = null
   for (const command of commands) {
     const program = agentsProgram(command.args[0] ?? '')
     for (const assignment of command.assignments) {
@@ -679,7 +900,8 @@ function agentsShellRefusal(text, context) {
       const reason = agentsGitRefusal(command.args, context, cwd)
       if (reason) return reason
     }
-    for (const path of agentsWrittenPaths(command)) edits.push(resolve(cwd, agentsExpandHome(path)))
+    editRefusal ??= agentsEditRefusal(agentsWrittenPaths(command).map((path) => resolve(cwd, agentsExpandHome(path))), context)
+    if (program === 'git') agentsTrackSwitch(command.args, context, cwd)
     if (program === 'cd' && command.depth === 0 && command.words[1] && !command.words[1].dynamic) cwd = resolve(cwd, agentsExpandHome(command.args[1]))
   }
   if (context.config.agent.deny.length > 0) {
@@ -692,10 +914,10 @@ function agentsShellRefusal(text, context) {
       }
     }
   }
-  return agentsEditRefusal(edits, context)
+  return editRefusal
 }
 
-// Session state, under the git folder: one file per session id.
+// Session state, under the common git folder: one file per session id.
 
 function agentsSessionFile(context, suffix) {
   return context.stateDir ? resolve(context.stateDir, `${context.sessionKey}.${suffix}`) : null
@@ -721,7 +943,7 @@ function agentsRecordStart(context) {
   const temporary = `${file}.${process.pid}.tmp`
   try {
     mkdirSync(context.stateDir, { recursive: true })
-    writeFileSync(temporary, `${JSON.stringify(agentsSnapshot(context.root))}\n`)
+    writeFileSync(temporary, `${JSON.stringify({ ...agentsSnapshot(context.root), top: agentsRealPath(context.root) })}\n`)
     try {
       linkSync(temporary, file)
     } catch (error) {
@@ -749,8 +971,9 @@ function agentsPruneSessions(context) {
   }
 }
 
-/** Prints the refusal and stops with exit code 2. */
-function agentsRefuse(message) {
+/** Prints the refusal and stops with exit code 2; json, when given, is the agent's own form of it on stdout. */
+function agentsRefuse(message, json = null) {
+  if (json) process.stdout.write(`${JSON.stringify(json)}\n`)
   console.error(`✖ ResaLedger: ${message}`)
   process.exit(2)
 }
@@ -760,8 +983,10 @@ function agentsSessionStart(context) {
   agentsPruneSessions(context)
   // work turns the git hooks on, and its output becomes the agent's context.
   const result = spawnSync(process.execPath, [process.argv[1], 'work'], { cwd: context.root, encoding: 'utf8', timeout: AGENTS_WORK_TIMEOUT })
-  if (result.stdout) process.stdout.write(result.stdout)
-  if (result.stderr) process.stdout.write(result.stderr)
+  const text = `${result.stdout ?? ''}${result.stderr ?? ''}`
+  const { startOutput } = context.adapter
+  if (startOutput) process.stdout.write(`${startOutput(text)}\n`)
+  else if (text) process.stdout.write(text)
 }
 
 function agentsStop(context) {
@@ -795,17 +1020,22 @@ function agentsStop(context) {
   }
   const shown = problems.slice(0, AGENTS_REMINDER_PROBLEMS).map(({ file, line, message }) => `  - ${file ? `${file}${line ? `:${line}` : ''}: ` : ''}${message}`)
   if (problems.length > AGENTS_REMINDER_PROBLEMS) shown.push(`  - and ${problems.length - AGENTS_REMINDER_PROBLEMS} more`)
-  agentsRefuse(`this session changed the repository, and "${context.guard} handoff" does not pass yet:
+  const message = `this session changed the repository, and "${context.guard} handoff" does not pass yet:
 ${shown.join('\n')}
-Finish the work and run handoff, or tell the user exactly what is left. (This reminder comes once per session.)`)
+Finish the work and run handoff, or tell the user exactly what is left. (This reminder comes once per session.)`
+  const { remind } = context.adapter
+  if (!remind) return agentsRefuse(message)
+  // This agent continues on its own JSON with exit code 0; the message on stderr is for its log.
+  process.stdout.write(`${JSON.stringify(remind(`ResaLedger: ${message}`))}\n`)
+  console.error(`✖ ResaLedger: ${message}`)
 }
 
 /** The repository, its configuration and the session, for one hook call; null outside a repository. */
-function agentsContext(session) {
+function agentsContext(session, adapter) {
   const cwd = typeof session.cwd === 'string' && session.cwd !== '' && existsSync(session.cwd) ? resolve(session.cwd) : process.cwd()
-  const out = agentsGit(cwd, ['rev-parse', '--show-toplevel', '--git-common-dir', '--git-path', 'resaledger/sessions'])
+  const out = agentsGit(cwd, ['rev-parse', '--show-toplevel', '--git-common-dir'])
   if (out === null) return null
-  const [top, common, state] = out.split('\n')
+  const [top, common] = out.split('\n')
   const root = resolve(top)
   process.chdir(root)
   const loaded = loadConfig((path) => {
@@ -826,9 +1056,13 @@ function agentsContext(session) {
     configProblems: loaded.problems,
     guard: `node ${effective.dir}/scripts/records.mjs`,
     commonDir: agentsRealPath(resolve(cwd, common)),
-    stateDir: key && !key.startsWith('.') ? resolve(cwd, state) : null,
+    // In the common git folder, shared by every worktree: a session that moves to another
+    // worktree keeps its start, and so the worktree it started in.
+    stateDir: key && !key.startsWith('.') ? resolve(cwd, common, 'resaledger', 'sessions') : null,
     sessionKey: key,
-    worktrees: new Map()
+    adapter,
+    worktrees: new Map(),
+    switched: new Map()
   }
 }
 
@@ -853,31 +1087,37 @@ export function hookCommand(agent, event, text = '') {
   let refusal = null
   try {
     const session = adapter.session ? adapter.session(input) : { id: input.session_id, cwd: input.cwd }
-    const context = agentsContext(session)
+    const context = agentsContext(session, adapter)
     if (context === null) return
     if (event === 'session-start') return agentsSessionStart(context)
     if (event === 'stop') {
       context.config = context.loadedConfig
       return agentsStop(context)
     }
+    // Cursor's cloud agents run no sessionStart hook, so their first shell call turns the git hooks on.
+    if (adapter.turnsOnHooks?.(input) && !existsSync(agentsSessionFile(context, 'start') ?? '')) activateHooks()
     agentsRecordStart(context)
     const action = adapter.tool(input)
     if (action === null) return
-    if (action.kind === 'shell') refusal = agentsShellRefusal(action.command, context)
+    if (action.kind === 'shell') refusal = agentsShellRefusal(action.command, context, action.cwd ? resolve(context.cwd, agentsExpandHome(action.cwd)) : context.cwd)
     else if (action.kind === 'edit') refusal = agentsEditRefusal(action.paths.map((path) => resolve(context.cwd, agentsExpandHome(path))), context)
   } catch {
     return
   }
-  if (refusal) agentsRefuse(refusal)
+  if (refusal) agentsRefuse(refusal, adapter.deny ? adapter.deny(`ResaLedger: ${refusal}`) : null)
 }
 
 // The configurations that call the hook. The command lines never change between versions,
-// because Codex asks the user to trust a hook again when its command changes.
+// because Codex asks the user to trust a hook again when its command changes. Claude Code,
+// Codex and Gemini CLI group handlers under a matcher; Cursor and Copilot list the handlers
+// themselves (flat) and take a "version" next to "hooks".
+
+const AGENTS_TIMEOUTS = { 'session-start': 30, 'pre-tool': 20, stop: 60 }
 
 const AGENT_CONFIGS = {
   claude: {
     file: '.claude/settings.json',
-    command: (dir, event) => `node "$CLAUDE_PROJECT_DIR/${dir}/scripts/records.mjs" hook claude ${event}`,
+    handler: (dir, event) => ({ type: 'command', command: `node "$CLAUDE_PROJECT_DIR/${dir}/scripts/records.mjs" hook claude ${event}`, timeout: AGENTS_TIMEOUTS[event] }),
     events: [
       { name: 'SessionStart', event: 'session-start' },
       { name: 'PreToolUse', event: 'pre-tool', matcher: 'Bash|Edit|Write|MultiEdit|NotebookEdit' },
@@ -887,15 +1127,50 @@ const AGENT_CONFIGS = {
   codex: {
     file: '.codex/hooks.json',
     // Codex runs hooks in the session's folder, so the command finds the repository's top first.
-    command: (dir, event) => `node "$(git rev-parse --show-toplevel)/${dir}/scripts/records.mjs" hook codex ${event}`,
+    handler: (dir, event) => ({ type: 'command', command: `node "$(git rev-parse --show-toplevel)/${dir}/scripts/records.mjs" hook codex ${event}`, timeout: AGENTS_TIMEOUTS[event] }),
     events: [
       { name: 'SessionStart', event: 'session-start' },
       { name: 'PreToolUse', event: 'pre-tool', matcher: 'Bash|apply_patch' },
       { name: 'Stop', event: 'stop' }
     ]
+  },
+  cursor: {
+    file: '.cursor/hooks.json',
+    flat: true,
+    version: 1,
+    // Cursor runs project hooks from the project's root. A hook that crashes or times out lets
+    // the tool run unless failClosed is set; loop_limit 1 lets the reminder continue the agent once.
+    handler: (dir, event) => ({ command: `node ${dir}/scripts/records.mjs hook cursor ${event}` }),
+    events: [
+      { name: 'sessionStart', event: 'session-start' },
+      { name: 'beforeShellExecution', event: 'pre-tool', extra: { failClosed: true } },
+      { name: 'preToolUse', event: 'pre-tool', extra: { failClosed: true } },
+      { name: 'stop', event: 'stop', extra: { loop_limit: 1 } }
+    ]
+  },
+  gemini: {
+    file: '.gemini/settings.json',
+    // Gemini CLI's timeouts are in milliseconds.
+    handler: (dir, event) => ({ name: `resaledger-${event}`, type: 'command', command: `node "$GEMINI_PROJECT_DIR/${dir}/scripts/records.mjs" hook gemini ${event}`, timeout: AGENTS_TIMEOUTS[event] * 1000 }),
+    events: [
+      { name: 'SessionStart', event: 'session-start' },
+      { name: 'BeforeTool', event: 'pre-tool', matcher: 'run_shell_command|write_file|replace' },
+      { name: 'AfterAgent', event: 'stop' }
+    ]
+  },
+  copilot: {
+    file: '.github/hooks/resaledger.json',
+    flat: true,
+    version: 1,
+    // The cloud agent runs only "bash"; the CLI may run hooks in a subfolder.
+    handler: (dir, event) => ({ type: 'command', bash: `node "$(git rev-parse --show-toplevel)/${dir}/scripts/records.mjs" hook copilot ${event}`, timeoutSec: AGENTS_TIMEOUTS[event] }),
+    events: [
+      { name: 'sessionStart', event: 'session-start' },
+      { name: 'preToolUse', event: 'pre-tool' },
+      { name: 'agentStop', event: 'stop' }
+    ]
   }
 }
-const AGENTS_TIMEOUTS = { 'session-start': 30, 'pre-tool': 20, stop: 60 }
 
 /** The configuration file an agent's hooks live in, relative to the repository root. */
 export function agentConfigFile(agent) {
@@ -907,20 +1182,35 @@ export function isLedgerHookCommand(command) {
   return typeof command === 'string' && /scripts\/records\.mjs\\?"?\s+hook\b/.test(command)
 }
 
-/** ResaLedger's entries for an agent: { EventName: matcher group }. */
+/** True when a handler, grouped or flat, runs ResaLedger's hook command. */
+function agentsOwnHandler(handler) {
+  return agentsIsObject(handler) && (isLedgerHookCommand(handler.command) || isLedgerHookCommand(handler.bash))
+}
+
+/** ResaLedger's entries for an agent: { EventName: matcher group }, or { EventName: handler } for a flat one. */
 export function agentHookEntries(agent, dir) {
-  const { command, events } = AGENT_CONFIGS[agent]
+  const { handler, events, flat } = AGENT_CONFIGS[agent]
   const entries = {}
-  for (const { name, event, matcher } of events) {
-    entries[name] = { ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command: command(dir, event), timeout: AGENTS_TIMEOUTS[event] }] }
+  for (const { name, event, matcher, extra } of events) {
+    entries[name] = flat ? { ...handler(dir, event), ...extra } : { ...(matcher ? { matcher } : {}), hooks: [handler(dir, event)] }
   }
   return entries
 }
 
-/** The JSON to add by hand under "hooks", for a file the merge cannot read. */
+/** The JSON to add by hand, for a file the merge cannot read. */
 export function agentConfigSnippet(agent, dir) {
+  const { version } = AGENT_CONFIGS[agent]
   const entries = agentHookEntries(agent, dir)
-  return JSON.stringify({ hooks: Object.fromEntries(Object.entries(entries).map(([name, group]) => [name, [group]])) }, null, 2)
+  return JSON.stringify({ ...(version ? { version } : {}), hooks: Object.fromEntries(Object.entries(entries).map(([name, entry]) => [name, [entry]])) }, null, 2)
+}
+
+/** An entry under an event without ResaLedger's handlers: { own, rest }, rest null when nothing is left. */
+function agentsWithoutOwn(entry, flat) {
+  if (flat) return agentsOwnHandler(entry) ? { own: true, rest: null } : { own: false, rest: entry }
+  const handlers = agentsIsObject(entry) && Array.isArray(entry.hooks) ? entry.hooks : []
+  const others = handlers.filter((handler) => !agentsOwnHandler(handler))
+  if (others.length === handlers.length) return { own: false, rest: entry }
+  return { own: true, rest: others.length > 0 ? { ...entry, hooks: others } : null }
 }
 
 /**
@@ -929,6 +1219,7 @@ export function agentConfigSnippet(agent, dir) {
  * everything else keeps its meaning and its order. Returns { text, changed } or { error }.
  */
 export function mergeAgentConfig(agent, text, dir) {
+  const { flat, version } = AGENT_CONFIGS[agent]
   let settings = {}
   if (text !== null && text !== undefined && text.trim() !== '') {
     try {
@@ -950,29 +1241,38 @@ export function mergeAgentConfig(agent, text, dir) {
     if (!Array.isArray(hooks[name])) continue
     const kept = []
     let removed = false
-    for (const group of hooks[name]) {
-      const handlers = agentsIsObject(group) && Array.isArray(group.hooks) ? group.hooks : null
-      const own = handlers ? handlers.filter((handler) => agentsIsObject(handler) && isLedgerHookCommand(handler.command)) : []
-      if (own.length === 0) {
-        kept.push(group)
+    for (const entry of hooks[name]) {
+      const { own, rest } = agentsWithoutOwn(entry, flat)
+      if (!own) {
+        kept.push(entry)
         continue
       }
       removed = true
       positions[name] ??= kept.length
-      const others = handlers.filter((handler) => !own.includes(handler))
-      if (others.length > 0) kept.push({ ...group, hooks: others })
+      if (rest !== null) kept.push(rest)
     }
     if (removed && kept.length === 0 && !(name in entries)) delete hooks[name]
     else hooks[name] = kept
   }
-  for (const [name, group] of Object.entries(entries)) {
+  for (const [name, entry] of Object.entries(entries)) {
     const list = hooks[name] ?? []
-    list.splice(positions[name] ?? list.length, 0, group)
+    list.splice(positions[name] ?? list.length, 0, entry)
     hooks[name] = list
   }
+  // A new file starts with the format's version; an existing one keeps its own.
+  if (version && !('version' in settings)) settings = { version, ...settings }
   settings.hooks = hooks
   const after = JSON.stringify(settings, null, 2)
   return { text: `${after}\n`, changed: after !== before || text === null || text === undefined }
+}
+
+/** True when an agent's configuration file holds ResaLedger's hook command, even as invalid JSON. */
+export function agentConfigured(root, agent) {
+  try {
+    return isLedgerHookCommand(readFileSync(resolve(root, agentConfigFile(agent)), 'utf8'))
+  } catch {
+    return false
+  }
 }
 
 /** The agents in use in a repository: their folder or instruction file exists. */
@@ -980,5 +1280,9 @@ export function detectAgents(root) {
   const found = []
   if (existsSync(resolve(root, '.claude')) || existsSync(resolve(root, 'CLAUDE.md'))) found.push('claude')
   if (existsSync(resolve(root, '.codex'))) found.push('codex')
+  if (existsSync(resolve(root, '.cursor')) || existsSync(resolve(root, '.cursorrules'))) found.push('cursor')
+  if (existsSync(resolve(root, '.gemini')) || existsSync(resolve(root, 'GEMINI.md'))) found.push('gemini')
+  const copilot = ['.github/copilot-instructions.md', '.github/instructions', '.github/copilot', '.github/hooks']
+  if (copilot.some((path) => existsSync(resolve(root, path)))) found.push('copilot')
   return found
 }

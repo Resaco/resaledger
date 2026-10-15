@@ -1,0 +1,7 @@
+{
+  "sessionId": "5e1d9c3b-7a2f-4b6e-8d0c-3f5a7b9d1e2c",
+  "timestamp": 1760518860000,
+  "cwd": "/home/user/project",
+  "toolName": "bash",
+  "toolArgs": "{\"command\":\"npm test\",\"description\":\"Run the tests\"}"
+}
