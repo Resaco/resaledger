@@ -130,7 +130,7 @@ export function main(argv) {
   else if (command === 'commit-msg') {
     if (!argv[1]) fail('commit-msg needs the message file, as git passes it: commit-msg <file>')
     commitMsg(argv[1])
-  } else if (command === 'pre-push') prePush(readStdin())
+  } else if (command === 'pre-push') prePush(readStdin(), argv.slice(1))
   else fail(`unknown command "${command}"; run "help" for the list`)
 }
 

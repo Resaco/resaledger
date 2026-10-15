@@ -122,8 +122,13 @@ export function taskTrailers(message) {
   return { ids, maintenance }
 }
 
-/** Why a commit is exempt from the range check, or null. */
-function rangeExemption(commit, context) {
+/**
+ * Why a commit is exempt from the trailer rules, or null: 'merge' (more than one parent),
+ * 'revert' (made by git revert), 'release' (a "Release vX.Y.Z" subject), or 'github' (a commit
+ * GitHub made when merging a pull request, only with context.skipGitHubMerges).
+ * commit is { parents, committer, subject, message }.
+ */
+export function commitExemption(commit, context) {
   if (commit.parents.length > 1) return 'merge'
   if (RANGE_REVERT.test(commit.message)) return 'revert'
   if (RANGE_RELEASE.test(commit.subject)) return 'release'
@@ -132,11 +137,78 @@ function rangeExemption(commit, context) {
 }
 
 /** The task file for an id among a tasks folder's entries: <id>.md or <id>-<slug>.md. */
-function rangeTaskFile(entries, id) {
-  for (const name of entries.keys()) {
+export function taskFileFor(names, id) {
+  for (const name of names) {
     if (name === `${id}.md` || (name.startsWith(`${id}-`) && name.endsWith('.md'))) return name
   }
   return null
+}
+
+/**
+ * The trailer problems of one commit, spec 5.9, as { file: commit.short, line: 0, message }.
+ * checkRange calls it for each commit of a range, and commit-msg for the commit being made.
+ *
+ * commit is { short, parents, committer, subject, message, paths }. context is { config, lane,
+ * skipGitHubMerges, task, startLane }: task(id) is the parsed task in the commit's own tree,
+ * or null when it has no file there; startLane(id) is the task's Lane where the range starts
+ * (null when the task is not there, has no Lane, or there is no start). A task whose Lane is
+ * not the lane is accepted when that Lane was set after the start. lane null skips the lane rule.
+ */
+export function checkCommit(commit, context) {
+  const { config } = context
+  const lane = context.lane ?? null
+  const tasksFolder = `${config.dir}/tasks`
+  if (commitExemption(commit, context) !== null) return []
+  if (!commit.paths.some((path) => isCode(path, config))) return []
+  const problems = []
+  const problem = (message) => problems.push({ file: commit.short, line: 0, message: `"${commit.subject}" ${message}` })
+  const { ids, maintenance } = taskTrailers(commit.message)
+  if (ids.length === 0 && !maintenance) {
+    problem(
+      'changes code but names no task. Add a trailer line "Task: <id>" to the message body for the task it belongs to, or "Task: maintenance" for a change with no behaviour change'
+    )
+    return problems
+  }
+  const valid = []
+  for (const id of ids) {
+    if (TASK_ID.test(id)) valid.push(id)
+    else
+      problem(
+        `has "${id}" in its Task: trailer, which is not a task id. Write ids such as S4 or S4.1, separated by commas, or "maintenance" in lowercase`
+      )
+  }
+
+  const laneChecks = []
+  for (const id of valid) {
+    const task = context.task(id)
+    if (task === null) {
+      problem(`names task ${id}, which has no file in ${tasksFolder}/ in that commit. Add the task file, or name the task the change belongs to`)
+      continue
+    }
+    if (task.status !== 'doing' && task.status !== 'done') {
+      problem(
+        `names task ${id}, which is ${task.status ?? 'without a status'} in that commit. A commit can only name a task that is doing or done in its own tree: claim the task first, or name the task the change belongs to`
+      )
+      continue
+    }
+    if (lane !== null && task.lane !== lane) laneChecks.push({ id, task })
+  }
+
+  // The lane rule only refuses naming a task that another lane held before the start: a Lane
+  // equal to this lane, or set after the start (by a claim, also in a records-only commit, or
+  // under a branch name that was later renamed), is accepted. Taking a held task without
+  // claim --take is caught by the ownership check in pre-commit and CI (H1 and C1), not here.
+  for (const { id, task } of laneChecks) {
+    if (task.lane === null) {
+      problem(`names task ${id}, which has no Lane in that commit. Claim the task for "${lane}" first`)
+      continue
+    }
+    if (context.startLane(id) !== task.lane) continue
+    problem(
+      `names task ${id}, which is held by lane "${task.lane}" before this range, not by "${lane}". Name a task this lane holds, or take it over with claim --take`
+    )
+  }
+  return problems
 }
 
 /**
@@ -148,7 +220,8 @@ function rangeTaskFile(entries, id) {
  * GitHub made when merging a pull request are skipped (the CI push check); and the repository,
  * by default the one of the current folder.
  *
- * Merge commits, commits made by git revert and release commits are skipped. A commit that
+ * Each commit is judged by checkCommit, with its own tree and the tasks at `from`: merge
+ * commits, commits made by git revert and release commits are skipped. A commit that
  * changes code needs a Task: trailer; each id it names must be doing or done in that commit's
  * own tree, with a Lane there that is the lane or was set inside the range (not held by another
  * lane already at `from`). "maintenance" is allowed.
@@ -156,106 +229,64 @@ function rangeTaskFile(entries, id) {
 export function checkRange(from, to, context) {
   const { config } = context
   const root = context.root ?? repositoryRoot()
-  const lane = context.lane ?? null
   const tasksFolder = `${config.dir}/tasks`
-  const perCommit = [] // the problems of each commit, in commit order
-  const pending = [] // commits that change code and name tasks: their trees are read below
-  const all = () => perCommit.flat()
+  const commits = rangeCommits(root, from, to).filter(
+    (commit) => commitExemption(commit, context) === null && commit.paths.some((path) => isCode(path, config))
+  )
+  if (commits.length === 0) return []
+  const hashBytes = commits[0].hash.length / 2
 
-  for (const commit of rangeCommits(root, from, to)) {
-    if (rangeExemption(commit, context) !== null) continue
-    if (!commit.paths.some((path) => isCode(path, config))) continue
-    const own = []
-    perCommit.push(own)
-    const problem = (message) => own.push({ file: commit.short, line: 0, message: `"${commit.subject}" ${message}` })
-    const { ids, maintenance } = taskTrailers(commit.message)
-    if (ids.length === 0 && !maintenance) {
-      problem(
-        'changes code but names no task. Add a trailer line "Task: <id>" to the message body for the task it belongs to, or "Task: maintenance" for a change with no behaviour change'
-      )
-      continue
-    }
-    const valid = []
-    for (const id of ids) {
-      if (TASK_ID.test(id)) valid.push(id)
-      else
-        problem(
-          `has "${id}" in its Task: trailer, which is not a task id. Write ids such as S4 or S4.1, separated by commas, or "maintenance" in lowercase`
-        )
-    }
-    if (valid.length > 0) pending.push({ commit, ids: valid, problem })
-  }
-  if (pending.length === 0) return all()
-
-  // One batch for the tasks folder of every pending commit, one for the task files they name.
-  const hashBytes = pending[0].commit.hash.length / 2
+  // One batch for the tasks folder of every commit that names a task id, one for the task files they name.
+  const naming = commits.filter((commit) => taskTrailers(commit.message).ids.some((id) => TASK_ID.test(id)))
   const trees = rangeObjects(
     root,
-    pending.map(({ commit }) => `${commit.hash}:${tasksFolder}`)
+    naming.map((commit) => `${commit.hash}:${tasksFolder}`)
   )
+  const entriesOf = new Map()
   const wanted = []
-  for (const item of pending) {
-    const tree = trees.get(`${item.commit.hash}:${tasksFolder}`)
-    item.entries = tree && tree.type === 'tree' ? rangeTreeEntries(tree.data, hashBytes) : new Map()
-    item.files = new Map(item.ids.map((id) => [id, rangeTaskFile(item.entries, id)]))
-    for (const name of item.files.values()) if (name !== null) wanted.push(item.entries.get(name))
+  for (const commit of naming) {
+    const tree = trees.get(`${commit.hash}:${tasksFolder}`)
+    const entries = tree && tree.type === 'tree' ? rangeTreeEntries(tree.data, hashBytes) : new Map()
+    entriesOf.set(commit.hash, entries)
+    for (const id of taskTrailers(commit.message).ids) {
+      const name = TASK_ID.test(id) ? taskFileFor(entries.keys(), id) : null
+      if (name !== null) wanted.push(entries.get(name))
+    }
   }
   const blobs = rangeObjects(root, wanted)
   const parsed = new Map()
-  const taskIn = (item, id) => {
-    const name = item.files.get(id)
+  const taskIn = (entries, id) => {
+    const name = taskFileFor(entries.keys(), id)
     if (name === null) return null
-    const oid = item.entries.get(name)
+    const oid = entries.get(name)
     const key = `${oid} ${name}`
     if (!parsed.has(key)) parsed.set(key, parseTask(`${tasksFolder}/${name}`, blobs.get(oid)?.data.toString('utf8') ?? ''))
     return parsed.get(key)
   }
 
-  const laneChecks = []
-  for (const item of pending) {
-    for (const id of item.ids) {
-      const task = taskIn(item, id)
-      if (task === null) {
-        item.problem(`names task ${id}, which has no file in ${tasksFolder}/ in that commit. Add the task file, or name the task the change belongs to`)
-        continue
-      }
-      if (task.status !== 'doing' && task.status !== 'done') {
-        item.problem(
-          `names task ${id}, which is ${task.status ?? 'without a status'} in that commit. A commit can only name a task that is doing or done in its own tree: claim the task first, or name the task the change belongs to`
-        )
-        continue
-      }
-      if (lane !== null && task.lane !== lane) laneChecks.push({ item, id, task })
-    }
-  }
-  if (laneChecks.length === 0) return all()
-
-  // The lane rule only refuses naming a task that another lane held before this range: a Lane
-  // equal to this lane, or set inside the range (by a claim, also in a records-only commit, or
-  // under a branch name that was later renamed), is accepted. Taking a held task without
-  // claim --take is caught by the ownership check in pre-commit and CI (H1 and C1), not here.
+  // The Lanes at `from`, read only when the lane rule needs one.
+  let startEntries = null
   const lanesAtStart = new Map() // id → its Lane at `from`, or null when the task is not there or has none
-  if (from) {
-    const startTree = rangeObjects(root, [`${from}:${tasksFolder}`]).get(`${from}:${tasksFolder}`)
-    const startEntries = startTree && startTree.type === 'tree' ? rangeTreeEntries(startTree.data, hashBytes) : new Map()
-    const startFiles = new Map()
-    for (const { id } of laneChecks) startFiles.set(id, rangeTaskFile(startEntries, id))
-    const startBlobs = rangeObjects(root, [...startFiles.values()].filter((name) => name !== null).map((name) => startEntries.get(name)))
-    for (const [id, name] of startFiles) {
-      const blob = name === null ? undefined : startBlobs.get(startEntries.get(name))
-      lanesAtStart.set(id, blob ? parseTask(`${tasksFolder}/${name}`, blob.data.toString('utf8')).lane : null)
+  const startLane = (id) => {
+    if (!from) return null
+    if (lanesAtStart.has(id)) return lanesAtStart.get(id)
+    if (startEntries === null) {
+      const startTree = rangeObjects(root, [`${from}:${tasksFolder}`]).get(`${from}:${tasksFolder}`)
+      startEntries = startTree && startTree.type === 'tree' ? rangeTreeEntries(startTree.data, hashBytes) : new Map()
     }
+    const name = taskFileFor(startEntries.keys(), id)
+    const blob = name === null ? undefined : rangeObjects(root, [startEntries.get(name)]).get(startEntries.get(name))
+    const lane = blob ? parseTask(`${tasksFolder}/${name}`, blob.data.toString('utf8')).lane : null
+    lanesAtStart.set(id, lane)
+    return lane
   }
-  for (const { item, id, task } of laneChecks) {
-    if (task.lane === null) {
-      item.problem(`names task ${id}, which has no Lane in that commit. Claim the task for "${lane}" first`)
-      continue
-    }
-    const startLane = from ? lanesAtStart.get(id) : null
-    if (startLane !== task.lane) continue
-    item.problem(
-      `names task ${id}, which is held by lane "${task.lane}" before this range, not by "${lane}". Name a task this lane holds, or take it over with claim --take`
-    )
-  }
-  return all()
+
+  return commits.flatMap((commit) =>
+    checkCommit(commit, {
+      ...context,
+      config,
+      task: (id) => taskIn(entriesOf.get(commit.hash) ?? new Map(), id),
+      startLane
+    })
+  )
 }

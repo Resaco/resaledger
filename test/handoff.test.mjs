@@ -209,8 +209,10 @@ test('a commit made with --no-verify that names no task fails', () => {
 /** A team repository with S1 claimed on lane s1, and a bare origin with main pushed. */
 function teamLane() {
   const r = workspace({ config: { preset: 'team' }, files: { 'ledger/tasks/S1.md': '# S1 Store the orders\n\n- Status: todo\n' } })
-  r.remote()
-  committed(r.push('main'))
+  // main is protected, so the remote fetches it rather than being pushed to.
+  const remote = r.remote()
+  committed(run(remote, 'git', ['fetch', '-q', r.root, 'main:main']))
+  committed(r.fetch())
   committed(r.git('checkout', '-q', '-b', 's1'))
   commit(r, { 'ledger/tasks/S1.md': doingTask('S1', 's1') }, 'chore: claim S1', 'Task: S1')
   commit(r, { 'src/orders.js': 'export const orders = []\n', 'ledger/tasks/S1.md': doingTask('S1', 's1', 'Stored. Next: views.') }, 'feat: store orders', 'Task: S1')

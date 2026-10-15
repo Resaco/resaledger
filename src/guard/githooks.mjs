@@ -2,11 +2,13 @@
 // in this clone, and turning them on.
 import { readFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
-import { loadConfig } from './config.mjs'
+import { CONFIG_FILE, loadConfig } from './config.mjs'
 import { runGates } from './gates.mjs'
 import { branchTaskFiles, idCollisions } from './ids.mjs'
 import { currentLane, localLanes } from './lanes.mjs'
 import { ownershipProblems, taskRecordsById } from './ownership.mjs'
+import { checkCommit, checkRange, commitExemption, taskFileFor } from './range.mjs'
+import { parseTask } from './tasks.mjs'
 import { fail, git, repositoryRoot } from './util.mjs'
 import { checkWorkspace, isCode, loadWorkspace, treeReader } from './workspace.mjs'
 
@@ -218,8 +220,286 @@ export function preCommit() {
   }
 }
 
-/** The commit-msg hook, given the message file. A placeholder until H2: header, attribution, trailers. */
-export function commitMsg(file) {}
+/**
+ * The names that aiAttribution "forbid" refuses in a trailer: models, assistants and their
+ * vendors, matched as whole words in any case, and the vendors' e-mail domains.
+ */
+export const AI_ATTRIBUTION = Object.freeze({
+  names: Object.freeze([
+    'Claude',
+    'Anthropic',
+    'OpenAI',
+    'ChatGPT',
+    'GPT',
+    'Codex',
+    'Copilot',
+    'Gemini',
+    'Jules',
+    'Cursor',
+    'Grok',
+    'xAI',
+    'Kimi',
+    'Moonshot',
+    'Mistral',
+    'Devin',
+    'Aider',
+    'Windsurf',
+    'Codeium',
+    'DeepSeek',
+    'Qwen',
+    'Amazon Q'
+  ]),
+  domains: Object.freeze([
+    'anthropic.com',
+    'openai.com',
+    'cursor.com',
+    'cursor.sh',
+    'x.ai',
+    'moonshot.ai',
+    'moonshot.cn',
+    'mistral.ai',
+    'cognition.ai',
+    'aider.chat',
+    'codeium.com',
+    'windsurf.com',
+    'deepseek.com'
+  ])
+})
 
-/** The pre-push hook, given git's lines on stdin. A placeholder until H2: protected branches, the pushed range. */
-export function prePush(input) {}
+const GITHOOKS_ESCAPE = /[.*+?^${}()|[\]\\]/g
+// A name as a word: no letter or digit before it, no letter after it (so "GPT-4o" and "Claude3" match, "cursory" does not).
+const GITHOOKS_AI_NAME = new RegExp(
+  `(?<![A-Za-z0-9])(?:${AI_ATTRIBUTION.names.map((name) => name.replace(GITHOOKS_ESCAPE, '\\$&').replace(/ /g, '[\\s-]+')).join('|')})(?![A-Za-z])`,
+  'i'
+)
+const GITHOOKS_AI_DOMAIN = new RegExp(
+  `@(?:[A-Za-z0-9-]+\\.)*(?:${AI_ATTRIBUTION.domains.map((domain) => domain.replace(GITHOOKS_ESCAPE, '\\$&')).join('|')})(?![A-Za-z0-9-]|\\.[A-Za-z0-9])`,
+  'i'
+)
+// A trailer whose key ends in -by or -with: Co-authored-by, Signed-off-by, Assisted-by, Generated-with.
+const GITHOOKS_ATTRIBUTION_TRAILER = /^[A-Za-z0-9][A-Za-z0-9-]*-(?:by|with)[ \t]*:/i
+// type(scope)!: description, after any of git's fixup!, squash! and amend! prefixes.
+const GITHOOKS_CONVENTIONAL = /^(?:(?:fixup|squash|amend)! )*[a-z]+(?:\([^()\s][^()]*\))?!?: \S/
+const GITHOOKS_ZERO_OID = /^0+$/
+
+/** The comment prefix of commit messages: core.commentString or core.commentChar, '#' by default and for "auto". */
+function githooksCommentPrefix() {
+  for (const key of ['core.commentString', 'core.commentChar']) {
+    let value = ''
+    try {
+      value = git('config', '--get', key)
+    } catch {
+      // Unset.
+    }
+    if (value !== '' && value !== 'auto') return value
+  }
+  return '#'
+}
+
+/**
+ * The message as git stores it with the default cleanup: comment lines and everything from
+ * the scissors line of `git commit -v` down are dropped, trailing spaces trimmed, runs of
+ * blank lines collapsed, and blank lines at the start and the end removed.
+ */
+function githooksCleanMessage(text, comment) {
+  const scissors = `${comment} ------------------------ >8 ------------------------`
+  const kept = []
+  for (const line of String(text).replace(/\r\n?/g, '\n').split('\n')) {
+    if (line === scissors) break
+    if (line.startsWith(comment)) continue
+    kept.push(line.trimEnd())
+  }
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').replace(/^\n+/, '').replace(/\n+$/, '')
+}
+
+/** The attribution trailers of a message that name a model, an assistant or its vendor, as problems. */
+function githooksAttributionProblems(message) {
+  const problems = []
+  for (const line of message.split('\n').slice(1)) {
+    if (!GITHOOKS_ATTRIBUTION_TRAILER.test(line)) continue
+    if (!GITHOOKS_AI_NAME.test(line) && !GITHOOKS_AI_DOMAIN.test(line)) continue
+    problems.push({
+      file: '',
+      line: 0,
+      message: `the trailer "${line.trim()}" names an AI model, assistant or vendor, and aiAttribution is "forbid" in .resaledger.json. Remove the trailer`
+    })
+  }
+  return problems
+}
+
+/** The task with an id in the tasks folder of a reader, parsed, or null when it has no file there. */
+function githooksTaskIn(reader, dir, id) {
+  const folder = `${dir}/tasks/`
+  const names = reader
+    .list(`${dir}/tasks`)
+    .map((path) => path.slice(folder.length))
+    .filter((name) => !name.includes('/'))
+  const name = taskFileFor(names, id)
+  return name === null ? null : parseTask(`${folder}${name}`, reader.read(`${folder}${name}`) ?? '')
+}
+
+/**
+ * The commit-msg hook, given the message file. The message is cleaned as git will store it,
+ * then judged: attribution trailers when aiAttribution is "forbid" (on every commit), and,
+ * unless the commit is a merge, a revert or a release, the Conventional Commits header when
+ * commitStyle is "conventional" and the task trailers against the staged tree (the index in
+ * GIT_INDEX_FILE), with the rules checkRange applies to one commit and HEAD as the start.
+ */
+export function commitMsg(file) {
+  let root
+  try {
+    root = repositoryRoot()
+  } catch {
+    fail('not inside a git repository')
+  }
+  let text
+  try {
+    text = readFileSync(file, 'utf8')
+  } catch (error) {
+    fail(`cannot read the commit message file ${file}: ${error.message}`)
+  }
+  const message = githooksCleanMessage(text, githooksCommentPrefix())
+  const reader = treeReader({ kind: 'index', root })
+  const { config, problems: configProblems } = loadConfig(reader)
+  if (!config) githooksRefuse(configProblems)
+
+  const head = githooksCommit('HEAD')
+  const mergeHead = githooksCommit('MERGE_HEAD')
+  const subject = message.split('\n')[0]
+  const commit = {
+    short: '',
+    parents: mergeHead === null ? [] : [head, mergeHead],
+    committer: '',
+    subject,
+    message,
+    paths: githooksStagedPaths()
+  }
+  const problems = config.aiAttribution === 'forbid' ? githooksAttributionProblems(message) : []
+  if (commitExemption(commit, { skipGitHubMerges: false }) === null) {
+    if (config.commitStyle === 'conventional' && !GITHOOKS_CONVENTIONAL.test(subject)) {
+      problems.unshift({
+        file: '',
+        line: 0,
+        message: `the header "${subject}" does not follow Conventional Commits, and commitStyle is "conventional" in .resaledger.json. Write "type(scope): description", for example "feat(server): store documents"`
+      })
+    }
+    const headReader = head === null ? null : treeReader({ kind: 'commit', rev: head, root })
+    problems.push(
+      ...checkCommit(commit, {
+        config,
+        lane: currentLane(),
+        skipGitHubMerges: false,
+        task: (id) => githooksTaskIn(reader, config.dir, id),
+        startLane: (id) => (headReader === null ? null : (githooksTaskIn(headReader, config.dir, id)?.lane ?? null))
+      })
+    )
+  }
+  if (problems.length > 0) githooksRefuse(problems)
+}
+
+/** The merge base of two revisions, or null when they have none. */
+function githooksMergeBase(a, b) {
+  try {
+    return git('merge-base', a, b) || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The lines of a push as [localRef, localOid, remoteRef, remoteOid]: git's stdin, or, when it
+ * is empty, the variables the pre-commit framework sets instead of passing stdin on.
+ */
+function githooksPushLines(input, env) {
+  const lines = String(input)
+    .split(/\r?\n/)
+    .map((line) => line.trim().split(/\s+/))
+    .filter((parts) => parts.length === 4)
+  if (lines.length > 0 || !env.PRE_COMMIT_REMOTE_BRANCH) return lines
+  const localRef = env.PRE_COMMIT_LOCAL_BRANCH || 'HEAD'
+  const localOid = githooksCommit(env.PRE_COMMIT_TO_REF || localRef)
+  if (localOid === null) return []
+  const remoteOid = (env.PRE_COMMIT_FROM_REF && githooksCommit(env.PRE_COMMIT_FROM_REF)) || '0'.repeat(localOid.length)
+  return [[localRef, localOid, env.PRE_COMMIT_REMOTE_BRANCH, remoteOid]]
+}
+
+/**
+ * Where the commits a push adds start: the remote commit when git has it; otherwise the merge
+ * base with the remote's base branch; otherwise, for a branch other than the base, the merge
+ * base with the local base branch; otherwise the commit that added .resaledger.json, so an
+ * adopting project is not judged on its history. null means every ancestor.
+ */
+function githooksPushStart(localOid, remoteOid, remote, branch, config) {
+  if (!GITHOOKS_ZERO_OID.test(remoteOid) && githooksCommit(remoteOid) !== null) return remoteOid
+  const remoteBase = remote ? githooksCommit(`refs/remotes/${remote}/${config.base}`) : null
+  if (remoteBase !== null) {
+    const start = githooksMergeBase(localOid, remoteBase)
+    if (start !== null) return start
+  }
+  if (branch !== config.base) {
+    const localBase = githooksCommit(`refs/heads/${config.base}`)
+    const start = localBase === null ? null : githooksMergeBase(localOid, localBase)
+    if (start !== null) return start
+  }
+  try {
+    return git('log', '--diff-filter=A', '--format=%H', localOid, '--', CONFIG_FILE).split('\n')[0] || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The pre-push hook, given git's lines on stdin and its arguments (the remote's name and URL).
+ * For each pushed branch: no push to a protected branch and no deletion of one, and the
+ * commits the push adds pass checkRange with the local branch as the lane. Tags are skipped.
+ * The configuration is the pushed commit's own (HEAD's for a deletion).
+ */
+export function prePush(input, args = []) {
+  let root
+  try {
+    root = repositoryRoot()
+  } catch {
+    fail('not inside a git repository')
+  }
+  const remote = args[0] || process.env.PRE_COMMIT_REMOTE_NAME || ''
+  const configs = new Map()
+  const configAt = (rev) => {
+    if (!configs.has(rev)) {
+      const reader = treeReader({ kind: 'commit', rev, root })
+      configs.set(rev, reader.exists(CONFIG_FILE) ? loadConfig(reader) : { config: null, problems: [] })
+    }
+    return configs.get(rev)
+  }
+  const problems = []
+  for (const [localRef, localOid, remoteRef, remoteOid] of githooksPushLines(input, process.env)) {
+    if (!remoteRef.startsWith('refs/heads/')) continue
+    const branch = remoteRef.slice('refs/heads/'.length)
+    const refuse = (message) => problems.push(`${branch}: ${message}`)
+    const deletion = GITHOOKS_ZERO_OID.test(localOid)
+    const rev = githooksCommit(deletion ? 'HEAD' : localOid)
+    if (rev === null) continue
+    const { config, problems: configProblems } = configAt(rev)
+    if (!config) {
+      for (const { file, line, message } of configProblems) refuse(`${file}${line ? `:${line}` : ''}: ${message}`)
+      continue
+    }
+    if (config.protected.includes(branch)) {
+      refuse(
+        deletion
+          ? `"${branch}" is a protected branch, so it is not deleted`
+          : `"${branch}" is a protected branch, so nothing is pushed to it directly. Push a lane branch and open a pull request`
+      )
+      continue
+    }
+    if (deletion) continue
+    const lane = localRef.startsWith('refs/heads/') ? localRef.slice('refs/heads/'.length) : branch
+    const from = githooksPushStart(localOid, remoteOid, remote, branch, config)
+    for (const { file, line, message } of checkRange(from, localOid, { config, lane, skipGitHubMerges: false, root })) {
+      refuse(`${file}${line ? `:${line}` : ''}: ${message}`)
+    }
+  }
+  if (problems.length === 0) return
+  console.error('✖ This push is refused')
+  for (const problem of problems) console.error(`  ${problem}`)
+  process.exit(1)
+}

@@ -118,7 +118,7 @@ test('the hooks reach the bundled guard, which accepts the commit and the push',
   r.write('.resaledger.json', '{ "version": 2 }\n')
   r.write('ledger/README.md', '# Shop\n\n## Goal\n\nSell bread.\n\n## Environments\n\nLocal only.\n\n## Manual checks\n\nNone.\n')
   r.git('config', 'core.hooksPath', '.githooks')
-  const committed = r.commit('chore: start')
+  const committed = r.commit('chore: start', 'Task: maintenance')
   assert.equal(committed.status, 0, committed.out)
   r.remote()
   const pushed = r.push('main')
