@@ -1,11 +1,13 @@
 // The commit range check: task trailers, each rule and each exemption in real repositories,
-// a task renamed later in the range, and a range of 200 commits within a time budget.
+// a task renamed later in the range, a range of 200 commits within a time budget, and
+// check --range through the bundle.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { parseConfig } from '../src/guard/config.mjs'
 import { checkRange, taskTrailers } from '../src/guard/range.mjs'
-import { ENV, repository, run } from './helpers.mjs'
+import { ENV, PACKAGE, repository, run, temporary } from './helpers.mjs'
 
 // GitHub's committer address, in two parts for the hygiene scan.
 const GITHUB = ['noreply', 'github.com'].join('@')
@@ -322,5 +324,58 @@ describe('checkRange: speed', () => {
     assert.deepEqual(problems, [])
     assert.ok(elapsed < 3000, `200 commits took ${Math.round(elapsed)} ms`)
     console.log(`# checkRange: 200 commits in ${Math.round(elapsed)} ms`)
+  })
+})
+
+describe('check --range through the bundle', () => {
+  const guard = join(temporary(), 'records.mjs')
+  const VALID = {
+    '.resaledger.json': '{\n  "version": 2\n}\n',
+    'ledger/README.md': '# Project\n\n## Goal\n\nA small app.\n\n## Environments\n\nLocal only.\n\n## Manual checks\n\nNone.\n',
+    'ledger/plan/S-server.md': '# S — Server\n\nStatus: approved · 2026-10-14 · by the owner\n\n## S1 Start\n\nGoal: start.\n',
+    'ledger/tasks/S1-start.md': '# S1 Start\n\n- Status: todo\n- Plan: [S-server.md](../plan/S-server.md#s1-start)\n'
+  }
+  const DOING = '# S1 Start\n\n- Status: doing\n- Lane: lane-a\n- Plan: [S-server.md](../plan/S-server.md#s1-start)\n\n## Handoff\n\nStarted.\n'
+
+  test('the bundle builds', () => {
+    const built = run(PACKAGE, process.execPath, [join(PACKAGE, 'scripts', 'bundle.mjs'), '--out', guard])
+    assert.equal(built.status, 0, built.out)
+  })
+
+  test('passes on recorded commits and fails on an unrecorded one, with the lane from the branch', () => {
+    const r = repository()
+    const base = commit(r, VALID, 'chore: set up', 'Task: maintenance')
+    r.git('checkout', '-q', '-b', 'lane-a')
+    commit(r, { 'src/a.js': '1\n', 'ledger/tasks/S1-start.md': DOING }, 'feat: a', 'Task: S1')
+    const passed = r.node(guard, 'check', '--range', `${base}..HEAD`)
+    assert.equal(passed.status, 0, passed.out)
+    assert.match(passed.out, /^✔ records valid: 1 tasks/)
+    assert.match(passed.out, /✔ commits recorded: [0-9a-f]+\.\.HEAD \(lane lane-a\)\n$/)
+    assert.equal(r.node(guard, 'check', '--range', `${base}..`).status, 0)
+
+    commit(r, { 'src/b.js': '1\n' }, 'feat: b')
+    const failed = r.node(guard, 'check', '--range', `${base}..HEAD`)
+    assert.equal(failed.status, 1)
+    assert.match(failed.out, new RegExp(`✖ ${short(r)}: "feat: b" changes code but names no task`))
+
+    // Another lane holds S1 there; a detached HEAD has no lane, so only that rule is skipped.
+    r.git('checkout', '-q', '-b', 'lane-b', 'HEAD~1')
+    commit(r, { 'src/c.js': '1\n' }, 'feat: c', 'Task: S1')
+    assert.match(r.node(guard, 'check', '--range', `${base}..HEAD`).out, /names task S1, which is held by lane "lane-a" in that commit, not by "lane-b"/)
+    r.git('checkout', '-q', '--detach', 'HEAD')
+    const detached = r.node(guard, 'check', '--range', `${base}..HEAD`)
+    assert.equal(detached.status, 0, detached.out)
+    assert.match(detached.out, /\(detached HEAD: no lane rule\)/)
+  })
+
+  test('refuses a malformed range and reports an unknown revision', () => {
+    const r = repository()
+    commit(r, VALID, 'chore: set up', 'Task: maintenance')
+    assert.match(r.node(guard, 'check', '--range').out, /--range needs two revisions/)
+    assert.match(r.node(guard, 'check', '--range', 'HEAD').out, /--range needs two revisions/)
+    assert.match(r.node(guard, 'check', '--range', 'main...HEAD').out, /--range needs two revisions/)
+    const unknown = r.node(guard, 'check', '--range', 'nope..HEAD')
+    assert.equal(unknown.status, 1)
+    assert.match(unknown.out, /git log failed/)
   })
 })
