@@ -25,6 +25,23 @@ export function renderHook(name, dir) {
   return readFileSync(new URL(name, TEMPLATES), 'utf8').replaceAll('{{dir}}', dir)
 }
 
+// The hooks `git lfs install` writes, and the command that writes them again over others.
+export const GIT_LFS_HOOKS = ['pre-push', 'post-checkout', 'post-commit', 'post-merge']
+export const GIT_LFS_RESTORE = 'git lfs update --force'
+// Git LFS's check that git-lfs is installed: printf in 3.x, echo in older releases, any message.
+const QUOTED = '"(?:[^"\\\\]|\\\\.)*"'
+const GIT_LFS_CHECK = new RegExp(`^command -v git-lfs >/dev/null 2>&1 ?\\|\\| ?\\{ ?(?:printf >&2 ?${QUOTED} ?|echo >&2 ?)${QUOTED} ?; ?exit 2 ?; ?\\}$`)
+
+/**
+ * True when text is the hook Git LFS writes as .githooks/<name>: #!/bin/sh, the check that
+ * git-lfs is installed and `git lfs <name> "$@"`, and nothing else. Whitespace does not count.
+ */
+export function isGitLfsHook(name, text) {
+  if (!GIT_LFS_HOOKS.includes(name)) return false
+  const lines = text.split(/\r?\n|\r/).map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean)
+  return lines.length === 3 && lines[0] === '#!/bin/sh' && GIT_LFS_CHECK.test(lines[1]) && lines[2] === `git lfs ${name} "$@"`
+}
+
 /** The arguments each hook passes on to the guard, in sh syntax. */
 const HOOK_ARGUMENTS = { 'pre-commit': '', 'pre-merge-commit': '', 'commit-msg': ' "$1"', 'pre-push': ' "$@"' }
 

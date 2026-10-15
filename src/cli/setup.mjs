@@ -173,3 +173,8 @@ export function setupCommitSteps(branch, config, commit, what = 'the setup') {
     `Push it and open a pull request into ${branch}; the first pull request that adds ResaLedger is judged by its own rules:\n       git push -u origin ${SETUP_BRANCH}`
   ]
 }
+
+/** The line that says a Git LFS hook at path is replaced, and that the guard runs Git LFS's pre-push (spec 9). */
+export function gitLfsNote(path) {
+  return `✔ ${path} was Git LFS's own hook; ResaLedger's pre-push replaces it, and the guard runs "git lfs pre-push" after its own checks wherever a tracked ${GITATTRIBUTES_FILE} names filter=lfs`
+}

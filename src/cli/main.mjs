@@ -13,7 +13,7 @@ import { detectCommitStyle, detectGates } from './detect.mjs'
 import { agentTrustLines, applyInit, commitCommand, initOptions, parseAgentsValue, parseInitArgs, planInit, presetFromAnswer } from './init.mjs'
 import { LEGACY_CONFIG_FILE } from './legacy.mjs'
 import { agentHooksAdvice, applyMigration, COMMIT_COMMAND, planMigration, UNDO_COMMAND } from './migrate.mjs'
-import { currentBranch, ensureGuard, GITATTRIBUTES_FILE, hooksNote, setupCommitSteps, turnOnHooks } from './setup.mjs'
+import { currentBranch, ensureGuard, GITATTRIBUTES_FILE, gitLfsNote, hooksNote, setupCommitSteps, turnOnHooks } from './setup.mjs'
 import { applyUpdate, planUpdate, UPDATE_COMMIT_MESSAGE } from './update.mjs'
 
 const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
@@ -271,6 +271,7 @@ export async function initCommand(args) {
   list('Created', result.created)
   list('Changed', result.changed)
   list('Warnings', plan.warnings.map((warning) => `! ${warning}`))
+  for (const path of plan.gitLfs) console.log(`\n${gitLfsNote(path)}`)
   if (plan.agents.length > 0) console.log(`\nAgent hooks for: ${plan.agents.join(', ')}.\n${agentTrustLines(plan.agents).join('\n')}`)
   console.log(`\n${hooksNote(result.hooks, dir)}`)
   if (result.instructions) console.log(`\n${result.instructions}`)
