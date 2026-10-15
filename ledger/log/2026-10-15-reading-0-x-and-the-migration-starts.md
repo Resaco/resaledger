@@ -1,0 +1,3 @@
+# 2026-10-15 · Reading 0.x, and the migration starts
+
+M1 merged: the 0.x readers keep every line, which a test proves for each parser and a read-only run confirmed on two private workspaces. The worker listed nine things the migration table did not cover, from the ledger's preamble to configuration keys with no 1.0 meaning; the specification now says where each goes, and nothing in a workspace folder that the table does not name is touched. The lead wrote the managed `AGENTS.md` block that `init`, `update` and `migrate` share, and the package now publishes the guard's modules so that `migrate` can validate with the 1.0 rules. H1, V3 and M2 are with workers. 323 tests pass.

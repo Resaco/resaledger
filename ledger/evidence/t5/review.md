@@ -8,13 +8,13 @@ The reviewer's summary: with a normal, fully tracked, UTF-8 workspace, `migrate`
 
 | # | Severity | Finding | Task |
 | --- | --- | --- | --- |
-| 1 | blocker | New record files that `.gitignore` matches (a `log/` rule is common) are written and pass `check`, but are never committed, so a clone loses the 0.x log and the migration's own log entry. | [T5.1](../../work/ledger.md#t51-data-safety-in-migrate) |
+| 1 | blocker | New record files that `.gitignore` matches (a `log/` rule is common) are written and pass `check`, but are never committed, so a clone loses the 0.x log and the migration's own log entry. | [T5.1](../../tasks/T5.1-data-safety-in-migrate.md) |
 | 2 | major | When writing fails halfway, the undo command is not printed. | T5.1 |
-| 3 | major | `.claude/settings.json` is rewritten to `records.mjs hook claude <event>`, which the guard does not have until A1. | [T5.3](../../work/ledger.md#t53-the-agent-hook-command-that-migrate-writes) |
+| 3 | major | `.claude/settings.json` is rewritten to `records.mjs hook claude <event>`, which the guard does not have until A1. | [T5.3](../../tasks/T5.3-the-agent-hook-command-that-migrate.md) |
 | 4 | minor | Bytes that are not UTF-8 are replaced with U+FFFD without a refusal. | T5.1 |
 | 5 | minor | Writes and deletes follow symlinks, so they can land outside git's reach. | T5.1 |
 | 6 | minor | On a case-insensitive file system, two planned task files that differ only in case overwrite each other. | T5.1 |
-| 7 | minor | A duplicated known field scatters its continuation lines; the content check cannot see placement. | [T5.2](../../work/ledger.md#t52-a-faithful-conversion) |
+| 7 | minor | A duplicated known field scatters its continuation lines; the content check cannot see placement. | [T5.2](../../tasks/T5.2-a-faithful-conversion.md) |
 | 8 | minor | Blank-line runs inside fenced code in the README, the root `AGENTS.md` and `CLAUDE.md` are collapsed. | T5.2 |
 | 9 | minor | Links into `standards.md` lose their anchor without a note; HTML links are neither rewritten nor listed; links in indented code are rewritten. | T5.2 |
 | 10 | minor | The `--accept-problems` advice says to commit and fix later, but pre-commit refuses that commit. | T5.2 |

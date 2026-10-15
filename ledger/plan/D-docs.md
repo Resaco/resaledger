@@ -48,5 +48,5 @@ Design:
 - light and dark images through `<picture>`.
 
 Acceptance:
-- The quickstart runs exactly as written in a new temporary repository (manual check 1 in [standards.md](../standards.md#quality-gates)).
+- The quickstart runs exactly as written in a new temporary repository (manual check 1 in [standards.md](../README.md#manual-checks)).
 - The owner reads it.

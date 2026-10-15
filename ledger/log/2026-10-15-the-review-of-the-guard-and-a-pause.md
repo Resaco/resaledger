@@ -1,0 +1,3 @@
+# 2026-10-15 · The review of the guard, and a pause
+
+Fable 5.1 reviewed the guard (T3) and reproduced thirteen findings with the real product. The blocker: a commit message ending in the byte 0x01 hides a code commit from the range check everywhere, CI included, because the check splits one formatted `git log` on that byte. Five are major: an evil merge, revert and release exemptions taken from the message text, a merge onto the protected base that no shipped hook sees, a first `handoff` that fails on history before ResaLedger, and hooks that read the rules from the commit they judge. They are the child tasks T3.1 to T3.4, and M4 now waits for the first two. The owner paused the build here; nothing is in progress.

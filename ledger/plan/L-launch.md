@@ -13,7 +13,7 @@ Design:
 - The output goes into the repository as a GIF or an SVG.
 - VHS must be installed, which needs the owner's permission.
 
-Acceptance: manual check 2 in [standards.md](../standards.md#quality-gates): the recording matches a rerun.
+Acceptance: manual check 2 in [standards.md](../README.md#manual-checks): the recording matches a rerun.
 
 ### L2 Release notes and launch drafts
 

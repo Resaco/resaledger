@@ -1,0 +1,3 @@
+# 2026-10-15 · `work`, and two review findings
+
+W1 merged: `work` shows this lane, the other local worktrees, what waits for the owner, what is blocked and ready, and warns about double and stale claims, in about half a second for 300 tasks. While testing V1 a worker found that two stamps sharing their gate list look like a rename to git, so two lanes replacing one stamp would conflict; the specification now binds every byte of a stamp to the fingerprint. Reviewing V2, the lead widened the lane rule of the range check to the whole range, so a claim in a records-only commit and a branch renamed before its pull request both pass. 243 tests pass. M1, reading 0.x workspaces, started.

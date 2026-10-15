@@ -1,0 +1,3 @@
+# 2026-10-15 · `task` and `new`, and `migrate` on real workspaces
+
+W3 merged: `task <id>` prints one task with its plan section, and `new` creates tasks, child tasks, decisions and log entries whose ids and file names nothing visible already uses, in this worktree, the other worktrees or any branch. The lead verified `migrate` on copies of two private 0.x workspaces (M3): no line lost, and `check` passes. The run showed that real blocked tasks say what they wait for in their notes, so `migrate` now takes Waiting for from them and lists each value for review. 525 tests pass on Node 24, 22 and 20. I3 and the independent review of `migrate` (T5) started.

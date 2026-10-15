@@ -1,0 +1,25 @@
+#!/bin/sh
+# resaledger: pre-merge-commit hook, managed by ResaLedger; do not edit
+# Checks a merge that commits by itself as pre-commit checks any other commit: the records, the branch and the commit gates. Never bypass it with --no-verify; fix the cause instead.
+# Finds Node or Bun even when PATH is minimal, as in some editors and GUI clients.
+runtime=
+for candidate in node bun "$HOME/.bun/bin/bun" /opt/homebrew/bin/node /usr/local/bin/node; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    runtime=$candidate
+    break
+  fi
+done
+if [ -z "$runtime" ]; then
+  # The newest Node that nvm installed, compared by version number rather than by name.
+  newest=$(for candidate in "$HOME"/.nvm/versions/node/v*/bin/node; do
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+    fi
+  done | sed 's|^.*/v\([0-9.]*\)/bin/node$|\1 &|' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
+  runtime=${newest#* }
+fi
+if [ -z "$runtime" ]; then
+  echo "resaledger: neither node nor bun was found, so this merge cannot be checked; install Node 20 or newer" >&2
+  exit 1
+fi
+exec "$runtime" 'ledger/scripts/records.mjs' pre-merge-commit

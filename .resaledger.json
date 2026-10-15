@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "dir": "ledger",
+  "aiAttribution": "forbid",
+  "codePaths": [],
+  "gates": {
+    "commit": [
+      "node scripts/bundle.mjs --check"
+    ],
+    "verify": [
+      "npm test"
+    ]
+  }
+}

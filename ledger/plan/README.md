@@ -52,4 +52,4 @@ The guard's modules and the contracts between them are in [modules.md](modules.m
 
 ## Waiting for the owner
 
-- The choice of a brand concept ([G1](../work/ledger.md#g1-brand-concepts)).
+- The choice of a brand concept ([G1](../tasks/G1-brand-concepts.md)).
