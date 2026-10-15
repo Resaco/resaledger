@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ResaLedger 1.0.0-rc.2
+// ResaLedger 1.0.0-rc.3
 // The ResaLedger guard: one file with no dependencies, run by the git hooks, the agent
 // hooks and CI. Built from its source modules by scripts/bundle.mjs; do not edit it here.
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -10,8 +10,8 @@ import { dirname, isAbsolute, join, posix, relative, resolve } from 'node:path'
 import { isatty } from 'node:tty'
 import { fileURLToPath } from 'node:url'
 
-const VERSION = '1.0.0-rc.2'
-const RELEASED = {"guard":{"1.0.0-rc.1":"5865d816045d07943149d2672863d8692583792e291834b0a22817811b3ffa15"},"hooks/commit-msg":{"1.0.0-rc.1":"aed52395adb1fd45357244e5d78ddc3c60b0e5fc558678b1f7464f42b740f667","1.0.0-rc.2":"aed52395adb1fd45357244e5d78ddc3c60b0e5fc558678b1f7464f42b740f667"},"hooks/pre-commit":{"1.0.0-rc.1":"26abf45bfc0570188dc7cd368e4a40269835b79bfcf72efb30d839017a5322e8","1.0.0-rc.2":"26abf45bfc0570188dc7cd368e4a40269835b79bfcf72efb30d839017a5322e8"},"hooks/pre-merge-commit":{"1.0.0-rc.1":"f62d8a0d3dfd87e4816e311a095b8f93e9329955adf668077a0cc10ace224b7f","1.0.0-rc.2":"f62d8a0d3dfd87e4816e311a095b8f93e9329955adf668077a0cc10ace224b7f"},"hooks/pre-push":{"1.0.0-rc.1":"68ac4461397ecad35218104129f87f02fce5964cbcc71f346dcac424282f553a","1.0.0-rc.2":"68ac4461397ecad35218104129f87f02fce5964cbcc71f346dcac424282f553a"},"workflow":{"1.0.0-rc.1":"ef7bdb309f6d0137ad2602be587d06ec2013be44664e6ccd99f2ef3da426e68f","1.0.0-rc.2":"ef7bdb309f6d0137ad2602be587d06ec2013be44664e6ccd99f2ef3da426e68f"}}
+const VERSION = '1.0.0-rc.3'
+const RELEASED = {"guard":{"1.0.0-rc.1":"5865d816045d07943149d2672863d8692583792e291834b0a22817811b3ffa15","1.0.0-rc.2":"0ba567d54ac828281b33cdf78774b9cda38119aed73fb2c0e10e146201f6b170"},"hooks/commit-msg":{"1.0.0-rc.1":"aed52395adb1fd45357244e5d78ddc3c60b0e5fc558678b1f7464f42b740f667","1.0.0-rc.2":"aed52395adb1fd45357244e5d78ddc3c60b0e5fc558678b1f7464f42b740f667","1.0.0-rc.3":"aed52395adb1fd45357244e5d78ddc3c60b0e5fc558678b1f7464f42b740f667"},"hooks/pre-commit":{"1.0.0-rc.1":"26abf45bfc0570188dc7cd368e4a40269835b79bfcf72efb30d839017a5322e8","1.0.0-rc.2":"26abf45bfc0570188dc7cd368e4a40269835b79bfcf72efb30d839017a5322e8","1.0.0-rc.3":"26abf45bfc0570188dc7cd368e4a40269835b79bfcf72efb30d839017a5322e8"},"hooks/pre-merge-commit":{"1.0.0-rc.1":"f62d8a0d3dfd87e4816e311a095b8f93e9329955adf668077a0cc10ace224b7f","1.0.0-rc.2":"f62d8a0d3dfd87e4816e311a095b8f93e9329955adf668077a0cc10ace224b7f","1.0.0-rc.3":"f62d8a0d3dfd87e4816e311a095b8f93e9329955adf668077a0cc10ace224b7f"},"hooks/pre-push":{"1.0.0-rc.1":"68ac4461397ecad35218104129f87f02fce5964cbcc71f346dcac424282f553a","1.0.0-rc.2":"68ac4461397ecad35218104129f87f02fce5964cbcc71f346dcac424282f553a","1.0.0-rc.3":"68ac4461397ecad35218104129f87f02fce5964cbcc71f346dcac424282f553a"},"workflow":{"1.0.0-rc.1":"ef7bdb309f6d0137ad2602be587d06ec2013be44664e6ccd99f2ef3da426e68f","1.0.0-rc.2":"ef7bdb309f6d0137ad2602be587d06ec2013be44664e6ccd99f2ef3da426e68f","1.0.0-rc.3":"ef7bdb309f6d0137ad2602be587d06ec2013be44664e6ccd99f2ef3da426e68f"}}
 
 // --- util.mjs ---
 // Small helpers that every part of the guard uses.

@@ -1,6 +1,6 @@
 {
   "name": "resaledger",
-  "version": "1.0.0-rc.2",
+  "version": "1.0.0-rc.3",
   "description": "Set up ResaLedger in a repository, and write plans, evidence, handoffs and decisions the next agent can act on.",
   "license": "MIT",
   "repository": "https://github.com/Resaco/resaledger",
