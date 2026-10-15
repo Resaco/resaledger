@@ -127,6 +127,24 @@ function ciCommitsCheck(root, from, to, config, lane, skipGitHubMerges, note) {
   return { name: 'commits', ok: problems.length === 0, problems, counts: { commits }, note }
 }
 
+/**
+ * The decisions and log entries the merge base has and the head lacks, as problems: they are
+ * only ever added (spec 6.2), and a renamed one would also pass for a new decision.
+ */
+function ciRemovedRecords(root, mergeBase, head, config) {
+  const before = treeReader({ kind: 'commit', rev: mergeBase, root })
+  const after = treeReader({ kind: 'commit', rev: head, root })
+  const problems = []
+  for (const [folder, kind] of [['decisions', 'decision'], ['log', 'log entry']]) {
+    const prefix = `${config.dir}/${folder}/`
+    for (const file of before.list(`${config.dir}/${folder}`)) {
+      if (!/\.md$/i.test(file) || file.slice(prefix.length).includes('/') || after.exists(file)) continue
+      problems.push({ file, line: 0, message: `this ${kind} is deleted or renamed, but the merge base has it. Decisions and log entries are only added: restore it${kind === 'decision' ? ', and supersede it with a new decision' : ''}` })
+    }
+  }
+  return problems
+}
+
 /** The text of a task's Evidence field, or null. */
 function ciEvidence(task) {
   if (!task.evidence) return null
@@ -247,6 +265,7 @@ function ciPullRequest(root, options) {
     accepted: [baseTasks],
     baseName: config.base
   })
+  ownership.push(...ciRemovedRecords(root, mergeBase, head, config))
   const changed = [...headTasks].filter(([id, { text }]) => mergeBaseTasks.get(id)?.text !== text).length
   checks.push({ name: 'ownership', ok: ownership.length === 0, problems: ownership, counts: { changed }, note: null })
   checks.push(ciIdsCheck(root, config, { mergeBaseTasks, headTasks, baseTasks, base, head, lane, fork: options.fork }))

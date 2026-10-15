@@ -162,9 +162,15 @@ function fileChanges(beforeReader, afterReader, beforeDir, afterDir, released) {
  * names on its "- Weakens:" line: [{ file, by, ids }].
  */
 function addedDecisions(mergeBaseReader, headReader, dir) {
+  const folder = `${dir}/decisions`
+  // Directly in decisions/, as the records check reads them; a deeper file is no decision.
+  const direct = (reader) => reader.list(folder).filter((file) => /\.md$/i.test(file) && !file.slice(folder.length + 1).includes('/'))
+  // A decision the merge base has under any name, renamed or copied, is not added by this change.
+  const text = (reader, file) => (reader.read(file) ?? '').replace(/\r\n?/g, '\n').trim()
+  const known = new Set(direct(mergeBaseReader).map((file) => text(mergeBaseReader, file)))
   const decisions = []
-  for (const file of headReader.list(`${dir}/decisions`)) {
-    if (!/\.md$/i.test(file) || mergeBaseReader.read(file) !== null) continue
+  for (const file of direct(headReader)) {
+    if (mergeBaseReader.read(file) !== null || known.has(text(headReader, file))) continue
     const decision = parseDecision(file, headReader.read(file) ?? '')
     const field = (name) => decision.fields.find((item) => item.name === name)
     const weakens = field(ENFORCEMENT_FIELD)

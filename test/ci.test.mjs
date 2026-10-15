@@ -462,6 +462,37 @@ describe('ci and changes to enforcement', () => {
     failed(ci(r, 'pull_request', pullRequest(r, 'lane-a')), /✖ wip raised from 3 to 5: this weakens enforcement/)
   })
 
+  test('an old decision renamed or copied lets nothing through, and one in a subfolder is no decision', () => {
+    const old = decision('wip', 'old')
+    const [oldPath, oldText] = Object.entries(old)[0]
+    const raise = { '.resaledger.json': json({ wip: 5 }) }
+    // Renamed with git mv: no new decision, and the old one is gone.
+    const renamed = setup()
+    commit(renamed, { '.resaledger.json': json({ wip: 3 }), ...old }, 'chore: before', 'Task: maintenance')
+    renamed.git('checkout', '-q', '-b', 'lane-a')
+    renamed.git('mv', oldPath, 'ledger/decisions/2026-10-15-raise-wip.md')
+    commit(renamed, raise, 'chore: raise wip', 'Task: maintenance')
+    const moved = ci(renamed, 'pull_request', pullRequest(renamed, 'lane-a'))
+    failed(moved, /✖ wip raised from 3 to 5: this weakens enforcement/)
+    assert.match(moved.out, /2026-10-15-old\.md: this decision is deleted or renamed, but the merge base has it/)
+    // Copied under a new name: the same text is no new decision.
+    const copied = change({ '.resaledger.json': json({ wip: 3 }), ...old }, { ...raise, 'ledger/decisions/2026-10-15-copy.md': oldText })
+    failed(ci(copied, 'pull_request', pullRequest(copied, 'lane-a')), /✖ wip raised from 3 to 5: this weakens enforcement/)
+    // In a subfolder, it is not read as a decision.
+    const nested = change({ '.resaledger.json': json({ wip: 3 }) }, { ...raise, 'ledger/decisions/archive/2026-10-15-raise.md': oldText })
+    failed(ci(nested, 'pull_request', pullRequest(nested, 'lane-a')), /✖ wip raised from 3 to 5: this weakens enforcement/)
+  })
+
+  test('a log entry the merge base has cannot be deleted', () => {
+    const entry = { 'ledger/log/2026-10-15-bake.md': '# 2026-10-15 · Bake\n\n- Lane: main\n- Tasks: —\n\nBaked.\n' }
+    const r = setup()
+    commit(r, entry, 'docs: log the baking')
+    r.git('checkout', '-q', '-b', 'lane-a')
+    r.git('rm', '-q', 'ledger/log/2026-10-15-bake.md')
+    commit(r, {}, 'docs: drop the log entry')
+    failed(ci(r, 'pull_request', pullRequest(r, 'lane-a')), /ledger\/log\/2026-10-15-bake\.md: this log entry is deleted or renamed, but the merge base has it/)
+  })
+
   test('one decision can name several changes, and each one it does not name still fails', () => {
     const r = change({ '.resaledger.json': json({ wip: 3, aiAttribution: 'forbid' }) }, { '.resaledger.json': json({ wip: 4 }), ...decision('`wip`, aiAttribution') })
     passed(ci(r, 'pull_request', pullRequest(r, 'lane-a')))

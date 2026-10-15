@@ -315,7 +315,9 @@ node ledger/scripts/records.mjs ci --base origin/main --head HEAD --lane t2-allo
 ✔ enforcement: 1 change, 1 weakening
 ```
 
-Only a decision that the pull request adds counts, so an old decision never lets a new change through. The ids, and which changes weaken, are listed in [the format reference](../format.md).
+Only a decision that the pull request adds counts, and only one directly in `ledger/decisions/`: an old decision renamed or copied under a new name is not new, and a decision or log entry the base has may not be deleted. The ids, and which changes weaken, are listed in [the format reference](../format.md).
+
+A loosened rule takes effect once it is on `main`, because CI judges every pull request by the rules of `main`. So a pull request that raises `wip` cannot also claim the fourth task: merge the decision first, then claim.
 
 ## Updating the guard
 
