@@ -109,7 +109,9 @@ Evidence is what lets someone else believe the task is done without redoing it. 
 - a link to a file in the repository, such as a screenshot or a saved report under `<dir>/evidence/`;
 - a URL someone else can open.
 
-Say what was not verified, too: `Not verified: Safari`. Keep evidence files as `.md`, `.txt` or `.log`; a file with a code extension counts as code and makes the stamp stale.
+Say what was not verified, too: `Not verified: Safari`. Keep evidence files as `.md`, `.txt`, `.log` or images; a file with a code extension counts as code and makes the stamp stale.
+
+Work outside the code, such as content edited in a CMS or a setting changed on a server, is a task like any other, claimed before the change. The hooks do not see it, so the record is all there is: give a small screenshot under `<dir>/evidence/` cropped to the change and free of personal data, the page's address, a revision id, or the command and what it printed. A document outside the repository is named by its URL or in a code span, since links must resolve inside the repository. The guide: https://github.com/Resaco/resaledger/blob/main/docs/guides/outside-the-code.md
 
 ### Handoff
 

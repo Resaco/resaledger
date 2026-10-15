@@ -338,7 +338,7 @@ One table for projects, one for document revisions. Done when the app lists, ope
 
 ## 7. Evidence
 
-`<dir>/evidence/` holds the files that evidence links to. Its form is free. Keep evidence as `.txt`, `.log` or Markdown: a file with a [code extension](#11-what-counts-as-code) counts as code, so it needs a task and makes the stamp stale.
+`<dir>/evidence/` holds the files that evidence links to. Its form is free. Keep evidence as `.txt`, `.log`, Markdown or images, such as a screenshot of work outside the code ([the guide](guides/outside-the-code.md)): a file with a [code extension](#11-what-counts-as-code) counts as code, so it needs a task and makes the stamp stale.
 
 ```text evidence ledger/evidence/2026-10-07-storage.txt
 Opened, saved and reopened a project with three documents. The list shows all three.

@@ -10,6 +10,7 @@ Start with [Concepts](guides/concepts.md), then follow the guide that fits how y
 - [CI](guides/ci.md): GitHub Actions with the shipped workflow, and any other CI system.
 - [Setting up agents](guides/agents.md): Claude Code, Codex, Cursor, Gemini CLI and GitHub Copilot, what the hooks refuse, and the skill.
 - [Moving from agent-ledger 0.x](guides/migration.md): `migrate`, what changes and what is kept, and how to undo it.
+- [Work outside the code](guides/outside-the-code.md): content in a CMS, server settings and other work the hooks cannot see, with evidence someone else can check.
 
 ## Reference
 

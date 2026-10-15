@@ -200,6 +200,15 @@ const FIXTURES = {
     must(root, env, 'node ledger/scripts/records.mjs claim T1 > /dev/null && echo "export const prices = { rye: 4 }" > prices.js && git add prices.js && git commit -q -m "feat: add a price list" -m "Task: T1"')
     return root
   },
+  // A solo repository with ResaLedger set up and its gates verified, for work outside the code.
+  ledger(base, env) {
+    const root = FIXTURES.project(base, env)
+    must(root, env, 'npx resaledger init --yes > /dev/null')
+    writeFileSync(join(root, 'ledger', 'README.md'), README)
+    must(root, env, 'git add -A && git commit -q -m "chore: set up ResaLedger" -m "Task: maintenance"')
+    must(root, env, 'node ledger/scripts/records.mjs verify > /dev/null && git add ledger && git commit -q -m "chore: stamp the code" -m "Task: maintenance"')
+    return root
+  },
   // An agent-ledger 0.3 workspace, with a lane that is not merged.
   legacy(base, env) {
     const root = join(base, 'bakery-shop')
@@ -219,6 +228,7 @@ const GUIDE_FIXTURES = {
   'team.md': 'remote',
   'ci.md': 'ci',
   'agents.md': 'agents',
+  'outside-the-code.md': 'ledger',
   'migration.md': 'legacy'
 }
 
