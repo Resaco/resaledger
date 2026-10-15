@@ -166,8 +166,9 @@ Every other key has a default. Keys marked † take their default from the prese
 | `ci.runGates` | `true` | CI runs the gates. With `false`, CI only checks that the head carries a stamp for its own code. |
 | `phases` | `[]` | An optional order of id prefixes, for "Ready next". |
 | `agent.deny` | `[]` | Extra commands that agent hooks refuse, as `{ "pattern": "…", "reason": "…" }`. |
+| `agent.pushNeedsHandoff` | `false` | With `true`, agent hooks refuse an agent's `git push` while `handoff` fails, leaving out its check that the lane is pushed ([section 11](#11-agent-integrations)). |
 
-`records.mjs config` prints the effective configuration with every default filled in. A key within two letters of a known one is refused as a typo; any other unknown key is kept with a notice, since a later 1.x release may add keys ([section 15](#15-format-stability-and-updates)), and `ci` lists a change to it.
+`records.mjs config` prints the effective configuration with every default filled in. A key close to a known one, within two letters of a known name of six letters or more or within one letter of a shorter one, is refused as a typo; any other unknown key is kept with a notice, since a later 1.x release may add keys ([section 15](#15-format-stability-and-updates)), and `ci` lists a change to it.
 
 ### 5.3 Task files
 
@@ -225,7 +226,7 @@ As built: one row per revision instead of a JSON column, because revisions are l
 | Issue | no | The issue the task came from, as a link or `#123`. |
 | Taken over from | no | Written by `claim --take`: the previous lane and commit. |
 
-Other fields are allowed and kept. A field name within two letters of a known one, such as `Staus`, is reported as a likely typo.
+Other fields are allowed and kept. A field name close to a known one, such as `Staus`, is reported as a likely typo: within two letters of a known name of six letters or more, or within one letter of a shorter one, so that a free field such as `Later` is not taken for `Lane`.
 
 **Sections.** `## Plan` is optional: the goal and acceptance checks for a task with no separate plan. `## Handoff` is required while `doing`: the present state, rewritten each time rather than appended, at most 1,500 characters. `## Notes` holds anything else: findings, what was tried, how the result differs from the plan.
 
@@ -474,6 +475,7 @@ One implementation serves every column. A hook calls the same functions as `ci`.
   | `gates.commit`, `gates.verify` | a command removed or changed | a command added; a new order |
   | `phases` | | any change |
   | `agent.deny` | a pattern removed or changed | a pattern added; a reason changed |
+  | `agent.pushNeedsHandoff` | turned off | turned on |
   | `guard` | removed, or new text that is no released version | new text that is a released version |
   | `hooks/<name>`, such as `hooks/pre-commit` | removed, new text that is no released version, or no longer executable (mode `100755` became another mode or a symlink) | new text that is a released version; another change of mode |
   | `workflow` | removed, or new text that is no released version | new text that is a released version |
@@ -513,7 +515,7 @@ Three layers, from what every agent has to what only some have.
 | GitHub Copilot, cloud agent and CLI | `.github/hooks/resaledger.json` | `sessionStart` | `preToolUse` | `agentStop` |
 
 - **Session start** turns on the git hooks in the clone and gives the agent the output of `work`.
-- **Before a tool** refuses `--no-verify`, a change to `core.hooksPath`, a forced push, a push to a protected branch, the project's `agent.deny` commands, and file edits on a protected branch. It also refuses the commands that throw work away (`git reset --hard`, `git clean -f`, `git checkout` of paths or with `-f`, `git restore` of the worktree, `git switch -f`) when they would hit a protected branch's checkout or a worktree other than the one the session started in, reached by `cd` or `git -C`; on the session's own lane they stay allowed. A `git checkout` or `git switch` earlier in the same command counts, so `git checkout main; git reset --hard HEAD~1` on a lane is refused. Cursor's `preToolUse` sees its edit tools, and its shell check catches the redirections it can see.
+- **Before a tool** refuses `--no-verify`, a change to `core.hooksPath`, a forced push, a push to a protected branch, the project's `agent.deny` commands, and file edits on a protected branch. It also refuses the commands that throw work away (`git reset --hard`, `git clean -f`, `git checkout` of paths or with `-f`, `git restore` of the worktree, `git switch -f`) when they would hit a protected branch's checkout or a worktree other than the one the session started in, reached by `cd` or `git -C`; on the session's own lane they stay allowed. A `git checkout` or `git switch` earlier in the same command counts, so `git checkout main; git reset --hard HEAD~1` on a lane is refused. With `agent.pushNeedsHandoff`, it also refuses a `git push` while `handoff` fails in the worktree the push runs in, leaving out the check that the lane is pushed, which the push itself does; the message is handoff's own. Cursor's `preToolUse` sees its edit tools, and its shell check catches the redirections it can see.
 - **End of turn** reminds once per session, and only if the session changed the repository and `handoff` fails: finish the work, or tell the user exactly what is left.
 
 Rules taken from how the five agents behave today. Hooks stay fast, because the Copilot hook lets a tool run when it times out and a Cursor hook lets it run when it crashes unless `failClosed` is set. The command line in each configuration never changes between versions, because Codex asks the user to trust each hook entry again when its command changes; new behaviour arrives in the script. The guard finds the repository root itself, because Codex runs hooks in the session's directory. A reminder fires at most once even when two configurations call it, because the Copilot CLI also reads `.claude/settings.json`, and Gemini's `AfterAgent` runs after every turn. Input an adapter does not recognise is allowed, never blocked; git hooks and CI still hold.
@@ -556,7 +558,7 @@ An agent without plugins takes the folder `plugins/resaledger/skills/resaledger/
 
 1. Requires a git repository. It refuses only when a file it must change, such as `AGENTS.md`, has uncommitted changes, so nothing it writes mixes with work in progress.
 2. **Finds the gates.** The candidates come from a short, fixed list:
-   - `package.json` scripts, run with the package manager its lockfile names (npm, pnpm, yarn or bun): `lint`, `typecheck`, `check-types` and `format:check` for `commit`, `test` and `build` for `verify`;
+   - `package.json` scripts, run with the package manager its lockfile names (npm, pnpm, yarn or bun): `lint`, `typecheck`, `check-types` and `format:check` for `commit`, `check`, `test` and `build` for `verify`. Scripts whose names start with `test:` or `lint:` are listed for the project to add by hand and never run, since a name does not say whether a script ends or changes files;
    - `Makefile` targets: `lint` for `commit`; `check`, `test` and `build` for `verify`. A target that a `package.json` script of the same name covers is skipped;
    - `pyproject.toml`, when it has the tool's table or names it as a requirement: `ruff check` and `mypy .` for `commit`, `pytest` for `verify`, each under `uv run` when there is a `uv.lock`;
    - `Cargo.toml`: `cargo fmt --check` for `commit`; `cargo clippy -- -D warnings` and `cargo test` for `verify`, since both compile;
@@ -696,6 +698,7 @@ These are open, and the build goes ahead without waiting for them:
 4. **Guard-only mode is cut** ([section 17](#17-not-in-10)). Decided on 15 October 2026. Repositories that use it stay on 0.x.
 5. **`changes` is in 1.0** ([section 8](#8-command-line)). Decided on 15 October 2026.
 6. **The predecessor's name may show.** This repository's history starts as an agent-ledger 0.3 workspace, and `migrate` reads 0.x files by their names. Accepted on 15 October 2026.
+7. **Three changes for rc.2**, from the first adoptions: `agent.pushNeedsHandoff` ([5.2](#52-configuration), [section 11](#11-agent-integrations)), a typo distance that depends on the length of the known name ([5.2](#52-configuration), [5.3](#53-task-files)), and `package.json`'s `check` as a `verify` candidate ([section 13](#13-installation-and-distribution)). Decided on 15 October 2026 ([decision](../decisions/2026-10-15-an-agent-s-push-can-require-handoff.md)).
 
 
 ## Appendix: Landscape sources

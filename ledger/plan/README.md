@@ -19,7 +19,8 @@ Status: approved · 2026-10-15 · by Niko Alho
 | M | Migration from 0.x, and this repository's own move to 1.0 | [M-migration.md](M-migration.md) |
 | T | The acceptance tests and the independent reviews | [T-acceptance.md](T-acceptance.md) |
 | D | Documentation and the repository's own files | [D-docs.md](D-docs.md) |
-| L | The demo, the launch drafts and the release candidate | [L-launch.md](L-launch.md) |
+| L | The demo, the launch drafts and the release candidates | [L-launch.md](L-launch.md) |
+| P | Feedback from the first adoptions, fixed for rc.2 | [P-adoption-feedback.md](P-adoption-feedback.md) |
 
 ## The order, and why
 

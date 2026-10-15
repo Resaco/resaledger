@@ -34,3 +34,18 @@ Design:
 Acceptance:
 - Every task in the ledger is done, with evidence.
 - The owner has the commands.
+
+### L4 The second release candidate
+
+Goal: `v1.0.0-rc.2` tagged locally with the fixes of [phase P](P-adoption-feedback.md), and the commands the owner runs.
+
+Design:
+- Merge the lanes of phase P, rebuild the guard and renew this repository's own copy with it.
+- The changelog's rc.2 section, drafted with `changes` and edited down, and `docs/releases/v1.0.0-rc.2.md`.
+- The managed files' hashes for rc.2 in `templates/released.json`.
+- Every test on Node 20, 22 and 24, the hygiene test, the history scan, `npm publish --dry-run`, the stamp and `handoff`.
+- Tag `v1.0.0-rc.2`, and write down the owner's commands: push, the tag that publishes to `next` through trusted publishing, the GitHub release and, when the owner decides, moving `latest`.
+
+Acceptance:
+- Every task of phase P is done, with evidence.
+- The owner has the commands.
