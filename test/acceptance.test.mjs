@@ -141,8 +141,9 @@ for (const lane of LANES) {
 }
 for (const lane of LANES) {
   const text = lane.at.read(lane.task)
-  assert.match(text, new RegExp(`- Status: doing\n- Lane: ${lane.branch}\n`))
-  lane.at.write(lane.task, text.replace(`- Status: doing\n- Lane: ${lane.branch}\n`, `- Status: done\n- Lane: ${lane.branch}\n- Evidence:\n  - \`${GATE}\`: passed\n  - [the decision](../${lane.decision.slice('ledger/'.length)})\n`))
+  // new wrote "- Evidence: —"; finishing the task replaces it.
+  assert.match(text, new RegExp(`- Status: doing\n- Lane: ${lane.branch}\n- Evidence: —\n`))
+  lane.at.write(lane.task, text.replace(`- Status: doing\n- Lane: ${lane.branch}\n- Evidence: —\n`, `- Status: done\n- Lane: ${lane.branch}\n- Evidence:\n  - \`${GATE}\`: passed\n  - [the decision](../${lane.decision.slice('ledger/'.length)})\n`))
   commit(lane.at, `docs: finish ${lane.id}`)
 }
 for (const lane of LANES) {
