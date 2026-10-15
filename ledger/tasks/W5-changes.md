@@ -10,4 +10,4 @@
 
 ## Notes
 
-Worked on branch `w5-changes`, the first lane merged into this repository after it moved to 1.0. Choices: a dropped task is not listed, but one line names it; the grouping looks only at the commits that name a listed task, and a `chore: claim <id>` commit does not count towards a task's type; the configuration is read from HEAD's commit, since the command reports committed history.
+Worked on branch `w5-changes`, which was open while this repository moved to 1.0. Merged as it was, its 0.x commit failed the 1.0 range check, which finds no task file in that commit's tree, so it was replayed onto the migrated base instead ([M4.1](M4.1-a-lane-open-during-the-migration.md)). Choices: a dropped task is not listed, but one line names it; the grouping looks only at the commits that name a listed task, and a `chore: claim <id>` commit does not count towards a task's type; the configuration is read from HEAD's commit, since the command reports committed history.

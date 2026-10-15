@@ -14,6 +14,6 @@
 What the move showed, for later tasks:
 
 - Migrate keeps the project's own text word for word and rewrites only link targets, so a link whose text named an old file, such as `[STATUS.md](README.md)`, kept its old text. The workspace README and `AGENTS.md` here were reworded by hand. D2's migration guide should say so.
-- The warning about an open lane is coarse: it named `w5-changes`, whose only changes in `ledger/` were to `plan/` files that migrate leaves alone, and that lane merged cleanly afterwards.
+- The warning about an open lane was right, but for the wrong reason. It named `w5-changes` because the lane changed `plan/` files, which migrate leaves alone; the real trouble was the lane's 0.x commit, which the 1.0 range check refused after the merge because its tree has no task file. The commit was replayed onto the migrated base, and [M4.1](M4.1-a-lane-open-during-the-migration.md) makes the warning say so.
 - A development build of the guard is never a released version, so `update` keeps it; this repository renews it with `update --force`, as its README says.
 - `changes` since a commit before the move lists every finished task, because no 1.0 task existed there.
