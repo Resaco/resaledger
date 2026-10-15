@@ -4,7 +4,7 @@
 // a shallow clone and the --base/--head/--lane flags.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { contentHash, normalizeManaged } from '../src/guard/managed.mjs'
@@ -75,12 +75,12 @@ function task(id, title, fields) {
 }
 
 /** Runs the bundled ci in a repository with a simulated GitHub event. */
-function ci(r, name, payload, args = []) {
+function ci(r, name, payload, args = [], extra = {}) {
   const file = join(temporary('resaledger-event-'), 'event.json')
   writeFileSync(file, JSON.stringify(payload))
   const result = spawnSync(process.execPath, [GUARD, 'ci', ...args], {
     cwd: r.root,
-    env: { ...ENV, GITHUB_EVENT_NAME: name, GITHUB_EVENT_PATH: file },
+    env: { ...ENV, GITHUB_EVENT_NAME: name, GITHUB_EVENT_PATH: file, ...extra },
     encoding: 'utf8'
   })
   return { status: result.status, out: `${result.stdout}${result.stderr}` }
@@ -264,14 +264,20 @@ describe('ci on a pull request', () => {
     assert.match(bad.out, /the gate "node -e .*existsSync.*" failed with 1 on [0-9a-f]{7}\. Fix the code; a gate is never weakened/)
   })
 
-  test('the gates say when the working tree is not at the head', () => {
-    const r = setup({ config: { gates: { commit: ['node -e "process.exit(0)"'] } } })
+  test('the gates fail without running when the working tree is not at the head', () => {
+    const marker = join(temporary(), 'gate-ran').replace(/\\/g, '/')
+    const r = setup({ config: { gates: { commit: [`node -e "require('fs').appendFileSync(process.argv[1], 'x')" "${marker}"`] } } })
     r.git('checkout', '-q', '-b', 'lane-a')
     commit(r, { 'notes.md': 'Notes.\n' }, 'docs: notes')
     r.git('checkout', '-q', 'main')
     const result = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
-    passed(result)
-    assert.match(result.out, /✔ gates on [0-9a-f]{7}: .* \(the working tree is at [0-9a-f]{7}, not at the head [0-9a-f]{7}\)/)
+    failed(result, /✖ gates on [0-9a-f]{7}: not run \(the working tree is at [0-9a-f]{7}, not at the head [0-9a-f]{7}\)/)
+    assert.match(result.out, /the gates did not run: the working tree is at [0-9a-f]{7}, not at the head [0-9a-f]{7}, so they would judge other code\. Check out the head/)
+    assert.ok(!existsSync(marker), 'the gate ran')
+
+    r.git('checkout', '-q', 'lane-a')
+    passed(ci(r, 'pull_request', pullRequest(r, 'lane-a')))
+    assert.equal(readFileSync(marker, 'utf8'), 'x')
   })
 
   test('with ci.runGates false the head must carry a stamp for its own code', () => {
@@ -673,6 +679,31 @@ describe('ci without the history it needs', () => {
     const result = ci(r, 'push', { before: 'a'.repeat(40), after: rev(r), ref: 'refs/heads/main' })
     assert.equal(result.status, 1, result.out)
     assert.match(result.out, /commit a{40} is not in this clone\. Fetch the full history/)
+  })
+
+  test('pull_request_target is refused, pointing at the spec', () => {
+    const r = setup({ tasks: [['S1', 'Bake bread'], ['S2', 'Buy flour']] })
+    finishedLane(r)
+    const result = ci(r, 'pull_request_target', pullRequest(r, 'lane-a'))
+    assert.equal(result.status, 1, result.out)
+    assert.match(result.out, /the pull_request_target event runs with a write token and the repository's secrets.*so ci refuses it\. Run ci on pull_request \(ResaLedger spec, section 10: CI\)/)
+  })
+
+  test('a commit the range reader refuses stops the check with a message and no stack trace', () => {
+    const r = setup()
+    r.git('checkout', '-q', '-b', 'lane-a')
+    commit(r, { 'src/x.js': 'x\n' }, 'feat: x', 'Task: maintenance')
+    // git accepts a commit with two committer lines only with --literally.
+    const body = `tree ${rev(r, 'HEAD^{tree}')}\nparent ${rev(r, 'HEAD^')}\nauthor T <t@example.com> 1700000000 +0000\ncommitter T <t@example.com> 1700000000 +0000\ncommitter T <t@example.com> 1700000000 +0000\n\nfeat: odd\n\nTask: maintenance\n`
+    const made = spawnSync('git', ['hash-object', '-t', 'commit', '-w', '--stdin', '--literally'], { cwd: r.root, env: ENV, input: body, encoding: 'utf8' })
+    assert.equal(made.status, 0, made.stderr)
+    r.git('update-ref', 'refs/heads/lane-a', made.stdout.trim())
+    const summary = join(temporary(), 'summary.md')
+    const result = ci(r, 'pull_request', pullRequest(r, 'lane-a'), [], { GITHUB_STEP_SUMMARY: summary })
+    assert.equal(result.status, 1, result.out)
+    assert.match(result.out, /^resaledger: .+/m)
+    assert.doesNotMatch(result.out, /\n\s+at /)
+    assert.match(readFileSync(summary, 'utf8'), /^### ResaLedger · ✖ the check could not run\n\n.+/)
   })
 
   test('an event ci does not check is refused', () => {

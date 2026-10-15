@@ -298,6 +298,26 @@ describe('the pull request comment, against a local API', () => {
     assert.match(result.out, /^warning: ResaLedger could not comment on the pull request: /m)
   })
 
+  test('the gates never see the token or the runner credentials, and the comment still uses the token', async () => {
+    // The gate is the base's command; it writes what it sees of the secret variables to a file.
+    const seen = join(temporary(), 'seen.json').replace(/\\/g, '/')
+    const names = ['GITHUB_TOKEN', 'ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'ACTIONS_ID_TOKEN_REQUEST_URL', 'ACTIONS_RUNTIME_TOKEN']
+    const gate = `node -e "require('fs').writeFileSync(process.argv[1], JSON.stringify(${JSON.stringify(names).replace(/"/g, "'")}.map((name) => process.env[name] ?? null).concat(process.env.GITHUB_REPOSITORY ?? null)))" "${seen}"`
+    const r = setup({ gates: { verify: [gate] } })
+    finishedLane(r)
+    const api = await fakeApi()
+    try {
+      const secrets = { ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'id-token', ACTIONS_ID_TOKEN_REQUEST_URL: 'http://127.0.0.1:9/token', ACTIONS_RUNTIME_TOKEN: 'runtime-token' }
+      const result = await ci(r, 'pull_request', pullRequestEvent(r, 'lane-a'), { ...commentEnv(api), ...secrets })
+      assert.equal(result.status, 0, result.out)
+      assert.deepEqual(JSON.parse(readFileSync(seen, 'utf8')), [null, null, null, null, 'team/shop'])
+      assert.match(result.out, /Pull request comment created\./)
+      assert.equal(api.state.requests[0].authorization, 'Bearer test-token')
+    } finally {
+      await api.close()
+    }
+  })
+
   test('no comment from a fork, without a token, or on a push', async () => {
     const r = setup()
     finishedLane(r)
@@ -474,6 +494,16 @@ describe('the workflow template', () => {
     assert.equal(step.env.GITHUB_TOKEN, '${{ github.token }}')
   })
 
+  test('stops a hanging job, cancels a superseded pull request run, and uses the v5 actions', () => {
+    assert.equal(job['timeout-minutes'], 30)
+    assert.deepEqual(workflow.concurrency, {
+      group: 'resaledger-${{ github.event.pull_request.number || github.ref }}',
+      'cancel-in-progress': "${{ github.event_name == 'pull_request' }}"
+    })
+    const uses = job.steps.filter((step) => step.uses).map((step) => step.uses)
+    assert.deepEqual(uses, ['actions/checkout@v5', 'actions/setup-node@v5'])
+  })
+
   test('holds no workspace folder name, so one hash serves every repository', () => {
     assert.doesNotMatch(WORKFLOW, /\bledger\//)
     assert.doesNotMatch(WORKFLOW, /\{\{dir\}\}/)
@@ -544,6 +574,24 @@ describe('the workflow step, run in a real repository', () => {
     assert.match(result.out, /✖ guard: records\/scripts\/records\.mjs changed, and the new text is no released version/)
   })
 
+  test('the folder filter follows the guard: a leading dot passes, a leading dash is refused with a message', { skip }, () => {
+    const r = setup({ dir: '.ledger' })
+    r.git('mv', 'ledger', '.ledger')
+    commit(r, { '.ledger/scripts/records.mjs': readFileSync(GUARD, 'utf8') }, 'chore: add the guard', 'Task: maintenance')
+    r.git('checkout', '-q', '-b', 'lane-a')
+    commit(r, { 'notes.md': 'Notes.\n' }, 'docs: notes')
+    const env = { EVENT: 'pull_request', BASE_SHA: rev(r, 'main'), HEAD_SHA: rev(r, 'lane-a'), GITHUB_EVENT_NAME: 'pull_request', GITHUB_EVENT_PATH: pullRequestEvent(r, 'lane-a') }
+    const dotted = step(r, env)
+    assert.equal(dotted.status, 0, dotted.out)
+    assert.match(dotted.out, /ResaLedger ci: pull request from "lane-a"/)
+
+    r.git('checkout', '-q', 'main')
+    commit(r, { '.resaledger.json': `${JSON.stringify({ version: 2, dir: '-ledger' }, null, 2)}\n` }, 'chore: an unsafe folder', 'Task: maintenance')
+    const dashed = step(r, { ...env, BASE_SHA: rev(r, 'main') })
+    assert.equal(dashed.status, 1, dashed.out)
+    assert.match(dashed.out, /::error::the "dir" of \.resaledger\.json in [0-9a-f]{7}, "-ledger", is no safe folder/)
+  })
+
   test('a push to a lane is skipped, and a new branch reads its own rules', { skip }, () => {
     const r = setup()
     commit(r, { 'ledger/scripts/records.mjs': readFileSync(GUARD, 'utf8') }, 'chore: add the guard', 'Task: maintenance')
@@ -573,7 +621,7 @@ describe('init and update install the workflow', () => {
     assert.equal(r.read('.github/workflows/resaledger.yml'), WORKFLOW)
     assert.match(r.read('.github/pull_request_template.md'), /\nTask: ?\n$/)
     assert.match(result.out, /Created \(\d+\):[\s\S]*\.github\/pull_request_template\.md\n {2}\.github\/workflows\/resaledger\.yml/)
-    assert.match(result.out, /add these lines to \.github\/CODEOWNERS[^\n]*\n {7}# ResaLedger's enforcement files[\s\S]*\/ledger\/scripts\/records\.mjs @your-org\/maintainers\n {7}\/\.githooks\/ @your-org\/maintainers\n {7}\/\.github\/workflows\/resaledger\.yml/)
+    assert.match(result.out, /add these lines to \.github\/CODEOWNERS[^\n]*\n {7}# ResaLedger's enforcement files[\s\S]*\/ledger\/scripts\/records\.mjs @your-org\/maintainers\n {7}\/\.githooks\/ @your-org\/maintainers\n {7}\/\.github\/workflows\/ @your-org\/maintainers\n/)
     // The printed commit command includes both files.
     assert.match(result.out, /git add [^\n]*\.github\/pull_request_template\.md \.github\/workflows\/resaledger\.yml/)
   })

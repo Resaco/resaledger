@@ -17,7 +17,8 @@ const GATES_STAMP_NAME = /^[0-9a-f]{16}\.json$/
 /**
  * Runs each command through the shell (sh, or cmd.exe on Windows) from the repository root,
  * in order, and stops at the first failure. A pass prints one line; a failure prints the last
- * 80 lines of the command's combined output. Never exits: returns
+ * 80 lines of the command's combined output. options.env, when given, is the commands'
+ * whole environment. Never exits: returns
  * { passed: [{ command, seconds }], failure: { command, status, output } | null }.
  */
 export function runGates(commands, options = {}) {
@@ -33,7 +34,7 @@ export function runGates(commands, options = {}) {
     try {
       const descriptor = openSync(file, 'w')
       try {
-        result = spawnSync(command, { cwd: root, shell: true, stdio: ['ignore', descriptor, descriptor], windowsHide: true })
+        result = spawnSync(command, { cwd: root, env: options.env ?? process.env, shell: true, stdio: ['ignore', descriptor, descriptor], windowsHide: true })
       } finally {
         closeSync(descriptor)
       }

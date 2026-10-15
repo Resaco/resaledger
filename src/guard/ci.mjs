@@ -17,7 +17,9 @@ import { compareTaskIds } from './work.mjs'
 import { checkWorkspace, fingerprint, loadWorkspace, treeReader } from './workspace.mjs'
 
 const CI_ZERO = /^0+$/
-const CI_PULL_REQUEST_EVENTS = ['pull_request', 'pull_request_target']
+// The variables that give access to the repository or to GitHub's runner services. The gates run
+// the pull request's code, so they never see them (spec 12).
+const CI_GATES_HIDDEN = /^(GITHUB_TOKEN|ACTIONS_.*)$/i
 const CI_FETCH_HINT =
   'Fetch the full history: in GitHub Actions, give actions/checkout "fetch-depth: 0"; elsewhere, run "git fetch --unshallow" or fetch the missing commits'
 
@@ -176,10 +178,16 @@ function ciIdsCheck(root, config, context) {
   return { name: 'ids', ok: problems.length === 0, problems, counts: { added: added.length, branches: branches + 1 }, note: null }
 }
 
+/** The environment of the gates: this process's, without the token and GitHub's runner credentials. */
+function ciGatesEnv(env) {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !CI_GATES_HIDDEN.test(name)))
+}
+
 /**
  * The gates of a pull request. With ci.runGates, the base's commit gates and then its verify
  * gates run in the working tree, which the workflow checks out at the head. Without it, the
- * head must carry a stamp for its own code and these gates.
+ * head must carry a stamp for its own code and these gates. A working tree that is not at the
+ * head fails the check without running them, since they would judge other code.
  */
 function ciGatesCheck(root, config, head) {
   const guard = `node ${config.dir}/scripts/records.mjs`
@@ -208,8 +216,13 @@ function ciGatesCheck(root, config, head) {
 
   gates.mode = 'run'
   gates.ranOn = ciCommit(root, 'HEAD')
-  if (gates.ranOn !== head) result.note = `the working tree is at ${ciShort(gates.ranOn)}, not at the head ${ciShort(head)}`
-  const { passed, failure } = runGates(commands, { root })
+  if (gates.ranOn !== head) {
+    result.note = `the working tree is at ${ciShort(gates.ranOn)}, not at the head ${ciShort(head)}`
+    result.ok = false
+    result.problems.push({ file: '', line: 0, message: `the gates did not run: ${result.note}, so they would judge other code. Check out the head before running ci` })
+    return { check: result, gates }
+  }
+  const { passed, failure } = runGates(commands, { root, env: ciGatesEnv(process.env) })
   gates.passed = passed
   if (failure) {
     gates.failure = { command: failure.command, status: failure.status }
@@ -415,7 +428,12 @@ export function ciOptions(args, env = process.env) {
   } catch (error) {
     throw new CiError(`cannot read the event file GITHUB_EVENT_PATH: ${error.message}`)
   }
-  if (CI_PULL_REQUEST_EVENTS.includes(name)) {
+  if (name === 'pull_request_target') {
+    throw new CiError(
+      'the pull_request_target event runs with a write token and the repository\'s secrets, which the gates would expose to the pull request\'s code, so ci refuses it. Run ci on pull_request (ResaLedger spec, section 10: CI)'
+    )
+  }
+  if (name === 'pull_request') {
     const pr = payload.pull_request
     if (!pr?.base?.sha || !pr?.head?.sha || !pr?.head?.ref) throw new CiError(`the ${name} event has no pull_request.base.sha, head.sha and head.ref`)
     const baseRepo = pr.base.repo?.full_name ?? null
@@ -443,7 +461,8 @@ export async function ciCommand(args, env = process.env) {
     options = ciOptions(args, env)
     result = ciResult(options)
   } catch (error) {
-    if (!(error instanceof CiError)) throw error
+    // Any error, such as a commit the range reader refuses, is a check that could not run: it
+    // gets the summary and exit 1, never a stack trace.
     writeSummary(env, ciErrorMarkdown(error.message))
     fail(error.message)
   }

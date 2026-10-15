@@ -12,22 +12,29 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels its running check; pushes to a branch are all checked.
+concurrency:
+  group: resaledger-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   resaledger:
     runs-on: ubuntu-latest
+    # The gates run in this job; a gate that hangs stops here, not after GitHub's six hours.
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: write
     steps:
       - name: Check out the head with its full history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
 
@@ -46,11 +53,16 @@ jobs:
           if [ "${EVENT}" = pull_request ]; then rules="${BASE_SHA}"; head="${HEAD_SHA}"; else rules="${BEFORE_SHA}"; head="${GITHUB_SHA}"; fi
           # A new branch, or a pull request that adds ResaLedger, is judged by its own rules.
           if ! git cat-file -e "${rules}:.resaledger.json" 2>/dev/null; then rules="${head}"; fi
-          dir=$(git show "${rules}:.resaledger.json" | node -e '
+          # The folder must pass the guard's own rule before it is used in a path.
+          dir=$(git show "${rules}:.resaledger.json" | RULES="${rules}" node -e '
             let text = ""
             process.stdin.on("data", (chunk) => { text += chunk }).on("end", () => {
               const dir = JSON.parse(text).dir ?? "ledger"
-              if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/.test(dir)) process.exit(1)
+              const safe = typeof dir === "string" && dir.split("/").every((name) => /^[A-Za-z0-9._][A-Za-z0-9._-]*$/.test(name) && name !== "." && name !== "..")
+              if (!safe) {
+                console.error(`::error::the "dir" of .resaledger.json in ${process.env.RULES.slice(0, 7)}, ${JSON.stringify(dir)}, is no safe folder: it must be "/"-separated names of letters, digits, ".", "_" and "-", none of them empty, "." or "..", and none starting with "-"`)
+                process.exit(1)
+              }
               console.log(dir)
             })')
           git show "${rules}:${dir}/scripts/records.mjs" > "${work}/records.mjs"
