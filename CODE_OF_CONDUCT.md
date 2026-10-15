@@ -8,7 +8,7 @@ It applies in every space of this project: the repository, its issues, pull requ
 
 ## Reporting
 
-Report unacceptable behaviour privately to the maintainers at <!-- owner: conduct contact -->. Every report is reviewed and investigated promptly and fairly, and the reporter's privacy is respected.
+Report unacceptable behaviour privately to the maintainers through GitHub's private reporting form: open the repository's **Security** tab, choose **Report a vulnerability**, and start the title with "Conduct:". Only the maintainers see the report. Every report is reviewed and investigated promptly and fairly, and the reporter's privacy is respected.
 
 The maintainers enforce the code of conduct with the community impact guidelines of the Contributor Covenant 2.1: correction, warning, temporary ban and permanent ban.
 

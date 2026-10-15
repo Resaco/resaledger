@@ -282,7 +282,7 @@ describe('the release workflow', () => {
 // starts with "owner:". Built from fragments so that this file does not list itself.
 const MARKER = new RegExp(['<', '!-- owner: ([^>]*?) --', '>'].join(''), 'g')
 
-test('the owner markers are listed', (t) => {
+test('the owner markers are listed, and none is left open', (t) => {
   const listed = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { cwd: PACKAGE, encoding: 'utf8' })
   assert.equal(listed.status, 0, listed.stderr)
   const markers = []
@@ -294,5 +294,6 @@ test('the owner markers are listed', (t) => {
     })
   }
   for (const marker of markers) t.diagnostic(`open for the owner: ${marker}`)
-  assert.ok(markers.some((marker) => marker.startsWith('CODE_OF_CONDUCT.md:') && marker.endsWith(': conduct contact')), markers.join('\n'))
+  // A release candidate leaves nothing open for the owner.
+  assert.deepEqual(markers, [])
 })
