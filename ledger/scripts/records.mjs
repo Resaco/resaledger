@@ -11,7 +11,7 @@ import { isatty } from 'node:tty'
 import { fileURLToPath } from 'node:url'
 
 const VERSION = '1.0.0-dev.0'
-const RELEASED = {"hooks/commit-msg":{"1.0.0-dev.0":"aed52395adb1fd45357244e5d78ddc3c60b0e5fc558678b1f7464f42b740f667"},"hooks/pre-commit":{"1.0.0-dev.0":"26abf45bfc0570188dc7cd368e4a40269835b79bfcf72efb30d839017a5322e8"},"hooks/pre-merge-commit":{"1.0.0-dev.0":"f62d8a0d3dfd87e4816e311a095b8f93e9329955adf668077a0cc10ace224b7f"},"hooks/pre-push":{"1.0.0-dev.0":"68ac4461397ecad35218104129f87f02fce5964cbcc71f346dcac424282f553a"},"workflow":{"1.0.0-dev.0":"f246e24a513d77b0c92bf6d2c50a698deb38e8e1ded6f5aeea2e7fe635537119"}}
+const RELEASED = {"hooks/commit-msg":{"1.0.0-dev.0":"aed52395adb1fd45357244e5d78ddc3c60b0e5fc558678b1f7464f42b740f667"},"hooks/pre-commit":{"1.0.0-dev.0":"26abf45bfc0570188dc7cd368e4a40269835b79bfcf72efb30d839017a5322e8"},"hooks/pre-merge-commit":{"1.0.0-dev.0":"f62d8a0d3dfd87e4816e311a095b8f93e9329955adf668077a0cc10ace224b7f"},"hooks/pre-push":{"1.0.0-dev.0":"68ac4461397ecad35218104129f87f02fce5964cbcc71f346dcac424282f553a"},"workflow":{"1.0.0-dev.0":"ef7bdb309f6d0137ad2602be587d06ec2013be44664e6ccd99f2ef3da426e68f"}}
 
 // --- util.mjs ---
 // Small helpers that every part of the guard uses.
@@ -1618,7 +1618,8 @@ const GATES_STAMP_NAME = /^[0-9a-f]{16}\.json$/
 /**
  * Runs each command through the shell (sh, or cmd.exe on Windows) from the repository root,
  * in order, and stops at the first failure. A pass prints one line; a failure prints the last
- * 80 lines of the command's combined output. Never exits: returns
+ * 80 lines of the command's combined output. options.env, when given, is the commands'
+ * whole environment. Never exits: returns
  * { passed: [{ command, seconds }], failure: { command, status, output } | null }.
  */
 function runGates(commands, options = {}) {
@@ -1634,7 +1635,7 @@ function runGates(commands, options = {}) {
     try {
       const descriptor = openSync(file, 'w')
       try {
-        result = spawnSync(command, { cwd: root, shell: true, stdio: ['ignore', descriptor, descriptor], windowsHide: true })
+        result = spawnSync(command, { cwd: root, env: options.env ?? process.env, shell: true, stdio: ['ignore', descriptor, descriptor], windowsHide: true })
       } finally {
         closeSync(descriptor)
       }
@@ -2435,6 +2436,54 @@ function ownershipProblems(context) {
         message: `task ${id} is held by lane "${holder}" (Status: ${held.status}), so only that lane changes it. To take it over, run "${guard} claim ${id} --take"`
       })
     }
+  }
+  return problems
+}
+
+/**
+ * The tasks of `after` that name another lane and change here: a Lane other than `lane`, and
+ * text that is neither in `before` nor in any `accepted` Map. A branch carries such a task only
+ * as a copy of the lane it names, as when it is stacked on that lane. Returns [{ id, task, text,
+ * holder }], holder being the Lane the task names.
+ */
+function foreignLaneTasks(context) {
+  const { before, after, lane } = context
+  const accepted = context.accepted ?? []
+  const foreign = []
+  for (const [id, { task, text }] of after) {
+    if (!task.lane || task.lane === lane) continue
+    if (before.get(id)?.text === text) continue
+    if (accepted.some((tasks) => tasks.get(id)?.text === text)) continue
+    foreign.push({ id, task, text, holder: task.lane })
+  }
+  return foreign
+}
+
+/**
+ * The problems of the tasks from foreignLaneTasks against the copies on their lanes' branches.
+ * copies is a Map from id to { branch, task, text } (task and text null when that branch has no
+ * such file); an id is missing when the lane has no branch to read.
+ *
+ * A copy equal to the lane's is fine. Otherwise it is a problem when this copy holds the task,
+ * or the lane's copy does: only that lane changes a task it holds (spec 6.2), and a branch that
+ * claims a task names its own lane. A done, dropped or todo task the lane no longer holds can be
+ * edited by anyone.
+ */
+function laneCopyProblems(tasks, copies, config) {
+  const guard = `node ${config.dir}/scripts/records.mjs`
+  const problems = []
+  for (const { id, task, text, holder } of tasks) {
+    const copy = copies.get(id)
+    if (copy?.text === text) continue
+    const held = ownershipHolder(task) !== null
+    const copyHeld = copy?.task ? ownershipHolder(copy.task) !== null : false
+    if (!held && !copyHeld) continue
+    const where = copy ? `branch "${copy.branch}"` : `lane "${holder}", whose branch is not in this clone`
+    problems.push({
+      file: task.file,
+      line: 0,
+      message: `task ${id} is held by lane "${holder}", and this branch's copy differs from that of ${where}. Only that lane changes it: rebase on "${holder}" for its latest copy, or claim the task for this lane with "${guard} claim ${id}" (with --take while "${holder}" holds it)`
+    })
   }
   return problems
 }
@@ -6096,7 +6145,7 @@ function ciCheckLine(check, result) {
       if (gates.mode === 'stamp') return `gates: ${problems}${gates.stamp ? `the head carries its stamp ${gates.stamp}` : 'no stamp for the head'} (ci.runGates is false)`
       const timings = gates.passed.map(({ command, seconds }) => `${command} ✔ ${seconds} s`)
       if (gates.failure) timings.push(`${gates.failure.command} ✖`)
-      return `gates on ${ciShort(gates.ranOn)}: ${timings.join(' · ')}${note}`
+      return `gates on ${ciShort(gates.ranOn)}: ${timings.length > 0 ? timings.join(' · ') : 'not run'}${note}`
     }
     default:
       return `${check.name}: ${problems}`.replace(/; $/, '')
@@ -6203,7 +6252,7 @@ function ciGatesSummary(result) {
   if (gates.mode === 'stamp') return `**Gates:** ${gates.stamp ? `the head carries its stamp ${ciMarkdownCode(gates.stamp)}` : '✖ no stamp for the head'}, as ci.runGates is false ${from}`
   const timings = gates.passed.map(({ command, seconds }) => `${ciMarkdownCode(command)} ✔ ${seconds} s`)
   if (gates.failure) timings.push(`${ciMarkdownCode(gates.failure.command)} ✖ (exit ${gates.failure.status})`)
-  return `**Gates** on \`${ciShort(gates.ranOn)}\`: ${timings.join(' · ')} ${from}`
+  return `**Gates** on \`${ciShort(gates.ranOn)}\`: ${timings.length > 0 ? timings.join(' · ') : 'not run'} ${from}`
 }
 
 /** The enforcement lines: "unchanged", or each change with its id. */
@@ -6336,7 +6385,9 @@ async function ciComment(env, options, markdown) {
 // writes the job summary, comments on the pull request (report.mjs) and sets the exit code.
 
 const CI_ZERO = /^0+$/
-const CI_PULL_REQUEST_EVENTS = ['pull_request', 'pull_request_target']
+// The variables that give access to the repository or to GitHub's runner services. The gates run
+// the pull request's code, so they never see them (spec 12).
+const CI_GATES_HIDDEN = /^(GITHUB_TOKEN|ACTIONS_.*)$/i
 const CI_FETCH_HINT =
   'Fetch the full history: in GitHub Actions, give actions/checkout "fetch-depth: 0"; elsewhere, run "git fetch --unshallow" or fetch the missing commits'
 
@@ -6490,6 +6541,50 @@ function ciRemotes(root) {
 }
 
 /**
+ * The branch of each lane in the clone, from one `git for-each-ref`: a Map from lane to
+ * { ref, branch, commit }. A remote-tracking branch (refs/remotes/<remote>/<lane>) comes before
+ * a local one (refs/heads/<lane>); a lane with neither is left out.
+ */
+function ciLaneBranches(root, lanes) {
+  const remotes = ciRemotes(root)
+  const refsOf = new Map(lanes.map((lane) => [lane, [...remotes.map((remote) => `refs/remotes/${remote}/${lane}`), `refs/heads/${lane}`]]))
+  const patterns = [...refsOf.values()].flat()
+  const commits = new Map()
+  const output = ciGit(root, ['for-each-ref', '--format=%(refname)%00%(objectname)%00%(objecttype)%00%(refname:short)', ...patterns])
+  for (const line of output.split('\n')) {
+    const [ref, commit, type, branch] = line.split('\0')
+    if (type === 'commit') commits.set(ref, { ref, branch, commit })
+  }
+  const branches = new Map()
+  for (const [lane, refs] of refsOf) {
+    const found = refs.find((ref) => commits.has(ref))
+    if (found) branches.set(lane, commits.get(found))
+  }
+  return branches
+}
+
+/**
+ * The copies of tasks on the branches of the lanes they name (spec 6.2), read in one
+ * `git cat-file --batch`. tasks is [{ id, task, holder }] from foreignLaneTasks. Returns a Map
+ * from id to { branch, task, text }, task and text null when that branch has no such file; an
+ * id whose lane has no branch in the clone is left out. No fetch: the workflow fetches every branch.
+ */
+function ciLaneCopies(root, tasks) {
+  const copies = new Map()
+  if (tasks.length === 0) return copies
+  const branches = ciLaneBranches(root, [...new Set(tasks.map(({ holder }) => holder))])
+  const wanted = tasks.filter(({ holder }) => branches.has(holder)).map(({ id, task, holder }) => ({ id, branch: branches.get(holder), spec: `${branches.get(holder).commit}:${task.file}` }))
+  const objects = rangeObjects(root, wanted.map(({ spec }) => spec))
+  for (const { id, branch, spec } of wanted) {
+    const object = objects.get(spec)
+    const text = object?.type === 'blob' ? object.data.toString('utf8') : null
+    const file = spec.slice(spec.indexOf(':') + 1)
+    copies.set(id, { branch: branch.branch, task: text === null ? null : parseTask(file, text), text })
+  }
+  return copies
+}
+
+/**
  * The ids check of a pull request: ids the head adds (not at the merge base) against the base's
  * tip and every other branch in the clone, except the pull request's own branch.
  */
@@ -6513,10 +6608,16 @@ function ciIdsCheck(root, config, context) {
   return { name: 'ids', ok: problems.length === 0, problems, counts: { added: added.length, branches: branches + 1 }, note: null }
 }
 
+/** The environment of the gates: this process's, without the token and GitHub's runner credentials. */
+function ciGatesEnv(env) {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !CI_GATES_HIDDEN.test(name)))
+}
+
 /**
  * The gates of a pull request. With ci.runGates, the base's commit gates and then its verify
  * gates run in the working tree, which the workflow checks out at the head. Without it, the
- * head must carry a stamp for its own code and these gates.
+ * head must carry a stamp for its own code and these gates. A working tree that is not at the
+ * head fails the check without running them, since they would judge other code.
  */
 function ciGatesCheck(root, config, head) {
   const guard = `node ${config.dir}/scripts/records.mjs`
@@ -6545,8 +6646,13 @@ function ciGatesCheck(root, config, head) {
 
   gates.mode = 'run'
   gates.ranOn = ciCommit(root, 'HEAD')
-  if (gates.ranOn !== head) result.note = `the working tree is at ${ciShort(gates.ranOn)}, not at the head ${ciShort(head)}`
-  const { passed, failure } = runGates(commands, { root })
+  if (gates.ranOn !== head) {
+    result.note = `the working tree is at ${ciShort(gates.ranOn)}, not at the head ${ciShort(head)}`
+    result.ok = false
+    result.problems.push({ file: '', line: 0, message: `the gates did not run: ${result.note}, so they would judge other code. Check out the head before running ci` })
+    return { check: result, gates }
+  }
+  const { passed, failure } = runGates(commands, { root, env: ciGatesEnv(process.env) })
   gates.passed = passed
   if (failure) {
     gates.failure = { command: failure.command, status: failure.status }
@@ -6584,6 +6690,10 @@ function ciPullRequest(root, options) {
     accepted: [baseTasks],
     baseName: config.base
   })
+  // A task that names another lane and changes here must be that lane's copy (a stacked branch).
+  const reported = new Set(ownership.map(({ file }) => file))
+  const foreign = foreignLaneTasks({ before: mergeBaseTasks, after: headTasks, lane, accepted: [baseTasks] }).filter(({ task }) => !reported.has(task.file))
+  ownership.push(...laneCopyProblems(foreign, ciLaneCopies(root, foreign), config))
   ownership.push(...ciRemovedRecords(root, mergeBase, head, config))
   const changed = [...headTasks].filter(([id, { text }]) => mergeBaseTasks.get(id)?.text !== text).length
   checks.push({ name: 'ownership', ok: ownership.length === 0, problems: ownership, counts: { changed }, note: null })
@@ -6753,7 +6863,12 @@ function ciOptions(args, env = process.env) {
   } catch (error) {
     throw new CiError(`cannot read the event file GITHUB_EVENT_PATH: ${error.message}`)
   }
-  if (CI_PULL_REQUEST_EVENTS.includes(name)) {
+  if (name === 'pull_request_target') {
+    throw new CiError(
+      'the pull_request_target event runs with a write token and the repository\'s secrets, which the gates would expose to the pull request\'s code, so ci refuses it. Run ci on pull_request (ResaLedger spec, section 10: CI)'
+    )
+  }
+  if (name === 'pull_request') {
     const pr = payload.pull_request
     if (!pr?.base?.sha || !pr?.head?.sha || !pr?.head?.ref) throw new CiError(`the ${name} event has no pull_request.base.sha, head.sha and head.ref`)
     const baseRepo = pr.base.repo?.full_name ?? null
@@ -6781,7 +6896,8 @@ async function ciCommand(args, env = process.env) {
     options = ciOptions(args, env)
     result = ciResult(options)
   } catch (error) {
-    if (!(error instanceof CiError)) throw error
+    // Any error, such as a commit the range reader refuses, is a check that could not run: it
+    // gets the summary and exit 1, never a stack trace.
     writeSummary(env, ciErrorMarkdown(error.message))
     fail(error.message)
   }
