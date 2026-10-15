@@ -10,6 +10,7 @@
     "bin",
     "dist/records.mjs",
     "src/cli",
+    "src/guard",
     "templates",
     "README.md",
     "LICENSE",
