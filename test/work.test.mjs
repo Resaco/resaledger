@@ -1,0 +1,299 @@
+// work: the state on one screen, in real repositories with the bundled guard and its hooks
+// installed, so that turning the hooks on is real. Lanes are real worktrees.
+import assert from 'node:assert/strict'
+import { chmodSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { test } from 'node:test'
+import { HOOK_NAMES, renderHook } from '../src/cli/hooks.mjs'
+import { compareTaskIds } from '../src/guard/work.mjs'
+import { PACKAGE, repository, run, temporary } from './helpers.mjs'
+
+const GUARD = join(temporary(), 'records.mjs')
+const built = run(PACKAGE, process.execPath, [join(PACKAGE, 'scripts', 'bundle.mjs'), '--out', GUARD])
+if (built.status !== 0) throw new Error(`bundle failed: ${built.out}`)
+
+const README = `# Bakery shop
+
+## Goal
+
+Build a small web shop for local bakers. It is finished when a customer can order bread.
+
+## Environments
+
+Local only.
+
+## Manual checks
+
+None.
+`
+
+/** A task file: its heading, fields and sections, valid for its status. */
+function taskFile(id, title, fields = {}) {
+  const { status = 'todo', lane, depends, waiting, handoff } = fields
+  const lines = [`# ${id} ${title}`, '', `- Status: ${status}`]
+  if (lane) lines.push(`- Lane: ${lane}`)
+  if (depends) lines.push(`- Depends on: ${depends}`)
+  if (waiting) lines.push(`- Waiting for: ${waiting}`)
+  if (status === 'done') lines.push('- Evidence: `npm test`: 3 of 3')
+  if (status === 'dropped') lines.push('- Reason: not needed')
+  if (status === 'doing') lines.push('', '## Plan', '', 'Do the thing and test it.')
+  if (handoff) lines.push('', '## Handoff', '', handoff)
+  return `${lines.join('\n')}\n`
+}
+
+/** A repository with the hooks and the bundled guard, a configuration, a README and tasks, committed with the hooks off. */
+function workspace({ config = {}, readme = README, tasks = [] } = {}) {
+  const r = repository()
+  for (const name of HOOK_NAMES) {
+    r.write(`.githooks/${name}`, renderHook(name, 'ledger'))
+    chmodSync(join(r.root, '.githooks', name), 0o755)
+  }
+  r.write('ledger/scripts/records.mjs', readFileSync(GUARD, 'utf8'))
+  r.write('.resaledger.json', `${JSON.stringify({ version: 2, ...config }, null, 2)}\n`)
+  if (readme !== null) r.write('ledger/README.md', readme)
+  for (const [id, title, fields] of tasks) r.write(`ledger/tasks/${id}.md`, taskFile(id, title, fields))
+  const committed = r.commit('chore: start')
+  if (committed.status !== 0) throw new Error(`commit failed: ${committed.out}`)
+  return r
+}
+
+function work(r, ...args) {
+  return r.node('ledger/scripts/records.mjs', 'work', ...args)
+}
+
+function workJson(r) {
+  const result = work(r, '--json')
+  assert.equal(result.status, 0, result.out)
+  return JSON.parse(result.out)
+}
+
+test('ids sort naturally: by prefix, then number by number', () => {
+  const ids = ['S10', 'S4.1', 'A2', 'S2', 'S4', 'S5', 'S4.10', 'S4.2', 'A10']
+  assert.deepEqual([...ids].sort(compareTaskIds), ['A2', 'A10', 'S2', 'S4', 'S4.1', 'S4.2', 'S4.10', 'S5', 'S10'])
+})
+
+test('an empty workspace shows the goal, no work in progress and the next commands', () => {
+  const r = workspace()
+  const result = work(r)
+  assert.equal(result.status, 0, result.out)
+  assert.equal(
+    result.out,
+    `✔ git hooks turned on: core.hooksPath is .githooks
+ResaLedger · lane main · solo · hooks on
+Goal: Build a small web shop for local bakers.
+
+In progress in this lane
+  none
+
+Next: node ledger/scripts/records.mjs task <id> for the plan, then node ledger/scripts/records.mjs handoff before you stop.
+`
+  )
+  // The second run finds the hooks on and says nothing about them.
+  assert.ok(work(r).out.startsWith('ResaLedger · lane main · solo · hooks on\n'))
+})
+
+test('a solo repository: in progress with the handoff, waiting, blocked, ready next and progress', () => {
+  const r = workspace({
+    tasks: [
+      ['S1', 'Set up the project', { status: 'done' }],
+      ['S2', 'Try a framework', { status: 'dropped' }],
+      ['S3', 'Store the orders', { status: 'doing', lane: 'main', handoff: 'Routes are done.\n\nNext: the list view.\nThe tree is clean.\nOpen question: paging.' }],
+      ['S4', 'Choose the payment provider', { status: 'blocked', waiting: 'Owner: pick one of the two offers' }],
+      ['S5', 'Send receipts', { status: 'blocked', waiting: 'S3' }],
+      ['S6', 'Show the bread list', { depends: 'S1, S2' }],
+      ['S7', 'Order history', { depends: 'S3' }],
+      ['S8', 'Opening hours page']
+    ]
+  })
+  work(r)
+  const result = work(r)
+  assert.equal(result.status, 0, result.out)
+  assert.equal(
+    result.out,
+    `ResaLedger · lane main · solo · hooks on
+Goal: Build a small web shop for local bakers.
+
+In progress in this lane
+  S3  Store the orders
+      Routes are done.
+      Next: the list view.
+      The tree is clean.
+
+Waiting for the owner
+  S4  Choose the payment provider — Owner: pick one of the two offers
+
+Blocked
+  S5  Send receipts — waiting for S3
+
+Ready next
+  S6  Show the bread list
+  S8  Opening hours page
+
+Progress
+  2 of 8 done or dropped
+
+Next: node ledger/scripts/records.mjs task S3 for the plan, then node ledger/scripts/records.mjs handoff before you stop.
+`
+  )
+})
+
+test('ready next is ordered by id naturally, or by phases first, and shows at most five', () => {
+  const tasks = ['S10', 'S2', 'S4.1', 'S4', 'S5', 'A1'].map((id) => [id, `Task ${id}`])
+  const plain = workJson(workspace({ tasks }))
+  assert.deepEqual(plain.ready.map((task) => task.id), ['A1', 'S2', 'S4', 'S4.1', 'S5'])
+  const phased = workJson(workspace({ tasks, config: { phases: ['S', 'A'] } }))
+  assert.deepEqual(phased.ready.map((task) => task.id), ['S2', 'S4', 'S4.1', 'S5', 'S10'])
+  assert.deepEqual(
+    phased.progress.byPrefix.map((entry) => entry.prefix),
+    ['S', 'A']
+  )
+})
+
+test('three worktrees see each other\'s claims, an uncommitted one too, and ready next leaves them out', () => {
+  const r = workspace({ tasks: [['S1', 'One'], ['S2', 'Two'], ['S3', 'Three'], ['S4', 'Four']] })
+  const a = r.worktree('a')
+  a.write('ledger/tasks/S1.md', taskFile('S1', 'One', { status: 'doing', lane: 'a', handoff: 'Started.' }))
+  assert.equal(a.commit('chore: claim S1').status, 0)
+  const b = r.worktree('b')
+  b.write('ledger/tasks/S2.md', taskFile('S2', 'Two', { status: 'doing', lane: 'b' }))
+  const c = r.worktree('c')
+
+  const fromMain = work(r)
+  assert.equal(fromMain.status, 0, fromMain.out)
+  assert.match(fromMain.out, /\nOther lanes\n {2}a: S1\n {2}b: S2\n {2}c: holds nothing\n/)
+  assert.match(fromMain.out, /\nReady next\n {2}S3 {2}Three\n {2}S4 {2}Four\n/)
+  assert.doesNotMatch(fromMain.out, /Warnings/)
+
+  const fromC = workJson(c)
+  assert.equal(fromC.lane, 'c')
+  assert.deepEqual(
+    fromC.lanes.map((lane) => [lane.branch, lane.source, lane.holds]),
+    [['c', 'this', []], ['a', 'worktree', ['S1']], ['b', 'worktree', ['S2']], ['main', 'worktree', []]]
+  )
+  assert.deepEqual(fromC.ready.map((task) => task.id), ['S3', 'S4'])
+  assert.equal(fromC.lanes[1].lastCommit.author, 'Test')
+
+  const fromA = work(a)
+  assert.match(fromA.out, /^ResaLedger · lane a · solo · hooks on\n/)
+  assert.match(fromA.out, /\nIn progress in this lane\n {2}S1 {2}One\n {6}Started\.\n/)
+  assert.match(fromA.out, /\nOther lanes\n {2}b: S2\n {2}c: holds nothing\n {2}main: holds nothing\n/)
+})
+
+test('a task doing in two worktrees is a double claim', () => {
+  const r = workspace({ tasks: [['S1', 'One'], ['S2', 'Two']] })
+  for (const name of ['a', 'b']) r.worktree(name).write('ledger/tasks/S1.md', taskFile('S1', 'One', { status: 'doing', lane: name }))
+  const result = work(r)
+  assert.match(result.out, /\nWarnings\n {2}S1 is doing in 2 lanes: a, b\./)
+  const state = workJson(r)
+  assert.deepEqual(state.warnings.doubleClaims, [{ id: 'S1', lanes: ['a', 'b'] }])
+  assert.deepEqual(state.ready.map((task) => task.id), ['S2'])
+})
+
+test('a task held by a branch that is gone is a stale claim', () => {
+  const r = workspace({ tasks: [['S1', 'One', { status: 'doing', lane: 's1-old-branch' }], ['S2', 'Two']] })
+  const result = work(r)
+  assert.match(result.out, /\nWarnings\n {2}S1 is held by s1-old-branch, which is no branch here: a stale claim\. Take it over with claim S1 --take\n/)
+  assert.match(result.out, /\nIn progress in this lane\n {2}none\n/)
+  const state = workJson(r)
+  assert.deepEqual(state.warnings.staleClaims, [{ id: 'S1', lane: 's1-old-branch', file: 'ledger/tasks/S1.md' }])
+  assert.deepEqual(state.ready.map((task) => task.id), ['S2'])
+
+  // A local branch that exists is not stale, even without a worktree.
+  r.git('branch', 's1-old-branch')
+  assert.deepEqual(workJson(r).warnings.staleClaims, [])
+})
+
+test('record problems are warnings: five shown, and a count of the rest', () => {
+  const tasks = Array.from({ length: 7 }, (_, index) => [`S${index + 1}`, `Task ${index + 1}`, { depends: 'X99' }])
+  const result = work(workspace({ tasks }))
+  assert.equal(result.status, 0, result.out)
+  const warnings = result.out.split('\nWarnings\n')[1].split('\n\n')[0].split('\n')
+  assert.equal(warnings.length, 6)
+  assert.match(warnings[0], /^ {2}ledger\/tasks\/S1\.md:\d+: "Depends on" names X99/)
+  assert.equal(warnings[5], '  and 2 more record problems; run check for the list')
+})
+
+test('--json prints one object with every section and nothing else', () => {
+  const r = workspace({
+    tasks: [
+      ['S1', 'One', { status: 'doing', lane: 'main', handoff: 'Halfway.' }],
+      ['S2', 'Two', { status: 'blocked', waiting: 'owner' }],
+      ['S3', 'Three']
+    ]
+  })
+  const result = work(r, '--json')
+  assert.equal(result.status, 0, result.out)
+  const state = JSON.parse(result.out)
+  assert.deepEqual(Object.keys(state), ['lane', 'preset', 'hooks', 'goal', 'inProgress', 'waitingForOwner', 'blocked', 'ready', 'lanes', 'progress', 'warnings', 'next'])
+  assert.equal(state.lane, 'main')
+  assert.equal(state.preset, 'solo')
+  assert.deepEqual(state.hooks, { active: true, activated: true, foreign: null })
+  assert.equal(state.goal, 'Build a small web shop for local bakers.')
+  assert.deepEqual(state.inProgress, [{ id: 'S1', title: 'One', file: 'ledger/tasks/S1.md', handoff: ['Halfway.'] }])
+  assert.deepEqual(state.waitingForOwner, [{ id: 'S2', title: 'Two', file: 'ledger/tasks/S2.md', waitingFor: 'owner' }])
+  assert.deepEqual(state.blocked, [])
+  assert.deepEqual(state.ready, [{ id: 'S3', title: 'Three', file: 'ledger/tasks/S3.md' }])
+  assert.equal(state.lanes.length, 1)
+  assert.deepEqual(state.lanes[0].holds, ['S1'])
+  assert.equal(state.lanes[0].source, 'this')
+  assert.deepEqual(Object.keys(state.lanes[0].lastCommit), ['author', 'date'])
+  assert.deepEqual(state.progress, { done: 0, total: 3, byPrefix: [{ prefix: 'S', done: 0, total: 3 }] })
+  assert.deepEqual(state.warnings, { doubleClaims: [], staleClaims: [], problems: [] })
+  assert.deepEqual(state.next, ['node ledger/scripts/records.mjs task S1', 'node ledger/scripts/records.mjs handoff'])
+  assert.equal(work(r, '--verbose').status, 1)
+})
+
+test('the hooks are off in a fresh clone and on after work', () => {
+  const r = workspace()
+  const clone = join(r.base, 'clone')
+  assert.equal(run(r.base, 'git', ['clone', '-q', r.root, clone]).status, 0)
+  const guard = (...args) => run(clone, process.execPath, ['ledger/scripts/records.mjs', ...args])
+  assert.equal(guard('hooks').status, 1)
+  const result = guard('work')
+  assert.equal(result.status, 0, result.out)
+  assert.match(result.out, /^✔ git hooks turned on: core\.hooksPath is \.githooks\nResaLedger · lane main · solo · hooks on\n/)
+  assert.equal(guard('hooks').status, 0)
+  assert.equal(run(clone, 'git', ['config', 'core.hooksPath']).out.trim(), '.githooks')
+})
+
+test('a foreign core.hooksPath is left alone, with one warning line', () => {
+  const r = workspace()
+  r.git('config', 'core.hooksPath', '.husky')
+  const result = work(r)
+  assert.equal(result.status, 0, result.out)
+  const lines = result.out.split('\n')
+  assert.match(lines[0], /^✖ core\.hooksPath is "\.husky", not \.githooks/)
+  assert.equal(lines[1], 'ResaLedger · lane main · solo · hooks off')
+  assert.equal(r.git('config', 'core.hooksPath').out.trim(), '.husky')
+})
+
+test('the status alias and the team preset', () => {
+  const r = workspace({ config: { preset: 'team' } })
+  const result = r.node('ledger/scripts/records.mjs', 'status')
+  assert.equal(result.status, 0, result.out)
+  assert.match(result.out, /ResaLedger · lane main · team · hooks on\n/)
+})
+
+test('work finishes within the budget on 300 tasks', (t) => {
+  const statuses = ['todo', 'todo', 'done', 'dropped', 'blocked', 'doing']
+  const tasks = Array.from({ length: 300 }, (_, index) => {
+    const status = statuses[index % statuses.length]
+    const id = `${['S', 'C', 'W'][index % 3]}${index + 1}`
+    const fields = { status, depends: index > 10 && status === 'todo' ? `S${(index % 9) * 3 + 1}` : undefined }
+    if (status === 'blocked') fields.waiting = index % 2 ? 'owner' : 'a supplier'
+    if (status === 'doing') {
+      fields.lane = 'main'
+      fields.handoff = 'Halfway there.\nNext: the tests.'
+    }
+    return [id, `Task number ${index + 1}`, fields]
+  })
+  const r = workspace({ tasks })
+  work(r)
+  const started = process.hrtime.bigint()
+  const result = work(r)
+  const elapsed = Number(process.hrtime.bigint() - started) / 1e6
+  assert.equal(result.status, 0, result.out)
+  assert.match(result.out, /300 done or dropped|of 300 done or dropped/)
+  t.diagnostic(`work on 300 tasks: ${elapsed.toFixed(0)} ms, including node start-up`)
+  assert.ok(elapsed < 3000, `work took ${elapsed} ms`)
+})
