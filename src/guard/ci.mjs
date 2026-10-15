@@ -124,8 +124,10 @@ function ciCommitsCheck(root, from, to, config, lane, skipGitHubMerges, note) {
   if (from === null) return { name: 'commits', ok: true, skipped: true, problems: [], counts: { commits: 0 }, note }
   const start = adoptionStart(root, from, to)
   const commits = Number(ciGit(root, ['rev-list', '--count', `${start}..${to}`]))
-  const problems = checkRange(start, to, { config, lane, skipGitHubMerges, root })
-  return { name: 'commits', ok: problems.length === 0, problems, counts: { commits }, note }
+  const exempt = new Map()
+  const problems = checkRange(start, to, { config, lane, skipGitHubMerges, root, exempt })
+  // Trusted by the committer address alone, so the output says how many (spec 10).
+  return { name: 'commits', ok: problems.length === 0, problems, counts: { commits, github: exempt.get('github') ?? 0 }, note }
 }
 
 /**

@@ -96,6 +96,8 @@ EOF
 
 The check appears in the list only after the workflow has run once, on the setup pull request.
 
+The protection matters for the push check too. On a push to `main`, CI leaves out merge and squash commits whose committer is GitHub's address, because their pull request was checked. Anyone can write that address into a commit, so the push check trusts it, and only a protected `main` keeps other commits out.
+
 ## Protect the enforcement files with CODEOWNERS
 
 CI judges each pull request with the base branch's rules, so a pull request cannot loosen the check that judges it. One file is beyond its reach: the workflow that runs the check, because GitHub runs a pull request's own copy of it. CODEOWNERS makes a change to that file, and to the other enforcement files, wait for a review from the people who own the rules.
@@ -247,7 +249,7 @@ CI comments on the pull request with what it moves: T1 from new to done, with it
 
 ## A deliberate loosening needs a decision
 
-CI lists every change to the enforcement files: the configuration, the guard, the git hooks and the workflow. A change that weakens enforcement fails the check unless the pull request adds a decision that names it, so reviewers see who decided.
+CI lists every change to the enforcement files: the configuration, the guard, the git hooks (their text and whether they are executable), the workflow and `.gitattributes`. A change that weakens enforcement fails the check unless the pull request adds a decision that names it, so reviewers see who decided.
 
 Here a lane raises the limit of tasks in progress per lane from 3 to 5:
 

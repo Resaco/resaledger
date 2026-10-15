@@ -16,7 +16,7 @@ On a pull request, `ci`:
 - runs the gates on the head, with the base's commands, or with `ci.runGates: false` in the configuration, wants a stamp for the head's code instead;
 - lists every change to the enforcement files and fails a weakening one unless the pull request adds a decision that names it ([the team guide](team.md#a-deliberate-loosening-needs-a-decision)).
 
-On a push to the base, it validates the records and checks the new commits. It leaves out merge commits and the commits GitHub makes when it merges a pull request, which were checked in the pull request, so squash merges work.
+On a push to the base, it validates the records and checks the new commits. It leaves out merge commits and the commits GitHub makes when it merges a pull request, which were checked in the pull request, so squash merges work. A commit counts as GitHub's when GitHub's address is its committer and it is a merge or has the subject of a squash merge, `Title (#12)`; the output says how many it left out that way. Anyone can write that address into a commit, so this check trusts it: protect the base, so that only pull requests reach it.
 
 It exits with 0 when every check passes and with 1 when one fails or the check cannot run.
 

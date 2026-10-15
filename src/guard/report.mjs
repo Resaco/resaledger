@@ -23,7 +23,7 @@ export function ciCheckLine(check, result) {
       return `records: ${problems}${recordCounts(counts.tasks, counts.decisions, counts.logs)}${note}`
     case 'commits':
       if (check.skipped) return `commits: not checked${note}`
-      return `commits: ${problems}${plural(counts.commits, 'commit')} ${result.event === 'push' ? 'pushed' : 'from the merge base to the head'}${note}`
+      return `commits: ${problems}${plural(counts.commits, 'commit')} ${result.event === 'push' ? 'pushed' : 'from the merge base to the head'}${ciGitHubExempt(counts)}${note}`
     case 'ownership':
       return `ownership: ${problems}${plural(counts.changed, 'task')} changed${note}`
     case 'ids':
@@ -47,6 +47,11 @@ export function ciCheckLine(check, result) {
     default:
       return `${check.name}: ${problems}`.replace(/; $/, '')
   }
+}
+
+/** How many code commits passed as GitHub's merge or squash commits, trusted by their committer. */
+function ciGitHubExempt(counts) {
+  return counts.github > 0 ? `, ${counts.github} exempt as GitHub's merge or squash ${counts.github === 1 ? 'commit' : 'commits'} by the committer address` : ''
 }
 
 /** A change's text led by its id, which a configuration change's text already starts with. */
@@ -137,7 +142,7 @@ function ciCommitsSummary(result) {
   if (!check) return null
   if (check.skipped) return `**Commits:** not checked${check.note ? ` (${ciMarkdownText(check.note)})` : ''}`
   const verdict = check.ok ? 'all pass' : plural(check.problems.length, 'problem')
-  return `**Commits:** ${check.counts.commits} checked, ${verdict}`
+  return `**Commits:** ${check.counts.commits} checked, ${verdict}${ciGitHubExempt(check.counts)}`
 }
 
 /** The gates line: each command with its time, where it ran, and where the rules came from. */

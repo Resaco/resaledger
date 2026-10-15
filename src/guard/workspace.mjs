@@ -86,13 +86,16 @@ function workspaceKey(path) {
  * (the staged content) or { kind: 'commit', rev }. An optional `root` names the repository;
  * by default it is the repository of the current folder.
  *
- * Returns { list(prefix), read(path), exists(path) }. list(prefix) gives the sorted file paths
- * in a folder, at any depth ('' for all). read gives a file's text, or null when it is missing.
- * exists is true for a file and for a folder that holds at least one file.
+ * Returns { list(prefix), read(path), exists(path), mode(path) }. list(prefix) gives the sorted
+ * file paths in a folder, at any depth ('' for all). read gives a file's text, or null when it is
+ * missing. exists is true for a file and for a folder that holds at least one file. mode gives
+ * git's mode of a file in the index or a commit, such as '100755', or null (always in the
+ * working tree).
  */
 export function treeReader(source) {
   const root = source.root ?? repositoryRoot()
   let files = null // Map of path → object id (null in the working tree)
+  const modes = new Map() // path → git's mode, in the index or a commit
   let folders = null
   const texts = new Map()
 
@@ -106,7 +109,11 @@ export function treeReader(source) {
       }
     } else {
       // In a merge conflict the index holds several stages of a path; the first one stands for it.
-      for (const entry of workspaceEntries(root, source)) if (!files.has(entry.path)) files.set(entry.path, entry.oid)
+      for (const entry of workspaceEntries(root, source)) {
+        if (files.has(entry.path)) continue
+        files.set(entry.path, entry.oid)
+        modes.set(entry.path, entry.mode)
+      }
     }
     files = new Map([...files].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
     folders = new Set([''])
@@ -150,6 +157,11 @@ export function treeReader(source) {
     exists(path) {
       const key = workspaceKey(path)
       return listing().has(key) || folders.has(key)
+    },
+    mode(path) {
+      const key = workspaceKey(path)
+      listing()
+      return modes.get(key) ?? null
     }
   }
 }

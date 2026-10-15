@@ -295,7 +295,7 @@ Small lanes merge sooner.
 - A field may appear only once, and a field name within two letters of a known one is refused.
 - A known field below the field list, such as a `- Weakens:` line after a blank line, is refused: there it would be text, not a field.
 - A decision file is added once; marking it superseded is its only later edit.
-- `Weakens` counts only in the pull request that adds the decision. CI lists every change to the configuration, the guard, the hooks and the workflow, each with an id such as `wip`, `gates.verify`, `protected`, `guard` or `hooks/pre-commit`, and fails a weakening change that no added decision names.
+- `Weakens` counts only in the pull request that adds the decision. CI lists every change to the configuration, the guard, the hooks, the workflow and `.gitattributes`, each with an id such as `wip`, `gates.verify`, `protected`, `guard`, `hooks/pre-commit` or `gitattributes`, and fails a weakening change that no added decision names. A hook that stops being executable weakens like a hook whose text changed.
 
 ## 5. Log entries
 
@@ -421,7 +421,7 @@ Exemptions:
 | --- | --- |
 | A merge | Every code path it changes against a parent was also changed on another side, between the merge base and that other parent: a clean merge or a conflict resolution. Code changed only in the merge needs its own `Task:` line. |
 | A revert | Its `This reverts commit <hash>.` line names an ancestor, and its change is exactly the inverse of that commit's change, compared by patch id. |
-| A commit GitHub made merging a pull request | Only in CI's check of a push to the base, because the pull request was checked. |
+| A commit GitHub made merging a pull request | Only in CI's check of a push to the base, because the pull request was checked: GitHub's committer address on a merge commit or on a squash commit, whose subject ends in ` (#12)`. The address is trusted, not verified, so the output counts these commits and the base must be protected. |
 
 A release commit is not exempt: one that changes code carries a `Task:` line, for example `Task: maintenance`. The message alone never exempts a commit.
 
