@@ -7,9 +7,36 @@
 
 A task ledger inside your repository that coding agents can't skip, can't fake and can't collide on.
 
-Every task, decision and log entry is a Markdown file in the repository. Git hooks and CI refuse work that is not recorded, a stamp ties a passing test run to the exact code it ran on, and parallel lanes never edit the same file, so agents and people can work side by side without merge conflicts in the records.
+Coding agents lose track of what they were doing, say the tests pass when nobody ran them, and trip over each other when several work at once. Rules in `AGENTS.md` ask them to behave, but nothing makes them. ResaLedger keeps the work in the repository as small Markdown files, one per task, and enforces them where an agent cannot talk its way past: in git hooks, in agent hooks and in CI.
 
-**Status: in development.** ResaLedger 1.0 is being built in this repository and is not ready to install yet. The build is tracked in [`ledger/`](ledger/README.md) with ResaLedger itself: it moved from agent-ledger 0.3, the tool ResaLedger replaces, with its own `migrate`.
+- **Can't skip.** A commit that changes code names a task its branch holds, or git refuses it. The agent hooks block `--no-verify`, and CI catches what got past a hook.
+- **Can't fake.** `verify` runs your project's own checks on the committed code and stamps that exact code. A session doesn't end, and a pull request doesn't pass, on code whose checks never passed.
+- **Can't collide.** A lane is a branch. Every task, decision and log entry is its own file, and only the lane that holds a task changes it, so three agents in three worktrees never edit the same file.
+
+No dependencies, Node 20 or newer. Works with Claude Code, Codex, Cursor, Gemini CLI and GitHub Copilot, and with people.
+
+**Status: release candidate.** 1.0.0 is not on npm yet. Until it is, clone this repository and run `node <clone>/bin/resaledger.mjs` wherever this page says `npx resaledger`. This repository is built with ResaLedger itself: its own tasks, decisions and log are in [`ledger/`](ledger/README.md).
+
+## Quickstart
+
+In a git repository with at least one commit:
+
+```bash
+npx resaledger init
+```
+
+`init` runs your project's checks once and keeps the ones that pass as gates, writes the configuration, a `ledger/` folder, the git hooks and a short protocol in `AGENTS.md`, and prints the command that commits the setup. Run that command. Then the daily loop:
+
+```bash
+npx resaledger new "Store uploads on disk"            # creates task T1
+# write its goal and checks under "## Plan" in ledger/tasks/T1-store-uploads-on-disk.md
+npx resaledger claim T1                               # T1 is yours now
+git add -A && git commit -m "feat: store uploads" -m "Task: T1"
+npx resaledger verify                                 # your checks, then a stamp for this code
+npx resaledger handoff                                # may this session end?
+```
+
+Agents follow the same loop from the block in `AGENTS.md`, and `npx resaledger work` shows where everything stands. [Working alone](docs/guides/solo.md) walks through it with real output, including three agents in three worktrees.
 
 ## How it works
 
@@ -19,6 +46,23 @@ Every task, decision and log entry is a Markdown file in the repository. Git hoo
 </picture>
 
 Three lanes work at once. Each commit carries the task it belongs to. A commit with no task stops at the gate. The lanes run together into `main` without crossing, and a stamp lands on the exact code that passed its checks.
+
+A task is a short Markdown file that people and agents read in pull requests:
+
+```markdown
+# T1 Store uploads on disk
+
+- Status: doing
+- Lane: t1-store-uploads
+- Plan: [S-storage.md](../plan/S-storage.md#uploads)
+- Evidence: —
+
+## Handoff
+
+Uploads are written; the size limit is next. Run `npm test -- uploads`.
+```
+
+Live state is computed from the files, never kept in a status file that every branch edits. [The format reference](docs/format.md) describes every file.
 
 ## Who it is for
 
@@ -31,6 +75,15 @@ Three lanes work at once. Each commit carries the task it belongs to. A commit w
 - **A team with pull requests.** Claims are pushed, so everyone sees them at once. CI judges every pull request by the rules of main.
 - **An operations repository.** Content, ad data and decisions are records too. Data passes its own checks before it lands.
 
+| | solo | team |
+| --- | --- | --- |
+| Commits on `main` | allowed | refused; work happens in lanes |
+| `claim` | claims in place | creates the lane branch first, then pushes the claim |
+| `handoff` asks for a pushed lane | no | yes |
+| The CI workflow | offered | installed |
+
+Switching is one line in `.resaledger.json`. [Working in a team](docs/guides/team.md) covers the required check, CODEOWNERS and squash merges.
+
 ## Where a bad commit stops
 
 <picture>
@@ -39,9 +92,65 @@ Three lanes work at once. Each commit carries the task it belongs to. A commit w
 </picture>
 
 1. **`AGENTS.md`** teaches every agent the protocol when its session starts.
-2. **Agent hooks** stop `--no-verify`, forced pushes and edits on a protected branch before the command runs.
+2. **Agent hooks** stop `--no-verify`, forced pushes, edits on a protected branch and commands that throw away another lane's work, before the command runs.
 3. **Git hooks** refuse a commit with no task, invalid records, or a change to another lane's task.
-4. **CI** judges each pull request by the rules of main, so whatever got past a hook stops there.
+4. **CI** judges each pull request by the rules of main, reruns your checks, and fails a change that weakens the rules unless a decision names it.
+
+| Agent | Session start | Before a tool | End of turn |
+| --- | :---: | :---: | :---: |
+| Claude Code | ✓ | ✓ | ✓ |
+| Codex | ✓ | ✓ | ✓ |
+| Cursor | ✓ | ✓ | ✓ |
+| Gemini CLI | ✓ | ✓ | ✓ |
+| GitHub Copilot | ✓ | ✓ | ✓ |
+
+[Agents](docs/guides/agents.md) says what `init` writes for each one, and how to install the skill.
+
+## What changes
+
+| | Rules in `AGENTS.md` alone | With ResaLedger |
+| --- | --- | --- |
+| Where the work is recorded | wherever the agent chooses | one file per task, in the repository |
+| A commit with no task | goes in | refused by the hooks and by CI |
+| "The tests pass" | the agent's word | a stamp for the exact code, rerun in CI |
+| Two agents, one status file | a merge conflict | no shared file: each record has one owner |
+| `--no-verify` | skips every hook | blocked by the agent hooks, caught by CI |
+| The next session | starts from scratch | reads the task's Handoff |
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `init` | Sets ResaLedger up in a repository, with the checks it found. |
+| `work [--all] [--fetch]` | Where things stand: your lane, the other lanes, what is ready, what waits for you. |
+| `task <id>` | One task with its plan section. |
+| `new "<title>"` | A task with an id nobody else uses; also `new decision` and `new log`. |
+| `claim <id>` | Takes a task; `--worktree` gives it its own branch and folder, `--take` takes one over and records it. |
+| `verify` | Runs your checks on the committed code and writes its stamp. |
+| `handoff` | The end-of-session check. |
+| `changes` | The tasks finished since the last tag, as a draft for the changelog. |
+| `ci` | The CI check. |
+| `update` | Renews the guard, the hooks and the agent configurations, keeping anything you changed. |
+| `migrate` | Moves an agent-ledger 0.x workspace to 1.0. |
+
+## FAQ
+
+**Do I need agents to use it?** No. People get the same records and the same checks. It was built for the moment several agents work at once, which is when a shared file stops working.
+
+**Can an agent still cheat?** It can write anything into a record. It cannot commit code without a task, merge code whose checks never passed on that exact code, or change a task another lane holds, without a hook or CI refusing it. A person still reviews the pull request.
+
+**What does it cost a solo developer?** One command to set up, and a `Task:` line in code commits. Lanes, claims across machines and CI cost nothing until you use them.
+
+**Why files and not a database or an issue tracker?** Files are reviewed in the same pull request as the code, work offline and merge like code. Because each record is its own file and has one owner, they merge without conflicts.
+
+**Where do my checks come from?** `init` reads `package.json`, `Makefile`, `pyproject.toml`, `Cargo.toml` and `go.mod`, runs each check once and keeps only those that pass. Fast checks run before each code commit; slow ones run in `verify` and in CI.
+
+**I use agent-ledger 0.x.** `npx resaledger migrate --dry-run` shows the plan. `migrate` converts the workspace in place, refuses before writing anything if a single line of the old records would be lost, and prints the commit command and the undo command. [Moving from 0.x](docs/guides/migration.md) has the details.
+
+## Documentation
+
+- [The docs](docs/README.md): concepts, guides for working alone, in a team, in CI and with each agent, and moving from 0.x.
+- [The format reference](docs/format.md): every file and field, as the guard reads it.
 
 ## Contributing
 
