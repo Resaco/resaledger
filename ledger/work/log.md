@@ -49,3 +49,7 @@ W1 merged: `work` shows this lane, the other local worktrees, what waits for the
 ## 2026-10-15 · Gates, stamps and the range check
 
 V1 and V2 merged. `verify` runs the project's gates on the committed code and writes a stamp named by the code's fingerprint, never rerunning on the same code and pruning stamps that no longer apply; two lanes' stamps merge without a conflict. The range check decides in one pass whether every commit in a range names a task its lane held, in under half a second for 200 commits. `work` now says whether the gates passed on the code at HEAD. 296 tests pass on Node 24, 22 and 20. H1 (pre-commit) and V3 (handoff) started.
+
+## 2026-10-15 · Reading 0.x, and the migration starts
+
+M1 merged: the 0.x readers keep every line, which a test proves for each parser and a read-only run confirmed on two private workspaces. The worker listed nine things the migration table did not cover, from the ledger's preamble to configuration keys with no 1.0 meaning; the specification now says where each goes, and nothing in a workspace folder that the table does not name is touched. The lead wrote the managed `AGENTS.md` block that `init`, `update` and `migrate` share, and the package now publishes the guard's modules so that `migrate` can validate with the 1.0 rules. H1, V3 and M2 are with workers. 323 tests pass.
