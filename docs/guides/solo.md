@@ -32,6 +32,8 @@ ledger/scripts/records.mjs
 ✔ records valid: 0 tasks, 0 decisions, 0 log entries
 ```
 
+The checks it tries are `package.json`'s `lint`, `typecheck`, `check-types` and `format:check` scripts as commit gates and `check`, `test` and `build` as verify gates, a `Makefile`'s `lint`, `check`, `test` and `build` targets, and the usual tools of `pyproject.toml`, `Cargo.toml` and `go.mod`. Scripts whose names start with `test:` or `lint:` are listed after the gates, with the command that runs each, and never run: a name does not say whether a script ends or changes files (`test:watch`, `lint:fix`). Add the ones that should be gates to `gates` in `.resaledger.json` by hand.
+
 On a terminal, `init` shows the gates that passed and asks before it writes them. Without a terminal, as when an agent runs it, it takes the defaults; `--yes` does the same on a terminal.
 
 What it wrote:
