@@ -84,7 +84,7 @@ function hookIO(r, agent, event, input, cwd = r.root) {
 }
 
 /** A Bash call from Claude Code with this command. */
-const bash = (r, command, session = 'shell') => hook(r, 'claude', 'pre-tool', fixture('claude-pre-tool-bash', r.root, { session_id: session, tool_input: { command } }))
+const bash = (r, command, session = 'shell') => hook(r, 'claude', 'pre-tool', fixture('claude/pre-tool-bash', r.root, { session_id: session, tool_input: { command } }))
 
 /**
  * Starts the repository's guard with these arguments and writes input to its stdin only after
@@ -116,7 +116,7 @@ describe('recorded input for every event', () => {
     test(`${agent}: session start turns the git hooks on and prints work`, () => {
       const r = workspace()
       assert.notEqual(r.git('config', 'core.hooksPath').out.trim(), '.githooks')
-      const result = hook(r, agent, 'session-start', fixture(`${agent}-session-start`, r.root))
+      const result = hook(r, agent, 'session-start', fixture(`${agent}/session-start`, r.root))
       allowed(result)
       assert.equal(r.git('config', 'core.hooksPath').out.trim(), '.githooks')
       assert.match(result.out, /git hooks turned on/)
@@ -125,32 +125,32 @@ describe('recorded input for every event', () => {
 
     test(`${agent}: a harmless shell command before a tool is allowed`, () => {
       const r = workspace({ preset: 'team' })
-      allowed(hook(r, agent, 'pre-tool', fixture(`${agent}-pre-tool-bash`, r.root)))
+      allowed(hook(r, agent, 'pre-tool', fixture(`${agent}/pre-tool-bash`, r.root)))
     })
 
     test(`${agent}: the end of a turn that changed nothing passes`, () => {
       const r = workspace()
-      allowed(hook(r, agent, 'session-start', fixture(`${agent}-session-start`, r.root)))
-      allowed(hook(r, agent, 'stop', fixture(`${agent}-stop`, r.root)))
+      allowed(hook(r, agent, 'session-start', fixture(`${agent}/session-start`, r.root)))
+      allowed(hook(r, agent, 'stop', fixture(`${agent}/stop`, r.root)))
     })
   }
 
   test('claude: Edit and Write on a lane are allowed, and refused on a protected branch', () => {
     const r = workspace({ preset: 'team' })
-    for (const name of ['claude-pre-tool-edit', 'claude-pre-tool-write']) refused(hook(r, 'claude', 'pre-tool', fixture(name, r.root)), /"main" is a protected branch, so files are not edited on it \(src\//)
+    for (const name of ['claude/pre-tool-edit', 'claude/pre-tool-write']) refused(hook(r, 'claude', 'pre-tool', fixture(name, r.root)), /"main" is a protected branch, so files are not edited on it \(src\//)
     r.git('switch', '-q', '-c', 'S1-lane')
-    for (const name of ['claude-pre-tool-edit', 'claude-pre-tool-write']) allowed(hook(r, 'claude', 'pre-tool', fixture(name, r.root)))
+    for (const name of ['claude/pre-tool-edit', 'claude/pre-tool-write']) allowed(hook(r, 'claude', 'pre-tool', fixture(name, r.root)))
   })
 
   test('codex: apply_patch on a lane is allowed, and refused on a protected branch', () => {
     const r = workspace({ preset: 'team' })
-    refused(hook(r, 'codex', 'pre-tool', fixture('codex-pre-tool-apply-patch', r.root)), /src\/app\.js/)
+    refused(hook(r, 'codex', 'pre-tool', fixture('codex/pre-tool-apply-patch', r.root)), /src\/app\.js/)
     r.git('switch', '-q', '-c', 'S1-lane')
-    allowed(hook(r, 'codex', 'pre-tool', fixture('codex-pre-tool-apply-patch', r.root)))
+    allowed(hook(r, 'codex', 'pre-tool', fixture('codex/pre-tool-apply-patch', r.root)))
   })
 
   test('the paths of an apply_patch envelope', () => {
-    const input = JSON.parse(readFileSync(join(FIXTURES, 'codex-pre-tool-apply-patch.json'), 'utf8'))
+    const input = JSON.parse(readFileSync(join(FIXTURES, 'codex', 'pre-tool-apply-patch.json'), 'utf8'))
     assert.deepEqual(patchPaths(input.tool_input.command), ['src/app.js', 'src/new.js'])
     assert.deepEqual(patchPaths('*** Begin Patch\n*** Update File: a.txt\n*** Move to: b.txt\n*** Delete File: c.txt\n*** End Patch'), ['a.txt', 'b.txt', 'c.txt'])
   })
@@ -242,13 +242,13 @@ describe('each refusal kind', () => {
 
   test('on a protected branch, ignored files, the null device and folders outside the repository may be written', () => {
     for (const command of ['echo x > local/notes.txt', 'echo x > /dev/null', 'make 2>/dev/null', `echo x > ${JSON.stringify(join(temporary(), 'out.txt'))}`]) allowed(bash(r, command))
-    allowed(hook(r, 'claude', 'pre-tool', fixture('claude-pre-tool-write', r.root, { tool_input: { file_path: join(r.root, 'local', 'x.txt') } })))
+    allowed(hook(r, 'claude', 'pre-tool', fixture('claude/pre-tool-write', r.root, { tool_input: { file_path: join(r.root, 'local', 'x.txt') } })))
   })
 
   test('a write into another worktree is judged by that worktree\'s branch', () => {
     const lane = r.worktree('lane', 'S2-lane')
     allowed(bash(r, `echo x > ${JSON.stringify(join(lane.root, 'src', 'app.js'))}`))
-    allowed(hook(r, 'claude', 'pre-tool', fixture('claude-pre-tool-edit', r.root, { tool_input: { file_path: join(lane.root, 'src', 'app.js') } })))
+    allowed(hook(r, 'claude', 'pre-tool', fixture('claude/pre-tool-edit', r.root, { tool_input: { file_path: join(lane.root, 'src', 'app.js') } })))
   })
 })
 
@@ -281,13 +281,13 @@ describe('input the adapter does not recognise is allowed', () => {
   ]
   for (const input of inputs) test(JSON.stringify(input).slice(0, 80), () => allowed(hook(r, 'claude', 'pre-tool', input)))
   test('an unknown agent or event', () => {
-    const input = fixture('claude-pre-tool-bash', r.root, { tool_input: { command: 'git push --force' } })
+    const input = fixture('claude/pre-tool-bash', r.root, { tool_input: { command: 'git push --force' } })
     allowed(hook(r, 'emacs', 'pre-tool', input))
     allowed(hook(r, 'claude', 'post-tool', input))
   })
   test('a folder outside any repository', () => {
     const outside = temporary()
-    allowed(run(outside, process.execPath, [GUARD, 'hook', 'claude', 'pre-tool'], fixture('claude-pre-tool-bash', outside, { tool_input: { command: 'git push --force' } })))
+    allowed(run(outside, process.execPath, [GUARD, 'hook', 'claude', 'pre-tool'], fixture('claude/pre-tool-bash', outside, { tool_input: { command: 'git push --force' } })))
   })
 })
 
@@ -295,31 +295,31 @@ describe('the repository root is found from a subfolder', () => {
   test('codex runs the hook in the session\'s folder', () => {
     const r = workspace({ preset: 'team' })
     const sub = join(r.root, 'src')
-    const input = fixture('codex-pre-tool-bash', sub, { tool_input: { command: 'echo x > app.js' } })
+    const input = fixture('codex/pre-tool-bash', sub, { tool_input: { command: 'echo x > app.js' } })
     refused(hook(r, 'codex', 'pre-tool', input, sub), /src\/app\.js/)
-    refused(hook(r, 'codex', 'pre-tool', fixture('codex-pre-tool-bash', sub, { tool_input: { command: 'git push origin main' } }), sub), /protected branch/)
-    allowed(hook(r, 'codex', 'session-start', fixture('codex-session-start', sub), sub))
+    refused(hook(r, 'codex', 'pre-tool', fixture('codex/pre-tool-bash', sub, { tool_input: { command: 'git push origin main' } }), sub), /protected branch/)
+    allowed(hook(r, 'codex', 'session-start', fixture('codex/session-start', sub), sub))
     assert.equal(r.git('config', 'core.hooksPath').out.trim(), '.githooks')
   })
   test('the cwd in the input wins over the folder the hook runs in', () => {
     const r = workspace({ preset: 'team' })
     const elsewhere = temporary()
-    refused(hook(r, 'claude', 'pre-tool', fixture('claude-pre-tool-bash', r.root, { tool_input: { command: 'git push --force' } }), elsewhere), /forced push/)
+    refused(hook(r, 'claude', 'pre-tool', fixture('claude/pre-tool-bash', r.root, { tool_input: { command: 'git push --force' } }), elsewhere), /forced push/)
   })
 })
 
 describe('the end-of-turn reminder', () => {
   test('fires once when the session changed the repository and handoff fails', () => {
     const r = workspace()
-    allowed(hook(r, 'claude', 'session-start', fixture('claude-session-start', r.root, { session_id: 'once' })))
+    allowed(hook(r, 'claude', 'session-start', fixture('claude/session-start', r.root, { session_id: 'once' })))
     r.write('src/app.js', 'console.log("changed")\n')
-    const first = hook(r, 'claude', 'stop', fixture('claude-stop', r.root, { session_id: 'once' }))
+    const first = hook(r, 'claude', 'stop', fixture('claude/stop', r.root, { session_id: 'once' }))
     refused(first, /this session changed the repository, and "node ledger\/scripts\/records\.mjs handoff" does not pass yet/)
     assert.match(first.out, /uncommitted path/)
     assert.match(first.out, /tell the user exactly what is left/)
-    allowed(hook(r, 'claude', 'stop', fixture('claude-stop', r.root, { session_id: 'once', stop_hook_active: true })))
+    allowed(hook(r, 'claude', 'stop', fixture('claude/stop', r.root, { session_id: 'once', stop_hook_active: true })))
     // A second configuration calling it for the same session, as the Copilot CLI does with .claude/settings.json.
-    allowed(hook(r, 'codex', 'stop', fixture('codex-stop', r.root, { session_id: 'once' })))
+    allowed(hook(r, 'codex', 'stop', fixture('codex/stop', r.root, { session_id: 'once' })))
   })
 
   test('fires once when several configurations call it at the same time, every time', async () => {
@@ -330,9 +330,9 @@ describe('the end-of-turn reminder', () => {
       const session = `race-${round}`
       // Every third session's start is never seen, so its first hook call records it.
       if (round % 3 === 2) allowed(bash(r, 'npm test', session))
-      else allowed(hook(r, 'claude', 'session-start', fixture('claude-session-start', r.root, { session_id: session })))
+      else allowed(hook(r, 'claude', 'session-start', fixture('claude/session-start', r.root, { session_id: session })))
       r.write('src/app.js', `console.log("changed ${round}")\n`)
-      const statuses = await Promise.all(['claude', 'codex', 'claude', 'codex', 'claude', 'codex'].map((agent, index) => late(r, ['hook', agent, 'stop'], fixture(`${agent}-stop`, r.root, { session_id: session }), index % 2 ? 30 : 0)))
+      const statuses = await Promise.all(['claude', 'codex', 'claude', 'codex', 'claude', 'codex'].map((agent, index) => late(r, ['hook', agent, 'stop'], fixture(`${agent}/stop`, r.root, { session_id: session }), index % 2 ? 30 : 0)))
       assert.deepEqual(statuses.map(({ status }) => status).sort(), [0, 0, 0, 0, 0, 2], `round ${round}: ${statuses.map(({ out }) => out).join('\n')}`)
     }
   })
@@ -340,34 +340,34 @@ describe('the end-of-turn reminder', () => {
   test('stays quiet when the session changed nothing, though handoff fails', () => {
     const r = workspace()
     r.write('src/app.js', 'console.log("changed before the session")\n')
-    allowed(hook(r, 'claude', 'session-start', fixture('claude-session-start', r.root, { session_id: 'quiet' })))
-    allowed(hook(r, 'claude', 'stop', fixture('claude-stop', r.root, { session_id: 'quiet' })))
+    allowed(hook(r, 'claude', 'session-start', fixture('claude/session-start', r.root, { session_id: 'quiet' })))
+    allowed(hook(r, 'claude', 'stop', fixture('claude/stop', r.root, { session_id: 'quiet' })))
   })
 
   test('stays quiet when the session changed the repository and handoff passes', () => {
     const r = workspace()
-    allowed(hook(r, 'claude', 'session-start', fixture('claude-session-start', r.root, { session_id: 'clean' })))
+    allowed(hook(r, 'claude', 'session-start', fixture('claude/session-start', r.root, { session_id: 'clean' })))
     r.write('docs/notes.md', 'Notes.\n')
     const committed = r.commit('docs: notes')
     assert.equal(committed.status, 0, committed.out)
     const handoff = r.node(join(r.root, 'ledger', 'scripts', 'records.mjs'), 'handoff')
     assert.equal(handoff.status, 0, handoff.out)
-    allowed(hook(r, 'claude', 'stop', fixture('claude-stop', r.root, { session_id: 'clean' })))
+    allowed(hook(r, 'claude', 'stop', fixture('claude/stop', r.root, { session_id: 'clean' })))
   })
 
   test('a session whose start was not seen starts at its first hook call', () => {
     const r = workspace()
     allowed(bash(r, 'npm test', 'late'))
     r.write('src/app.js', 'console.log("changed")\n')
-    refused(hook(r, 'claude', 'stop', fixture('claude-stop', r.root, { session_id: 'late' })), /handoff/)
+    refused(hook(r, 'claude', 'stop', fixture('claude/stop', r.root, { session_id: 'late' })), /handoff/)
     const unseen = workspace()
     unseen.write('src/app.js', 'console.log("changed")\n')
-    allowed(hook(unseen, 'claude', 'stop', fixture('claude-stop', unseen.root, { session_id: 'unseen' })))
+    allowed(hook(unseen, 'claude', 'stop', fixture('claude/stop', unseen.root, { session_id: 'unseen' })))
   })
 
   test('the state lives under the git folder', () => {
     const r = workspace()
-    allowed(hook(r, 'claude', 'session-start', fixture('claude-session-start', r.root, { session_id: 'a/../b c' })))
+    allowed(hook(r, 'claude', 'session-start', fixture('claude/session-start', r.root, { session_id: 'a/../b c' })))
     assert.ok(existsSync(join(r.root, '.git', 'resaledger', 'sessions', 'a_.._b_c.start')))
     assert.equal(r.git('status', '--porcelain').out, '')
   })
@@ -376,7 +376,7 @@ describe('the end-of-turn reminder', () => {
 describe('input that arrives after the guard starts', () => {
   const r = workspace({ preset: 'team' })
   test('a pre-tool refusal still refuses', async () => {
-    const result = await late(r, ['hook', 'claude', 'pre-tool'], fixture('claude-pre-tool-bash', r.root, { tool_input: { command: 'git push --force' } }), 300)
+    const result = await late(r, ['hook', 'claude', 'pre-tool'], fixture('claude/pre-tool-bash', r.root, { tool_input: { command: 'git push --force' } }), 300)
     refused(result, /forced push/)
   })
   test('pre-push still refuses a push to a protected branch', async () => {
@@ -493,9 +493,9 @@ describe('the agents\' configurations', () => {
     }
     for (const agent of ['claude', 'codex']) {
       const entries = agentHookEntries(agent, 'ledger')
-      allowed(shell(entries.SessionStart.hooks[0].command, sub, fixture(`${agent}-session-start`, sub)))
-      refused(shell(entries.PreToolUse.hooks[0].command, sub, fixture(`${agent}-pre-tool-bash`, sub, { tool_input: { command: 'git push --force' } })), /forced push/)
-      allowed(shell(entries.Stop.hooks[0].command, sub, fixture(`${agent}-stop`, sub)))
+      allowed(shell(entries.SessionStart.hooks[0].command, sub, fixture(`${agent}/session-start`, sub)))
+      refused(shell(entries.PreToolUse.hooks[0].command, sub, fixture(`${agent}/pre-tool-bash`, sub, { tool_input: { command: 'git push --force' } })), /forced push/)
+      allowed(shell(entries.Stop.hooks[0].command, sub, fixture(`${agent}/stop`, sub)))
     }
   })
 
@@ -512,7 +512,7 @@ describe('the agents\' configurations', () => {
       const command = JSON.parse(JSON.stringify(legacy).replace(pattern, found[2]))
       assert.equal(command, `node "$CLAUDE_PROJECT_DIR/ledger/scripts/records.mjs" hook claude ${event}`)
       assert.ok(isLedgerHookCommand(legacy) && isLedgerHookCommand(command))
-      const name = event === 'pre-tool' ? 'claude-pre-tool-bash' : `claude-${event}`
+      const name = event === 'pre-tool' ? 'claude/pre-tool-bash' : `claude/${event}`
       for (const input of [fixture(name, r.root), fixture(name, r.root, { tool_input: { command: 'git push --force' } })]) {
         const result = spawnSync('sh', ['-c', command], { cwd: r.root, env: { ...ENV, CLAUDE_PROJECT_DIR: r.root }, input, encoding: 'utf8' })
         assert.ok([0, 2].includes(result.status), `${command}: ${result.status} ${result.stderr}`)
@@ -849,7 +849,7 @@ describe('Cursor, Gemini CLI and Copilot: recorded input for every event', () =>
 
   test('copilot: a shell call in Claude Code\'s shape, as the CLI sends for .claude/settings.json, is read too', () => {
     const r = workspace({ preset: 'team' })
-    refused(hook(r, 'copilot', 'pre-tool', fixture('claude-pre-tool-bash', r.root, { tool_input: { command: 'git push --force' } })), /forced push/)
+    refused(hook(r, 'copilot', 'pre-tool', fixture('claude/pre-tool-bash', r.root, { tool_input: { command: 'git push --force' } })), /forced push/)
     refused(hook(r, 'copilot', 'pre-tool', JSON.stringify({ sessionId: 'x', cwd: r.root, toolName: 'bash', toolArgs: { command: 'git push --force' } })), /forced push/)
   })
 })
@@ -905,7 +905,7 @@ describe('Cursor, Gemini CLI and Copilot: the end-of-turn reminder', () => {
       const id = `both-${order[0]}`
       const inputs = {
         copilot: (name) => fixture(name === 'start' ? 'copilot/session-start' : 'copilot/agent-stop', r.root, { sessionId: id }),
-        claude: (name) => fixture(name === 'start' ? 'claude-session-start' : 'claude-stop', r.root, { session_id: id })
+        claude: (name) => fixture(name === 'start' ? 'claude/session-start' : 'claude/stop', r.root, { session_id: id })
       }
       for (const agent of order) allowed(hook(r, agent, 'session-start', inputs[agent]('start')))
       r.write('src/app.js', 'console.log("changed")\n')
@@ -1007,13 +1007,13 @@ describe('commands that throw work away', () => {
   test('a session is judged by the worktree it started in, even after its folder moved', () => {
     const solo = workspace()
     const own = solo.worktree('own', 'S1-own')
-    allowed(hook(own, 'claude', 'session-start', fixture('claude-session-start', own.root, { session_id: 'moved' })))
-    refused(hook(own, 'claude', 'pre-tool', fixture('claude-pre-tool-bash', solo.root, { session_id: 'moved', tool_input: { command: 'git reset --hard' } })), /in another worktree/)
-    allowed(hook(solo, 'claude', 'pre-tool', fixture('claude-pre-tool-bash', solo.root, { session_id: 'main-session', tool_input: { command: 'git reset --hard' } })))
+    allowed(hook(own, 'claude', 'session-start', fixture('claude/session-start', own.root, { session_id: 'moved' })))
+    refused(hook(own, 'claude', 'pre-tool', fixture('claude/pre-tool-bash', solo.root, { session_id: 'moved', tool_input: { command: 'git reset --hard' } })), /in another worktree/)
+    allowed(hook(solo, 'claude', 'pre-tool', fixture('claude/pre-tool-bash', solo.root, { session_id: 'main-session', tool_input: { command: 'git reset --hard' } })))
   })
 
   test('every agent refuses them', () => {
-    refused(hook(r, 'codex', 'pre-tool', fixture('codex-pre-tool-bash', r.root, { tool_input: { command: 'git reset --hard' } })), /protected branch "main"/)
+    refused(hook(r, 'codex', 'pre-tool', fixture('codex/pre-tool-bash', r.root, { tool_input: { command: 'git reset --hard' } })), /protected branch "main"/)
     for (const [agent, events] of Object.entries(NEW_AGENTS)) {
       for (const [name, command] of events.shells) refused(hook(r, agent, 'pre-tool', fixture(name, r.root, command('git clean -fd'))), /protected branch "main"/)
     }

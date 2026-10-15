@@ -228,7 +228,7 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Status: done
 - Depends on: W1, H1
 - Plan: [A-agents.md](../plan/A-agents.md#a1-the-agent-hook-core-claude-code-and-codex)
-- Evidence: `node scripts/test.mjs` on `main` after the merge: 679 of 679 on Node 24.18.0, 22.23.3 and 20.20.2. The 59 tests in [agents.test.mjs](../../test/agents.test.mjs) use recorded input for every event of both agents ([fixtures](../../test/fixtures/agents/claude-pre-tool-bash.json)); quoted text never triggers a refusal; the reminder fires once when called twice; every refusal kind, `agent.deny`, an edit on a protected branch, unknown input and merging into an existing `settings.json` are covered. Not verified: a live Claude Code or Codex session, and Windows.
+- Evidence: `node scripts/test.mjs` on `main` after the merge: 679 of 679 on Node 24.18.0, 22.23.3 and 20.20.2. The 59 tests in [agents.test.mjs](../../test/agents.test.mjs) use recorded input for every event of both agents ([fixtures](../../test/fixtures/agents/claude/pre-tool-bash.json)); quoted text never triggers a refusal; the reminder fires once when called twice; every refusal kind, `agent.deny`, an edit on a protected branch, unknown input and merging into an existing `settings.json` are covered. Not verified: a live Claude Code or Codex session, and Windows.
 - Notes: The input formats come from the agents' documentation; Codex loads project hooks only for a trusted project. Known gaps, listed in the module header: `cp`, `mv`, `perl -i`, other editor tools and variables that disable other hook managers. Open: `update` adds the configuration back for an agent whose folder exists even when a project removed it on purpose; A2 decides with the other agents.
 
 ### A1.1 The end-of-turn reminder under concurrent calls
@@ -239,11 +239,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: The cause was not the session state: reading stdin before the caller wrote it returned nothing, so every hook allowed, pre-tool refusals and pre-push's ref list included. `readStdin` now waits for the input, and session starts are written atomically and never replaced.
 
 ### A2 Cursor, Gemini CLI and GitHub Copilot
-- Status: doing
+- Status: done
 - Depends on: A1
 - Plan: [A-agents.md](../plan/A-agents.md#a2-cursor-gemini-cli-and-github-copilot)
-- Evidence: —
-- Notes: A worker builds it on branch `a2-agents`. Also add to the built-in refusals the commands that throw work away (`reset --hard`, `clean -f`, `checkout -- .`, `restore`) when they would hit another lane's worktree or a protected branch: on 15 October an experimenting reviewer's shell ran such a chain in the lead's checkout. Decide too whether `update` adds back an agent configuration a project removed on purpose.
+- Evidence: 832 of 832 on the branch on Node 22.23.3 and 20.20.2, and on 24.18.0 with the timing test in `ids.test.mjs` rerun alone; [agents.test.mjs](../../test/agents.test.mjs), 179 tests, runs recorded input for every event of Cursor, Gemini CLI and Copilot ([fixtures](../../test/fixtures/agents/cursor/session-start.json)), validates each configuration's documented shape and its merge into an existing file, refuses 20 commands that throw work away on a protected branch or in another lane's worktree (with quoted-text negatives and the incident's own chain), and fires the end-of-turn reminder once for Gemini's `AfterAgent` and for Copilot together with Claude Code.
+- Notes: Worked on branch `a2-agents`. Assumptions about input shapes are tolerant: input an adapter does not recognise is allowed. Cursor and Copilot get the reminder as their documented JSON with exit 0. Left: when a session's folder moves to another worktree, the end-of-turn reminder still runs `handoff` where the session is now.
 
 ### A3 The `AGENTS.md` block, the skill and the plugin
 - Status: todo
