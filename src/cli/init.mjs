@@ -279,8 +279,8 @@ function shellWord(path) {
   return /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replaceAll("'", "'\\''")}'`
 }
 
-/** The command that commits exactly the files init wrote. */
-export function commitCommand(files) {
-  const [header, trailer] = INIT_COMMIT_MESSAGE
+/** The command that commits exactly the given files, by default with init's message. */
+export function commitCommand(files, message = INIT_COMMIT_MESSAGE) {
+  const [header, trailer] = message
   return `git add ${files.map(shellWord).join(' ')} && git commit -m "${header}" -m "${trailer}"`
 }

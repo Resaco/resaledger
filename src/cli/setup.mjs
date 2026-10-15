@@ -12,8 +12,8 @@ export const BUILT_GUARD = join(PACKAGE_ROOT, 'dist', 'records.mjs')
 export const HOOKS_FOLDER = '.githooks'
 
 const AGENTS_BLOCK = new URL('../../templates/agents-block.md', import.meta.url)
-const MANAGED_START = '<!-- resaledger:start'
-const MANAGED_END = '<!-- resaledger:end -->'
+export const MANAGED_START = '<!-- resaledger:start'
+export const MANAGED_END = '<!-- resaledger:end -->'
 const AGENTS_IMPORT = /^\s*@AGENTS\.md\s*$/
 
 /** Builds the guard when dist/records.mjs is missing, as in a checkout of the source. False when the build fails. */

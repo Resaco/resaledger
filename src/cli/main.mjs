@@ -1,14 +1,18 @@
-// The package's own command line: `npx resaledger <command>`.
-// update comes in a later task.
+// The package's own command line: `npx resaledger <command>`. init, update, migrate, version
+// and help run here; every other command goes to the repository's own guard, so the committed
+// version always decides.
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline/promises'
+import { CONFIG_FILE, DEFAULTS, parseConfig } from '../guard/config.mjs'
 import { hooksActive } from '../guard/githooks.mjs'
 import { SETUP_MARKER } from '../guard/records.mjs'
 import { applyInit, commitCommand, initOptions, parseInitArgs, planInit, presetFromAnswer } from './init.mjs'
+import { LEGACY_CONFIG_FILE } from './legacy.mjs'
 import { applyMigration, COMMIT_COMMAND, planMigration, UNDO_COMMAND } from './migrate.mjs'
 import { ensureGuard, hooksNote, turnOnHooks } from './setup.mjs'
+import { applyUpdate, planUpdate, UPDATE_COMMIT_MESSAGE } from './update.mjs'
 
 const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
 
@@ -27,8 +31,16 @@ Commands:
             --dry-run only shows the plan, --force replaces 0.x git hooks that
             were changed by hand, --accept-problems writes even when the result
             breaks a 1.0 rule and lists those problems as work to do
+  update [--force]
+            renew the guard, the git hooks and the AGENTS.md block when they
+            are a released version; a file changed by hand is shown and kept,
+            unless --force replaces it. The README, the records, the
+            configuration and your own text in AGENTS.md are never touched
   version   print the version
   help      print this help
+
+Every other command, such as work, claim, verify or handoff, runs the
+repository's own guard: npx resaledger work is node <dir>/scripts/records.mjs work.
 `
 
 function list(title, items) {
@@ -195,6 +207,101 @@ export async function initCommand(args) {
   if (check.status !== 0) process.exit(1)
 }
 
+/** The repository's root from git, or an error message and exit 1. */
+function gitRoot() {
+  const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' })
+  if (top.status !== 0) {
+    console.error('resaledger: not inside a git repository')
+    process.exit(1)
+  }
+  return top.stdout.trim()
+}
+
+/** update [--force], in the repository of the current folder. */
+export function updateCommand(args) {
+  let force = false
+  for (const arg of args) {
+    if (arg === '--force') force = true
+    else {
+      console.error(`resaledger: unknown option "${arg}" for update; use --force`)
+      process.exit(1)
+    }
+  }
+  const root = gitRoot()
+  if (!ensureGuard()) {
+    console.error('resaledger: the guard could not be built')
+    process.exit(1)
+  }
+  const plan = planUpdate(root, { force })
+  if (plan.refusals.length > 0) {
+    console.error('✖ resaledger update changed nothing:')
+    for (const message of plan.refusals) console.error(`  ✖ ${message}`)
+    process.exit(1)
+  }
+  const changed = applyUpdate(root, plan)
+  console.log(`resaledger update: ResaLedger ${version} in ${plan.dir}/`)
+  const show = (state, title, describe) => {
+    const files = plan.files.filter((file) => file.state === state)
+    if (files.length === 0) return
+    console.log(`\n${title} (${files.length}):`)
+    for (const file of files) {
+      console.log(`  ${file.path}${describe(file)}`)
+      if (file.diff && state === 'kept') console.log(`    --force would change it so ("-" lines are removed, "+" lines added):\n${file.diff.replace(/^/gm, '      ')}`)
+    }
+  }
+  const note = (file) => (file.note ? `: ${file.note}` : '')
+  show('replaced', 'Replaced', (file) => (file.from ? ` (was ${file.from})` : note(file)))
+  show('restored', 'Restored', note)
+  show('kept', 'Kept', note)
+  show('manual', 'To do by hand', note)
+  show('unchanged', 'Unchanged', () => '')
+  if (plan.instructions) console.log(`\n${plan.instructions}`)
+  if (changed.length > 0) console.log(`\nReview the change, then commit it:\n  ${commitCommand(changed, UPDATE_COMMIT_MESSAGE)}`)
+  else console.log('\nNothing to change.')
+  const kept = plan.files.filter((file) => file.state === 'kept').length
+  if (kept > 0) {
+    console.error(`\n✖ ${kept} managed ${kept === 1 ? 'file was' : 'files were'} changed by hand and kept. Move the change elsewhere, or run "npx resaledger update --force" to replace ${kept === 1 ? 'it' : 'them'}.`)
+    process.exit(1)
+  }
+}
+
+/**
+ * Any other command: runs node <root>/<dir>/scripts/records.mjs with the same arguments,
+ * stdin, output and exit code, from the current folder.
+ */
+export function guardCommand(argv) {
+  const root = gitRoot()
+  const configPath = join(root, CONFIG_FILE)
+  if (!existsSync(configPath)) {
+    if (existsSync(join(root, LEGACY_CONFIG_FILE))) console.error(`resaledger: ${LEGACY_CONFIG_FILE} exists, so this is an agent-ledger 0.x workspace; run "npx resaledger migrate" to convert it to ResaLedger 1.0`)
+    else console.error(`resaledger: ResaLedger is not set up in this repository (${CONFIG_FILE} is missing); run "npx resaledger init"`)
+    process.exit(1)
+  }
+  // The guard reports a broken configuration itself; here only the folder matters.
+  let dir = DEFAULTS.dir
+  const text = readFileSync(configPath, 'utf8')
+  const parsed = parseConfig(text).config
+  if (parsed) dir = parsed.dir
+  else {
+    try {
+      const raw = JSON.parse(text)
+      if (typeof raw?.dir === 'string' && raw.dir !== '') dir = raw.dir
+    } catch {}
+  }
+  const guard = join(root, dir, 'scripts', 'records.mjs')
+  if (!existsSync(guard)) {
+    console.error(`resaledger: the guard ${dir}/scripts/records.mjs is missing; run "npx resaledger update" to restore it`)
+    process.exit(1)
+  }
+  const result = spawnSync(process.execPath, [guard, ...argv], { stdio: 'inherit' })
+  if (result.error) {
+    console.error(`resaledger: could not run the guard: ${result.error.message}`)
+    process.exit(1)
+  }
+  if (result.signal) process.kill(process.pid, result.signal)
+  process.exit(result.status ?? 1)
+}
+
 export function main(argv) {
   const [command = 'help'] = argv
   if (command === 'version' || command === '--version') console.log(version)
@@ -205,10 +312,8 @@ export function main(argv) {
       process.exitCode = 1
     })
   else if (command === 'migrate') migrateCommand(argv.slice(1))
-  else {
-    console.error(`resaledger: unknown command "${command}"; run "resaledger help" for the list`)
-    process.exitCode = 1
-  }
+  else if (command === 'update') updateCommand(argv.slice(1))
+  else guardCommand(argv)
 }
 
 main(process.argv.slice(2))
