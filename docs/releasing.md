@@ -44,13 +44,15 @@ The release-candidate task prepares the release commit; the owner tags and pushe
 
 1. Set the version, without a tag or a commit:
 
-   ```sh
+   <!-- not run: the owner's release steps, which change the version, tag and publish -->
+   ```bash
    npm version 1.0.0 --no-git-tag-version
    ```
 
 2. Record the managed files' hashes for that version, and check that the table holds them:
 
-   ```sh
+   <!-- not run: the owner's release steps, which change the version, tag and publish -->
+   ```bash
    node scripts/release-hashes.mjs
    node scripts/release-hashes.mjs --check
    ```
@@ -58,7 +60,8 @@ The release-candidate task prepares the release commit; the owner tags and pushe
 3. Move the entries under `## [Unreleased]` in [CHANGELOG.md](../CHANGELOG.md) to a new `## [1.0.0] - <date>` section. Draft them with `node ledger/scripts/records.mjs changes`, which lists the tasks finished since the last tag, and edit that draft down to what a user needs.
 4. Run the tests on Node 20, 22 and 24, and look at what would be published:
 
-   ```sh
+   <!-- not run: the owner's release steps, which change the version, tag and publish -->
+   ```bash
    npm test
    npm publish --dry-run
    ```
@@ -66,7 +69,8 @@ The release-candidate task prepares the release commit; the owner tags and pushe
 5. Commit the release with the release task's trailer, run `node ledger/scripts/records.mjs verify`, commit the stamp, and run `node ledger/scripts/records.mjs handoff`.
 6. Tag the commit and push the branch and the tag:
 
-   ```sh
+   <!-- not run: the owner's release steps, which change the version, tag and publish -->
+   ```bash
    git tag -a v1.0.0 -m "ResaLedger 1.0.0"
    git push origin main
    git push origin v1.0.0

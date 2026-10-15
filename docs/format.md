@@ -22,7 +22,7 @@ Contents:
 
 ## 1. Layout
 
-```
+```text
 .resaledger.json                         configuration
 ledger/                                  the workspace ("dir"; default "ledger")
   README.md                              the project's slow facts: goal, environments, manual checks

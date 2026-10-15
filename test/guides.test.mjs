@@ -28,8 +28,9 @@ export function blocks(markdown) {
   let comments = []
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]
-    // A fence may be indented, as in a list item; its lines lose the same indent.
-    const open = line.match(/^( *)(`{3,})(\w*)\s*$/)
+    // A fence may be indented, as in a list item; its lines lose the same indent. The language
+    // is the info string's first word; format.md names the kind of example after it.
+    const open = line.match(/^( *)(`{3,})(\w*)(?:\s+[^`]*)?$/)
     if (open) {
       const body = []
       let end = index + 1
