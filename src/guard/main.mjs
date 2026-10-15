@@ -2,6 +2,7 @@
 // VERSION is defined by scripts/bundle.mjs from package.json.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { hookCommand } from './agents.mjs'
 import { ciCommand } from './ci.mjs'
 import { claimCommand } from './claim.mjs'
 import { DEFAULTS, effectiveConfigJson, loadConfig } from './config.mjs'
@@ -57,6 +58,14 @@ Commands:
   verify [--force]
             run the gates on the committed code and write its stamp
             (--force: run them even when the stamp exists)
+  hook <agent> <event>
+            called by an agent's own hooks with its JSON on stdin; agent is
+            claude or codex, event is session-start, pre-tool or stop. It
+            refuses --no-verify, changes to core.hooksPath, forced pushes,
+            pushes and edits on a protected branch and agent.deny commands
+            (exit code 2, the reason on stderr), and reminds once per
+            session when handoff fails after the session changed the
+            repository
   version   print the version
   help      print this help
 `
@@ -155,6 +164,7 @@ export function main(argv) {
     if (!argv[1]) fail('commit-msg needs the message file, as git passes it: commit-msg <file>')
     commitMsg(argv[1])
   } else if (command === 'pre-push') prePush(readStdin(), argv.slice(1))
+  else if (command === 'hook') hookCommand(argv[1], argv[2], readStdin())
   else fail(`unknown command "${command}"; run "help" for the list`)
 }
 

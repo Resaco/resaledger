@@ -1,14 +1,16 @@
 // `resaledger update`: renews the files ResaLedger manages (spec section 15): the guard, the
-// git hooks or the guard's calls in a hook manager, and the managed block in the root
-// AGENTS.md. A file is replaced only when its content is a released version of it, or this
+// git hooks or the guard's calls in a hook manager, the managed block in the root AGENTS.md,
+// and ResaLedger's entries in the hook configurations of the agents in use. A file is replaced only when its content is a released version of it, or this
 // package's own; a file changed by hand is shown and kept unless --force is given. The
 // README, the records, the configuration and the project's own text in AGENTS.md are never
 // touched. planUpdate() only reads; applyUpdate() writes.
 import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { detectAgents } from '../guard/agents.mjs'
 import { CONFIG_FILE, parseConfig } from '../guard/config.mjs'
 import { callMarker, detectHookManager, guardCall, HOOK_NAMES, integrateHookManager, renderHook } from './hooks.mjs'
+import { planAgentConfigs } from './init.mjs'
 import { LEGACY_CONFIG_FILE } from './legacy.mjs'
 import { lineDiff } from './migrate.mjs'
 import { agentsBlock, BUILT_GUARD, HOOKS_FOLDER, MANAGED_END, MANAGED_START, realRelative } from './setup.mjs'
@@ -322,6 +324,17 @@ export function planUpdate(root, options = {}) {
         plan.writes.delete(label)
       }
     }
+  }
+
+  // 4. ResaLedger's entries in the agents' hook configurations; the other entries are the project's.
+  const agentPlan = planAgentConfigs(root, detectAgents(root), dir, plan.writes)
+  for (const file of agentPlan.files) {
+    const state = file.created ? 'restored' : file.changed ? 'replaced' : 'unchanged'
+    plan.files.push({ path: file.path, state, note: "ResaLedger's hook entries" })
+  }
+  for (const { path, reason, snippet } of agentPlan.manual) {
+    plan.files.push({ path, state: 'manual', note: `${reason}, so its hook entries were not renewed; fix it and run update again, or add the entries below by hand` })
+    plan.instructions = [plan.instructions, `Add these entries under "hooks" in ${path}:\n${snippet}`].filter(Boolean).join('\n\n')
   }
   for (const path of plan.executable) if (!plan.writes.has(path)) plan.executable.delete(path)
   return plan

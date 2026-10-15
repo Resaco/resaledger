@@ -4,6 +4,7 @@
 import { spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import { AGENT_NAMES, agentConfigFile, agentConfigSnippet, detectAgents, mergeAgentConfig } from '../guard/agents.mjs'
 import { CONFIG_FILE, CONFIG_VERSION, DEFAULTS, parseConfig } from '../guard/config.mjs'
 import { SETUP_MARKER } from '../guard/records.mjs'
 import { detectHookManager, HOOK_NAMES, integrateHookManager, renderHook } from './hooks.mjs'
@@ -16,9 +17,19 @@ export const INIT_COMMIT_MESSAGE = ['chore: set up ResaLedger', 'Task: maintenan
 
 // The options, the answers and the project name.
 
-/** Parses init's arguments: { flags: { team, dir, yes }, error }. error is null or a message. */
+/** Parses "--agents claude,codex": { agents, error }. "none" names no agent. */
+export function parseAgentsValue(value) {
+  if (value === undefined || value === '' || value.startsWith('--')) return { agents: null, error: `--agents needs a list, such as --agents ${AGENT_NAMES.join(',')}, or --agents none` }
+  if (value === 'none') return { agents: [], error: null }
+  const agents = [...new Set(value.split(',').map((name) => name.trim()).filter(Boolean))]
+  const unknown = agents.filter((name) => !AGENT_NAMES.includes(name))
+  if (unknown.length > 0 || agents.length === 0) return { agents: null, error: `--agents: unknown agent "${unknown.join('", "')}"; use ${AGENT_NAMES.join(', ')} or none` }
+  return { agents, error: null }
+}
+
+/** Parses init's arguments: { flags: { team, dir, yes, agents }, error }. error is null or a message; agents is null when not given. */
 export function parseInitArgs(args) {
-  const flags = { team: false, dir: null, yes: false }
+  const flags = { team: false, dir: null, yes: false, agents: null }
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]
     if (arg === '--team') flags.team = true
@@ -27,7 +38,11 @@ export function parseInitArgs(args) {
       const value = arg === '--dir' ? args[++index] : arg.slice('--dir='.length)
       if (value === undefined || value === '' || value.startsWith('--')) return { flags, error: '--dir needs a folder name, such as --dir records' }
       flags.dir = value
-    } else return { flags, error: `unknown option "${arg}" for init; use --team, --dir <name> or --yes` }
+    } else if (arg === '--agents' || arg.startsWith('--agents=')) {
+      const parsed = parseAgentsValue(arg === '--agents' ? args[++index] : arg.slice('--agents='.length))
+      if (parsed.error) return { flags, error: parsed.error }
+      flags.agents = parsed.agents
+    } else return { flags, error: `unknown option "${arg}" for init; use --team, --dir <name>, --agents <names> or --yes` }
   }
   return { flags, error: null }
 }
@@ -52,7 +67,7 @@ function oneLine(text) {
  */
 export function initOptions(flags, answers = {}) {
   const preset = flags.team ? 'team' : (presetFromAnswer(answers.preset ?? '') ?? 'solo')
-  return { preset, dir: flags.dir ?? DEFAULTS.dir, goal: oneLine(answers.goal ?? '') }
+  return { preset, dir: flags.dir ?? DEFAULTS.dir, goal: oneLine(answers.goal ?? ''), agents: flags.agents ?? null }
 }
 
 /** The value of `name` in a TOML table such as [project], read line by line; null when absent. */
@@ -137,9 +152,30 @@ function dirtyFiles(root, paths) {
 }
 
 /**
- * Plans the setup without writing anything. options is { preset, dir, goal, guardPath }.
- * Returns { refusals, writes (path → text), executable, created, changed, managerFiles,
- * manager, instructions, warnings, dir, preset, goalMarker }. Nothing may be written when
+ * ResaLedger's hook entries in each agent's configuration, merged into what is there: sets
+ * writes (path → text) and returns { agents, files, manual }, manual holding { path, reason,
+ * snippet } for a file the merge cannot read. Shared by init and update.
+ */
+export function planAgentConfigs(root, agents, dir, writes) {
+  const files = []
+  const manual = []
+  for (const agent of agents) {
+    const path = agentConfigFile(agent)
+    const current = readText(root, path)
+    const merged = mergeAgentConfig(agent, current, dir)
+    if (merged.error) manual.push({ path, reason: merged.error, snippet: agentConfigSnippet(agent, dir) })
+    else {
+      files.push({ path, created: current === null, changed: merged.changed })
+      if (merged.changed) writes.set(path, merged.text)
+    }
+  }
+  return { agents, files, manual }
+}
+
+/**
+ * Plans the setup without writing anything. options is { preset, dir, goal, guardPath, agents };
+ * agents null finds the agents in use. Returns { refusals, writes (path → text), executable,
+ * created, changed, managerFiles, manager, instructions, warnings, dir, preset, goalMarker, agents }. Nothing may be written when
  * refusals is not empty.
  */
 export function planInit(root, options = {}) {
@@ -155,7 +191,8 @@ export function planInit(root, options = {}) {
     warnings: [],
     dir: null,
     preset: options.preset ?? 'solo',
-    goalMarker: !options.goal
+    goalMarker: !options.goal,
+    agents: []
   }
   const refuse = (message) => plan.refusals.push(message)
 
@@ -232,12 +269,19 @@ export function planInit(root, options = {}) {
     if (!hasAgentsImport(text.split(/\r?\n/))) plan.writes.set(claude.path, `${text}${text === '' || text.endsWith('\n') ? '' : '\n'}${text === '' ? '' : '\n'}@AGENTS.md\n`)
   }
 
-  // 5. Uncommitted changes in a file init changes.
+  // 5. The agents' hook configurations.
+  const agentPlan = planAgentConfigs(root, options.agents ?? detectAgents(root), dir, plan.writes)
+  plan.agents = agentPlan.agents
+  for (const { path, reason, snippet } of agentPlan.manual) {
+    plan.warnings.push(`${path} ${reason}, so init did not add ResaLedger's agent hooks to it. Fix the file and run "npx resaledger update", or add these entries under "hooks" by hand:\n${snippet}`)
+  }
+
+  // 6. Uncommitted changes in a file init changes.
   for (const path of plan.writes.keys()) if (existsSync(join(root, path))) touched.push(path)
   const dirty = dirtyFiles(root, [...new Set(touched)])
   if (dirty.length > 0) refuse(`these files have uncommitted changes, and init would change them: ${dirty.join(', ')}. Commit or stash them first`)
 
-  // 6. What changes.
+  // 7. What changes.
   for (const [path, text] of plan.writes) {
     const current = readText(root, path)
     if (current === null) plan.created.push(path)
