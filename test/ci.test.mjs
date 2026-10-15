@@ -586,11 +586,14 @@ describe('ci and changes to enforcement', () => {
 
   test('a hook that stops being executable, or becomes a symlink, weakens', () => {
     const r = setup()
+    // The mode goes through git's index, so the test holds where the file system keeps no executable bit.
     r.write('.githooks/pre-commit', hook('pre-commit'))
     chmodSync(join(r.root, '.githooks/pre-commit'), 0o755)
+    r.git('add', '--chmod=+x', '.githooks/pre-commit')
     commit(r, {}, 'chore: hooks', 'Task: maintenance')
     r.git('checkout', '-q', '-b', 'lane-a')
     chmodSync(join(r.root, '.githooks/pre-commit'), 0o644)
+    r.git('update-index', '--chmod=-x', '.githooks/pre-commit')
     commit(r, {}, 'chore: mode', 'Task: maintenance')
     const plain = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
     failed(plain, /✖ enforcement: 1 weakening change no decision names; 1 change, 1 weakening/)
@@ -598,6 +601,8 @@ describe('ci and changes to enforcement', () => {
     commit(r, decision('hooks/pre-commit'), 'docs: decide', 'Task: maintenance')
     passed(ci(r, 'pull_request', pullRequest(r, 'lane-a')))
 
+    // A symlink needs privileges on Windows.
+    if (process.platform === 'win32') return
     r.git('checkout', '-q', '-b', 'lane-b', 'main')
     rmSync(join(r.root, '.githooks/pre-commit'))
     symlinkSync('../ledger/README.md', join(r.root, '.githooks/pre-commit'))
