@@ -147,21 +147,51 @@ describe('checkRange: the rules', () => {
     assert.deepEqual(check(r, base), [])
   })
 
-  test('a task held by another lane is reported, unless the commit set its Lane or no lane is given', () => {
+  test('a task held by another lane before the range is reported, also on later commits; no lane skips the rule', () => {
     const { r, base } = setup({ S1: task('S1', 'doing', 'lane-b'), S2: task('S2', 'todo') })
     commit(r, { 'src/a.js': '1\n' }, 'feat: a', 'Task: S1')
-    const problems = check(r, base)
-    assert.equal(problems.length, 1)
-    assert.match(problems[0].message, /^"feat: a" names task S1, which is held by lane "lane-b" in that commit, not by "lane-a"\./)
+    commit(r, { 'src/b.js': '1\n' }, 'feat: b', 'Task: S1')
+    assert.deepEqual(
+      check(r, base).map((problem) => problem.message),
+      ['"feat: a"', '"feat: b"'].map(
+        (subject) => `${subject} names task S1, which is held by lane "lane-b" before this range, not by "lane-a". Name a task this lane holds, or take it over with claim --take`
+      )
+    )
     assert.deepEqual(check(r, base, { lane: null }), [])
+  })
 
-    // A claim under another name in the same commit counts as this commit's own claim.
-    const claimed = head(r)
-    commit(r, { 'src/b.js': '1\n', 'ledger/tasks/S2.md': task('S2', 'doing', 'claude/s2') }, 'feat: b', 'Task: S2')
-    assert.deepEqual(check(r, claimed), [])
-    // The next commit did not set it, so it is held by another lane there.
+  test('a Lane set inside the range passes, in the same commit or a records-only one before it', () => {
+    const { r, base } = setup()
+    // Claimed under another name in the same commit as the code, and again in later commits.
+    commit(r, { 'src/a.js': '1\n', 'ledger/tasks/S1.md': task('S1', 'doing', 'claude/s1') }, 'feat: a', 'Task: S1')
+    commit(r, { 'src/b.js': '1\n' }, 'feat: b', 'Task: S1')
+    // A records-only claim, then a code commit naming the task.
+    commit(r, { 'ledger/tasks/S2.md': task('S2', 'doing', 'lane-a') }, 'chore: claim S2')
     commit(r, { 'src/c.js': '1\n' }, 'feat: c', 'Task: S2')
-    assert.match(check(r, claimed)[0].message, /^"feat: c" names task S2, which is held by lane "claude\/s2"/)
+    assert.deepEqual(check(r, base), [])
+    // From a later start, the Lane claude/s1 was already there: held before this range.
+    const later = head(r, 'HEAD~2')
+    assert.deepEqual(check(r, later), [])
+    commit(r, { 'src/d.js': '1\n' }, 'feat: d', 'Task: S1')
+    assert.match(check(r, later)[0].message, /^"feat: d" names task S1, which is held by lane "claude\/s1" before this range/)
+  })
+
+  test('a claim under a branch name that was renamed passes with the new lane', () => {
+    const { r, base } = setup()
+    r.git('checkout', '-q', '-b', 'wip')
+    commit(r, { 'ledger/tasks/S1.md': task('S1', 'doing', 'wip') }, 'chore: claim S1')
+    commit(r, { 'src/a.js': '1\n' }, 'feat: a', 'Task: S1')
+    assert.equal(r.git('branch', '-m', 'wip', 'feat/storage').status, 0)
+    commit(r, { 'src/b.js': '1\n' }, 'feat: b', 'Task: S1')
+    assert.deepEqual(check(r, base, { lane: 'feat/storage' }), [])
+  })
+
+  test('a task created inside the range passes, also when no range start is given', () => {
+    const { r, base } = setup()
+    commit(r, { 'ledger/tasks/S7-new.md': task('S7', 'doing', 'other-name') }, 'chore: add S7')
+    commit(r, { 'src/a.js': '1\n' }, 'feat: a', 'Task: S7')
+    assert.deepEqual(check(r, base), [])
+    assert.deepEqual(check(r, null), [])
   })
 
   test('several ids on one line and on two lines are each checked', () => {
@@ -358,12 +388,13 @@ describe('check --range through the bundle', () => {
     assert.equal(failed.status, 1)
     assert.match(failed.out, new RegExp(`✖ ${short(r)}: "feat: b" changes code but names no task`))
 
-    // Another lane holds S1 there; a detached HEAD has no lane, so only that rule is skipped.
-    r.git('checkout', '-q', '-b', 'lane-b', 'HEAD~1')
+    // Another lane holds S1 at the range start; a detached HEAD has no lane, so only that rule is skipped.
+    const claimed = head(r, 'HEAD~1')
+    r.git('checkout', '-q', '-b', 'lane-b', claimed)
     commit(r, { 'src/c.js': '1\n' }, 'feat: c', 'Task: S1')
-    assert.match(r.node(guard, 'check', '--range', `${base}..HEAD`).out, /names task S1, which is held by lane "lane-a" in that commit, not by "lane-b"/)
+    assert.match(r.node(guard, 'check', '--range', `${claimed}..HEAD`).out, /names task S1, which is held by lane "lane-a" before this range, not by "lane-b"/)
     r.git('checkout', '-q', '--detach', 'HEAD')
-    const detached = r.node(guard, 'check', '--range', `${base}..HEAD`)
+    const detached = r.node(guard, 'check', '--range', `${claimed}..HEAD`)
     assert.equal(detached.status, 0, detached.out)
     assert.match(detached.out, /\(detached HEAD: no lane rule\)/)
   })

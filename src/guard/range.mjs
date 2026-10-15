@@ -150,7 +150,8 @@ function rangeTaskFile(entries, id) {
  *
  * Merge commits, commits made by git revert and release commits are skipped. A commit that
  * changes code needs a Task: trailer; each id it names must be doing or done in that commit's
- * own tree, and held by the lane there or claimed by the commit itself. "maintenance" is allowed.
+ * own tree, with a Lane there that is the lane or was set inside the range (not held by another
+ * lane already at `from`). "maintenance" is allowed.
  */
 export function checkRange(from, to, context) {
   const { config } = context
@@ -210,7 +211,6 @@ export function checkRange(from, to, context) {
     return parsed.get(key)
   }
 
-  // Tasks held by another lane in the commit's tree pass when the commit itself set the Lane.
   const laneChecks = []
   for (const item of pending) {
     for (const id of item.ids) {
@@ -230,18 +230,31 @@ export function checkRange(from, to, context) {
   }
   if (laneChecks.length === 0) return all()
 
-  const parentSpec = ({ item, task }) => (item.commit.parents.length > 0 ? `${item.commit.parents[0]}:${task.file}` : null)
-  const parents = rangeObjects(root, laneChecks.map(parentSpec).filter((spec) => spec !== null))
-  for (const check of laneChecks) {
-    const { item, id, task } = check
-    const spec = parentSpec(check)
-    const before = spec === null ? undefined : parents.get(spec)
-    const previousLane = before ? parseTask(task.file, before.data.toString('utf8')).lane : null
-    const setHere = item.commit.paths.includes(task.file) && task.lane !== null && previousLane !== task.lane
-    if (setHere) continue
-    const holder = task.lane === null ? 'which has no Lane' : `which is held by lane "${task.lane}"`
+  // The lane rule only refuses naming a task that another lane held before this range: a Lane
+  // equal to this lane, or set inside the range (by a claim, also in a records-only commit, or
+  // under a branch name that was later renamed), is accepted. Taking a held task without
+  // claim --take is caught by the ownership check in pre-commit and CI (H1 and C1), not here.
+  const lanesAtStart = new Map() // id → its Lane at `from`, or null when the task is not there or has none
+  if (from) {
+    const startTree = rangeObjects(root, [`${from}:${tasksFolder}`]).get(`${from}:${tasksFolder}`)
+    const startEntries = startTree && startTree.type === 'tree' ? rangeTreeEntries(startTree.data, hashBytes) : new Map()
+    const startFiles = new Map()
+    for (const { id } of laneChecks) startFiles.set(id, rangeTaskFile(startEntries, id))
+    const startBlobs = rangeObjects(root, [...startFiles.values()].filter((name) => name !== null).map((name) => startEntries.get(name)))
+    for (const [id, name] of startFiles) {
+      const blob = name === null ? undefined : startBlobs.get(startEntries.get(name))
+      lanesAtStart.set(id, blob ? parseTask(`${tasksFolder}/${name}`, blob.data.toString('utf8')).lane : null)
+    }
+  }
+  for (const { item, id, task } of laneChecks) {
+    if (task.lane === null) {
+      item.problem(`names task ${id}, which has no Lane in that commit. Claim the task for "${lane}" first`)
+      continue
+    }
+    const startLane = from ? lanesAtStart.get(id) : null
+    if (startLane !== task.lane) continue
     item.problem(
-      `names task ${id}, ${holder} in that commit, not by "${lane}". Name a task this lane holds, or claim it first (claim --take for a task another lane holds)`
+      `names task ${id}, which is held by lane "${task.lane}" before this range, not by "${lane}". Name a task this lane holds, or take it over with claim --take`
     )
   }
   return all()
