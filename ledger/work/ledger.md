@@ -232,11 +232,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: The input formats come from the agents' documentation; Codex loads project hooks only for a trusted project. Known gaps, listed in the module header: `cp`, `mv`, `perl -i`, other editor tools and variables that disable other hook managers. Open: `update` adds the configuration back for an agent whose folder exists even when a project removed it on purpose; A2 decides with the other agents.
 
 ### A1.1 The end-of-turn reminder under concurrent calls
-- Status: todo
+- Status: doing
 - Depends on: A1
 - Plan: [A-agents.md](../plan/A-agents.md#a1-the-agent-hook-core-claude-code-and-codex)
 - Evidence: —
-- Notes: CI on Linux with Node 20 (run 38681500663) failed "fires once when two configurations call it at the same time" in agents.test.mjs: three simultaneous stop hooks all stayed quiet, where exactly one should remind. Find the race in the session state (the start record or the change check), fix it, and make the test prove it repeatedly.
+- Notes: A worker fixes it on branch `a1-1-reminder`. CI on Linux with Node 20 (run 38681500663) failed "fires once when two configurations call it at the same time" in agents.test.mjs: three simultaneous stop hooks all stayed quiet, where exactly one should remind. Find the race in the session state (the start record or the change check), fix it, and make the test prove it repeatedly.
 
 ### A2 Cursor, Gemini CLI and GitHub Copilot
 - Status: todo
@@ -344,11 +344,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: A worker fixes it on branch `t3-2-rules`. Ship a `pre-merge-commit` hook; take the protected branches, the branch pattern and the gates from the committed configuration, not the staged one; refuse deleting a task another lane holds.
 
 ### T3.3 handoff and verify at the edges
-- Status: doing
+- Status: done
 - Depends on: T3
 - Plan: [The review](../evidence/t3/review.md#findings), findings 5, 8, 10 and 11
-- Evidence: —
-- Notes: A worker fixes it on branch `t3-3-edges`. Start `handoff`'s range at the commit that added the configuration, as pre-push does; decide in spec section 5.10 whether code-like files in the workspace count as code; prune only stamp files; refuse `verify` when code is hidden with `skip-worktree` or `assume-unchanged`.
+- Evidence: 721 of 721 on Node 24.18.0, 22.23.3 and 20.20.2 on the branch; [handoff.test.mjs](../../test/handoff.test.mjs) passes the first `handoff` after ten commits made before adoption, [adoption.test.mjs](../../test/adoption.test.mjs) covers the shared range start, and [gates.test.mjs](../../test/gates.test.mjs) covers pruning only stamps and refusing code hidden with `skip-worktree` or `assume-unchanged`.
+- Notes: Spec section 5.10 now says which workspace files are code. Pre-push should take its range start through `adoptionStart` too; T3.2 or the lead wires it in when T3.2 merges.
 
 ### T3.4 Setup that works everywhere
 - Status: todo

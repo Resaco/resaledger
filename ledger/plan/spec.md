@@ -311,7 +311,7 @@ Task: S4
 
 ### 5.10 What counts as code
 
-Every tracked file outside the workspace that is not Markdown, plus the workspace's `scripts/`, the git hooks, `.resaledger.json` and the `codePaths`. Everything else in the workspace is a record, and Markdown elsewhere is documentation. A commit that changes only records or Markdown needs no task, and neither changes the fingerprint.
+Code is every tracked file outside the workspace that is not Markdown, plus `.resaledger.json` and the git hooks (`.githooks/`). Inside the workspace, code is everything under `scripts/`; everything under a `codePaths` folder except images; and every other file with a code extension (`.js .mjs .cjs .ts .tsx .jsx .json .yml .yaml .sh .py .rb .go .rs .toml`, in any case), except a stamp (`verified/<16 hex digits>.json`) and anything under `tasks/`, `decisions/`, `log/` and `plan/`. Everything else in the workspace is a record, and Markdown elsewhere is documentation. A commit that changes only records or Markdown needs no task, and neither changes the fingerprint. Evidence is best kept as `.txt`, `.log` or Markdown: an evidence file with a code extension counts as code, so it needs a task and makes the stamp stale.
 
 ## 6. Lanes
 
