@@ -108,6 +108,14 @@ describe('validateDecision', () => {
     assert.deepEqual(validateDecision(decision({ status: '—' }), existing()), [])
   })
 
+  test('knows the Weakens field, so a misspelt one is reported', () => {
+    const text = (field) => `# Allow it\n\n- Date: 2026-10-14\n- Decided by: alice\n- ${field}: wip\n\nWhy.\n`
+    assert.deepEqual(validateDecision(parseDecision(DECISION_FILE, text('Weakens')), existing()), [])
+    const problems = messages(validateDecision(parseDecision(DECISION_FILE, text('Weaken')), existing()))
+    assert.equal(problems.length, 1)
+    assert.match(problems[0], /"Weaken".*"Weakens"/)
+  })
+
   test('accepts superseded by a link to a decision that exists', () => {
     const parsed = decision({ status: 'superseded by [front matter after all](2026-11-02-front-matter.md)' })
     assert.deepEqual(validateDecision(parsed, existing('ledger/decisions/2026-11-02-front-matter.md')), [])

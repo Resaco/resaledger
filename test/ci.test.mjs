@@ -497,6 +497,29 @@ describe('ci and changes to enforcement', () => {
     failed(ci(r, 'pull_request', pullRequest(r, 'lane-a')), /✖ guard: ledger\/scripts\/records\.mjs removed: this weakens enforcement/)
   })
 
+  test('moving the guard back to an older release weakens enforcement', () => {
+    const older = '#!/usr/bin/env node\n// ResaLedger 8.0.0\n'
+    const newer = '#!/usr/bin/env node\n// ResaLedger 9.0.0\n'
+    const table = join(temporary(), 'released.json')
+    writeFileSync(table, JSON.stringify({ guard: { '8.0.0': contentHash(normalizeManaged(older)), '9.0.0': contentHash(normalizeManaged(newer)) } }))
+    const guard = join(temporary(), 'records.mjs')
+    const bundled = run(PACKAGE, process.execPath, [join(PACKAGE, 'scripts', 'bundle.mjs'), '--out', guard, '--released', table])
+    assert.equal(bundled.status, 0, bundled.out)
+    const r = change({ 'ledger/scripts/records.mjs': newer }, { 'ledger/scripts/records.mjs': older })
+    const result = run(r.root, process.execPath, [guard, 'ci', '--base', 'main', '--head', 'lane-a', '--lane', 'lane-a'])
+    failed(result, /✖ guard: ledger\/scripts\/records\.mjs moved back from ResaLedger 9\.0\.0 to 8\.0\.0, an older release/)
+  })
+
+  test('a removed or broken configuration in the head weakens enforcement', () => {
+    const removed = setup()
+    removed.git('checkout', '-q', '-b', 'lane-a')
+    removed.git('rm', '-q', '.resaledger.json')
+    commit(removed, {}, 'chore: remove the configuration', 'Task: maintenance')
+    failed(ci(removed, 'pull_request', pullRequest(removed, 'lane-a')), /✖ config: \.resaledger\.json removed: this weakens enforcement/)
+    const broken = change({}, { '.resaledger.json': '{ "version": 2, \n' })
+    failed(ci(broken, 'pull_request', pullRequest(broken, 'lane-a')), /✖ config: \.resaledger\.json is not a valid configuration in the head: this weakens enforcement/)
+  })
+
   test('a change the base made after the merge base is not the pull request\'s change', () => {
     const r = setup({ config: { wip: 5 } })
     r.git('checkout', '-q', '-b', 'lane-a')

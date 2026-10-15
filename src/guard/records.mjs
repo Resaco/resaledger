@@ -12,7 +12,7 @@ const LOG_HEADING = /^(\d{4}-\d{2}-\d{2}) · (\S.*)$/
 const PLAN_STATUS_LINE = /^Status:(.*)$/
 const PLAN_STATUSES = ['proposal', 'approved', 'in progress', 'implemented']
 const README_SECTIONS = ['Goal', 'Environments', 'Manual checks']
-const DECISION_FIELDS = ['Date', 'Decided by', 'Status']
+const DECISION_FIELDS = ['Date', 'Decided by', 'Status', 'Weakens']
 const LOG_FIELDS = ['Lane', 'Tasks']
 
 /** Whether a YYYY-MM-DD string names a day that exists in the calendar. */

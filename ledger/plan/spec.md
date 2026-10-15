@@ -248,7 +248,7 @@ GitHub renders bullets with working links and front matter as a table of raw tex
 A colon in a value breaks YAML. Agents already write `Field: value` lines reliably.
 ```
 
-`decisions/<date>-<slug>.md`. Date and Decided by are required. Status is `accepted` (also when it is missing) or `superseded by <link>`. A decision file is added once; marking it superseded is its only later edit.
+`decisions/<date>-<slug>.md`. Date and Decided by are required. Status is `accepted` (also when it is missing) or `superseded by <link>`. Weakens is optional: the changes to enforcement this decision lets through in the pull request that adds it ([section 10](#10-ci)). A decision file is added once; marking it superseded is its only later edit.
 
 ### 5.5 Log entries
 

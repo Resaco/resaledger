@@ -209,18 +209,18 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: For C3: the workflow must run on `pull_request`, never `pull_request_target`, because the gates run the pull request's code; and gate output appears above the `ci` header today. Pre-commit clears git's location variables while it reads the other worktrees, because git sets `GIT_INDEX_FILE` for hooks; W2 moves that into `localLanes`, so every caller is safe.
 
 ### C2 Changes to enforcement
-- Status: doing
+- Status: done
 - Depends on: C1
 - Plan: [C-ci.md](../plan/C-ci.md#c2-changes-to-enforcement)
-- Evidence: —
-- Notes: A worker builds it on branch `c2-enforcement`.
+- Evidence: 778 tests on the branch on Node 24.18.0, 22.23.3 and 20.20.2 (the timing test in `ids.test.mjs` rerun alone on 24 and 22); [ci.test.mjs](../../test/ci.test.mjs) fails each of 16 kinds of weakening without a decision and passes it with one that names it, refuses a decision that names another change or is already on the base, passes an update to a released guard or hook and a pull request that only tightens, and refuses a guard moved back to an older release and a removed or broken configuration; [records.test.mjs](../../test/records.test.mjs) reports a misspelt `Weakens` field.
+- Notes: Worked on branch `c2-enforcement`. The rules and the table of ids are in [spec section 10](../plan/spec.md#10-ci). Limit for C3: the base's guard cannot know the hashes of a newer release, so a pull request that updates the guard needs a decision until the workflow supplies the release it moves to.
 
 ### C3 Output, workflow and templates
 - Status: todo
 - Depends on: C1
 - Plan: [C-ci.md](../plan/C-ci.md#c3-output-workflow-and-templates)
 - Evidence: —
-- Notes: —
+- Notes: From C2: let the workflow fetch the package version the head's guard names (`npm pack resaledger@<version>`) and give `ci` that guard, whose released table (its own hash and every earlier release) then counts as known, so an update to a real release passes without a decision. The workflow is the trust anchor already, protected by CODEOWNERS, and npm provenance ties the package to the release; a CI system without registry access falls back to a decision. Add the shipped workflow template to `released.json`.
 
 ## A: Agent integrations
 

@@ -2,7 +2,7 @@
 // the git hooks and the workflow; which of those changes weaken the rules; and the decisions the
 // pull request adds that let a weakening change through. The table of ids is in spec 10.
 import { CONFIG_FILE, loadConfig } from './config.mjs'
-import { contentHash, normalizeManaged, releasedTable } from './managed.mjs'
+import { compareVersions, contentHash, normalizeManaged, releasedTable } from './managed.mjs'
 import { parseDecision } from './records.mjs'
 import { treeReader } from './workspace.mjs'
 
@@ -90,21 +90,34 @@ function configChanges(before, after) {
   return [...changes, ...denyChanges]
 }
 
+/** The newest released version whose text of a managed file is this one, or null. */
+function releasedVersionOf(text, key, dir, released) {
+  if (text === null) return null
+  const hash = contentHash(normalizeManaged(text, dir))
+  const versions = Object.entries(released[key] ?? {})
+    .filter(([, known]) => known === hash)
+    .map(([version]) => version)
+    .sort(compareVersions)
+  return versions.at(-1) ?? null
+}
+
 /**
  * The change to one managed file: listed when the head's text is a released version of it
- * (key in the released table), else weakening. A removed file always weakens.
+ * (key in the released table), else weakening. A removed file always weakens, and so does a
+ * move back to an older release, which may bring back what a later one fixed.
  */
 function managedChange(change, released) {
   const { id, key, path, before, after, dir } = change
   if (before === after) return []
   if (after === null) return [enforcementChange(id, true, `${path} removed`, path)]
-  const hash = contentHash(normalizeManaged(after, dir))
-  const versions = Object.entries(released[key] ?? {})
-    .filter(([, known]) => known === hash)
-    .map(([version]) => version)
+  const version = releasedVersionOf(after, key, dir, released)
   const how = before === null ? 'added' : 'changed'
-  if (versions.length > 0) return [enforcementChange(id, false, `${path} ${how}: ResaLedger ${versions.at(-1)}, a released version`, path)]
-  return [enforcementChange(id, true, `${path} ${how}, and the new text is no released version of ResaLedger's`, path)]
+  if (version === null) return [enforcementChange(id, true, `${path} ${how}, and the new text is no released version of ResaLedger's`, path)]
+  const previous = releasedVersionOf(before, key, dir, released)
+  if (previous !== null && compareVersions(version, previous) < 0) {
+    return [enforcementChange(id, true, `${path} moved back from ResaLedger ${previous} to ${version}, an older release`, path)]
+  }
+  return [enforcementChange(id, false, `${path} ${how}: ResaLedger ${version}, a released version`, path)]
 }
 
 /** The changes to the guard, the git hooks and the workflow between two trees. */
