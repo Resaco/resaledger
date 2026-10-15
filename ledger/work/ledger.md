@@ -112,34 +112,34 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 ## V: Gates, stamps, the range check and handoff
 
 ### V1 Gates and stamps
-- Status: doing
+- Status: done
 - Depends on: R5
 - Plan: [V-verify.md](../plan/V-verify.md#v1-gates-and-stamps)
-- Evidence: —
-- Notes: A worker builds it on branch `v1-gates` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs` on `main` after the merge: 268 of 268 on Node 24.18.0, 22.23.3 and 20.20.2 (with W1's verification state); the 23 tests in [gates.test.mjs](../../test/gates.test.mjs) include two branches verifying the same code and a new stamp against a pruned one, merged in both orders with ten long gates. Not verified: Windows shells (CI).
+- Notes: The stamp's gate list is a digest bound to the fingerprint, so no two stamps look like a rename to git. `work` now says whether the gates passed on the code at HEAD.
 
 ### V2 The commit range check
-- Status: doing
+- Status: done
 - Depends on: R5
 - Plan: [V-verify.md](../plan/V-verify.md#v2-the-commit-range-check)
-- Evidence: —
-- Notes: A worker builds it on branch `v2-range` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs` on `main` after the merge: 296 of 296 on Node 24.18.0 (22.23.3 and 20.20.2 recorded in the next log entry); the 29 tests in [range.test.mjs](../../test/range.test.mjs) cover every exemption, a claim in a records-only commit, a branch renamed after its claim, and 200 commits in under 0.4 seconds against a 3-second budget. Not verified: Windows (CI).
+- Notes: On review the lane rule became range-wide: a Lane set inside the checked range is accepted, so the rule only refuses tasks another lane held before the range. Taking a held task is caught by the ownership checks in H1 and C1.
 
 ### V3 `handoff`
-- Status: todo
+- Status: doing
 - Depends on: V1, V2, H3
 - Plan: [V-verify.md](../plan/V-verify.md#v3-handoff)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `v3-handoff` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ## H: Git hooks
 
 ### H1 pre-commit
-- Status: todo
+- Status: doing
 - Depends on: R5
 - Plan: [H-hooks.md](../plan/H-hooks.md#h1-pre-commit)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `h1-pre-commit` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### H2 commit-msg and pre-push
 - Status: todo

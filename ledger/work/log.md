@@ -45,3 +45,7 @@ H3 merged: POSIX hook scripts that find Node or Bun on every platform, `hooks --
 ## 2026-10-15 · `work`, and two review findings
 
 W1 merged: `work` shows this lane, the other local worktrees, what waits for the owner, what is blocked and ready, and warns about double and stale claims, in about half a second for 300 tasks. While testing V1 a worker found that two stamps sharing their gate list look like a rename to git, so two lanes replacing one stamp would conflict; the specification now binds every byte of a stamp to the fingerprint. Reviewing V2, the lead widened the lane rule of the range check to the whole range, so a claim in a records-only commit and a branch renamed before its pull request both pass. 243 tests pass. M1, reading 0.x workspaces, started.
+
+## 2026-10-15 · Gates, stamps and the range check
+
+V1 and V2 merged. `verify` runs the project's gates on the committed code and writes a stamp named by the code's fingerprint, never rerunning on the same code and pruning stamps that no longer apply; two lanes' stamps merge without a conflict. The range check decides in one pass whether every commit in a range names a task its lane held, in under half a second for 200 commits. `work` now says whether the gates passed on the code at HEAD. 296 tests pass on Node 24, 22 and 20. H1 (pre-commit) and V3 (handoff) started.
