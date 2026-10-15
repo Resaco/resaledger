@@ -32,7 +32,8 @@ const LEGACY_FIELD = /^- ([A-Z][\p{L}]*(?: [\p{L}]+)*):(?:[ \t]+(.*))?$/u
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 // "Blocked on the owner: …", "Waits for the owner." and the like, at the start of a 0.x note or of
 // a sentence in it: what a blocked task waits for, which 1.0 records in its own field.
-const WAITING_PHRASE = /(?:^|[.;]\s+)(?:waits? (?:for|on)|waiting (?:for|on)|blocked (?:on|by))\s*:?\s+(?:the\s+)?([^.:;,()\n]{1,60}?)\s*(?=[.:;,(]|$)/i
+// A full stop between digits belongs to a task id such as S4.1, so it does not end the value.
+const WAITING_PHRASE = /(?:^|[.;]\s+)(?:waits? (?:for|on)|waiting (?:for|on)|blocked (?:on|by))\s*:?\s+(?:the\s+)?((?:[^.:;,()\n]|\.(?=\d)){1,60}?)\s*(?=\.(?!\d)|[:;,(]|$)/i
 
 // The hooks are staged as executable, so a migration committed on Windows still runs on Linux and macOS.
 export const COMMIT_COMMAND =
