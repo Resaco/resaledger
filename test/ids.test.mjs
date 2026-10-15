@@ -8,7 +8,7 @@ import { describe, test } from 'node:test'
 import { HOOK_NAMES, renderHook } from '../src/cli/hooks.mjs'
 import { parseConfig } from '../src/guard/config.mjs'
 import { branchTaskFiles, idCollisions } from '../src/guard/ids.mjs'
-import { PACKAGE, repository, run, temporary } from './helpers.mjs'
+import { BUDGET, PACKAGE, repository, run, temporary } from './helpers.mjs'
 
 const GUARD = join(temporary(), 'records.mjs')
 const built = run(PACKAGE, process.execPath, [join(PACKAGE, 'scripts', 'bundle.mjs'), '--out', GUARD])
@@ -184,7 +184,7 @@ describe('pre-commit: new ids against the locally visible branches', () => {
     assert.equal(branches.find((entry) => entry.branch === 'lane-7').files.size, 21)
     assert.equal(problems.length, 1)
     t.diagnostic(`branchTaskFiles: 51 branches in ${elapsed.toFixed(0)} ms`)
-    assert.ok(elapsed < 1000, `51 branches took ${Math.round(elapsed)} ms`)
+    assert.ok(elapsed < 1000 * BUDGET, `51 branches took ${Math.round(elapsed)} ms`)
 
     // The whole commit: pre-commit with the scan, and commit-msg, each in its own node process.
     r.git('checkout', '-q', '-b', 'mine')
@@ -193,6 +193,6 @@ describe('pre-commit: new ids against the locally visible branches', () => {
     passed(r.commit('docs: S2'))
     const commitMs = Number(process.hrtime.bigint() - before) / 1e6
     t.diagnostic(`a commit that adds a task, with 51 other branches: ${commitMs.toFixed(0)} ms, including node start-up`)
-    assert.ok(commitMs < 3000, `the commit took ${Math.round(commitMs)} ms`)
+    assert.ok(commitMs < 3000 * BUDGET, `the commit took ${Math.round(commitMs)} ms`)
   })
 })

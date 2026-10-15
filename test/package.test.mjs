@@ -1,9 +1,10 @@
 // The package itself: its manifest, its license and the shape of the built guard.
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { PACKAGE, run, temporary } from './helpers.mjs'
+import { ENV, PACKAGE, run, temporary } from './helpers.mjs'
 
 const manifest = JSON.parse(readFileSync(join(PACKAGE, 'package.json'), 'utf8'))
 
@@ -39,6 +40,18 @@ test('the package command prints the version', () => {
   assert.equal(ran.out.trim(), manifest.version)
 })
 
+/**
+ * Runs npm in the package. Through npm's own script when the tests run under npm, which sets
+ * npm_execpath; otherwise as a command, through a shell on Windows, where Node refuses to start
+ * npm.cmd without one.
+ */
+function npm(args) {
+  if (process.env.npm_execpath) return run(PACKAGE, process.execPath, [process.env.npm_execpath, ...args])
+  if (process.platform !== 'win32') return run(PACKAGE, 'npm', args)
+  const result = spawnSync('npm', args, { cwd: PACKAGE, env: ENV, encoding: 'utf8', shell: true })
+  return { status: result.status, out: `${result.stdout}${result.stderr}` }
+}
+
 /** Every file under a path in the package, as POSIX paths relative to the package. */
 function filesUnder(path) {
   const full = join(PACKAGE, path)
@@ -50,7 +63,7 @@ function filesUnder(path) {
 test('npm pack publishes exactly the files in "files", the built guard, package.json and README.md', () => {
   // --ignore-scripts: prepack would rebuild dist/records.mjs while other test files read it.
   // scripts/test.mjs has built it already.
-  const packed = run(PACKAGE, process.platform === 'win32' ? 'npm.cmd' : 'npm', ['pack', '--dry-run', '--json', '--ignore-scripts'])
+  const packed = npm(['pack', '--dry-run', '--json', '--ignore-scripts'])
   assert.equal(packed.status, 0, packed.out)
   const listed = JSON.parse(packed.out.slice(packed.out.indexOf('['))) [0].files.map((file) => file.path).sort()
   const intended = [...new Set([...manifest.files.flatMap(filesUnder), 'dist/records.mjs', 'package.json', 'README.md'])].sort()

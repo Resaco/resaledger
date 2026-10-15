@@ -10,6 +10,10 @@ import { fileURLToPath } from 'node:url'
 
 export const PACKAGE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
+// Time budgets are written for Linux and macOS. Windows starts processes several times more
+// slowly, so its budgets are three times as long; T2 sets the final budgets.
+export const BUDGET = process.platform === 'win32' ? 3 : 1
+
 const created = []
 after(() => created.forEach((folder) => rmSync(folder, { recursive: true, force: true })))
 
