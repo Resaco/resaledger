@@ -3,9 +3,8 @@
 // that no line of the old records is lost, rewrites links into the removed files and
 // validates the result with the guard's own modules. applyMigration() writes the plan.
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { join, posix, relative, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { join, posix } from 'node:path'
 import { CONFIG_FILE, parseConfig } from '../guard/config.mjs'
 import { slugify, taskFileName } from '../guard/tasks.mjs'
 import { checkWorkspace, loadWorkspace } from '../guard/workspace.mjs'
@@ -20,14 +19,8 @@ import {
   lostLegacyLines,
   readLegacyWorkspace
 } from './legacy.mjs'
+import { agentsBlock, BUILT_GUARD, claudeFile, detectBase, hasAgentsImport, HOOKS_FOLDER, realRelative, removeManagedBlock } from './setup.mjs'
 
-export const PACKAGE_ROOT = resolve(fileURLToPath(new URL('../../', import.meta.url)))
-export const BUILT_GUARD = join(PACKAGE_ROOT, 'dist', 'records.mjs')
-const AGENTS_BLOCK = new URL('../../templates/agents-block.md', import.meta.url)
-
-const HOOKS_FOLDER = '.githooks'
-const MANAGED_START = '<!-- resaledger:start'
-const MANAGED_END = '<!-- resaledger:end -->'
 const POINTER_START = '<!-- agent-ledger:start -->'
 const POINTER_END = '<!-- agent-ledger:end -->'
 const UNION_COMMENT = '# agent-ledger: records that only grow at the end merge without conflicts'
@@ -341,27 +334,6 @@ function plannedReader(root, files, contents) {
   }
 }
 
-/** The repository-relative path a file really is, following a link inside the repository; null outside it. */
-function realRelative(root, path) {
-  const full = join(root, path)
-  if (!existsSync(full)) return path
-  if (!lstatSync(full).isSymbolicLink()) return path
-  const real = realpathSync(full)
-  const inside = relative(realpathSync(root), real)
-  if (inside.startsWith('..') || resolve(inside) === inside) return null
-  return inside.split(/[\\/]/).join('/')
-}
-
-function sameFile(root, a, b) {
-  try {
-    const one = statSync(join(root, a))
-    const two = statSync(join(root, b))
-    return one.ino === two.ino && one.dev === two.dev
-  } catch {
-    return false
-  }
-}
-
 /** Removes every 0.x pointer block; returns the text without them and the blocks removed, with their line. */
 function removePointers(text) {
   const lines = sourceLines(text)
@@ -638,41 +610,32 @@ export function planMigration(root, options = {}) {
   const checkPointers = (file, blocks) => {
     for (const block of blocks) if (!pointerTemplates.includes(block.text)) editedPointers.push({ file, text: block.text })
   }
-  const block = readFileSync(AGENTS_BLOCK, 'utf8').replaceAll('{{dir}}', dir).trimEnd()
+  const block = agentsBlock(dir)
   const agentsPath = realRelative(root, 'AGENTS.md')
   if (agentsPath === null) refuse('AGENTS.md is a link to a file outside the repository; migrate does not write there')
   else {
     const existing = existsSync(join(root, agentsPath)) ? readFileSync(join(root, agentsPath), 'utf8') : ''
     const { lines, blocks } = removePointers(existing)
     checkPointers('AGENTS.md', blocks)
-    let kept = tidyLines(lines).join('\n')
-    const managed = kept.indexOf(MANAGED_START)
-    if (managed !== -1) {
-      const end = kept.indexOf(MANAGED_END, managed)
-      kept = tidyLines(`${kept.slice(0, managed)}${end === -1 ? '' : kept.slice(end + MANAGED_END.length)}`.split('\n')).join('\n')
-    }
+    const kept = tidyLines(removeManagedBlock(tidyLines(lines).join('\n')).split('\n')).join('\n')
     const segments = []
     if (kept) segments.push({ text: kept, frame: agentsPath })
     for (const section of movedAgents) segments.push({ text: `${segments.length > 0 ? '\n\n' : ''}${sectionText(section)}`, frame: files.agents })
     segments.push({ text: `${segments.length > 0 ? '\n\n' : ''}${block}\n`, frame: null })
     put(agentsPath, segments)
   }
-  if (lstatSync(join(root, 'CLAUDE.md'), { throwIfNoEntry: false })) {
-    const linked = sameFile(root, 'CLAUDE.md', 'AGENTS.md') || (agentsPath !== null && realRelative(root, 'CLAUDE.md') === agentsPath)
-    if (!linked) {
-      const claudePath = realRelative(root, 'CLAUDE.md')
-      if (claudePath === null || !existsSync(join(root, claudePath))) plan.report.warnings.push('CLAUDE.md is a link outside the repository or to nothing; add an "@AGENTS.md" line to the file it points to')
-      else {
-        const { lines, blocks } = removePointers(readFileSync(join(root, claudePath), 'utf8'))
-        checkPointers('CLAUDE.md', blocks)
-        if (!lines.some((line) => /^\s*@AGENTS\.md\s*$/.test(line))) {
-          const at = blocks.length > 0 ? blocks[0].at : lines.length
-          lines.splice(at, 0, '', '@AGENTS.md', '')
-        }
-        const text = `${tidyLines(lines).join('\n')}\n`
-        if (blocks.length > 0 || text !== readFileSync(join(root, claudePath), 'utf8')) put(claudePath, [{ text, frame: claudePath }])
-      }
+  const claude = claudeFile(root, agentsPath)
+  if (claude?.warning) plan.report.warnings.push(claude.warning)
+  else if (claude) {
+    const claudePath = claude.path
+    const { lines, blocks } = removePointers(readFileSync(join(root, claudePath), 'utf8'))
+    checkPointers('CLAUDE.md', blocks)
+    if (!hasAgentsImport(lines)) {
+      const at = blocks.length > 0 ? blocks[0].at : lines.length
+      lines.splice(at, 0, '', '@AGENTS.md', '')
     }
+    const text = `${tidyLines(lines).join('\n')}\n`
+    if (blocks.length > 0 || text !== readFileSync(join(root, claudePath), 'utf8')) put(claudePath, [{ text, frame: claudePath }])
   }
   if (editedPointers.length > 0) {
     plan.report.warnings.push(`the 0.x pointer block in ${[...new Set(editedPointers.map((item) => item.file))].join(' and ')} was changed by hand; it is removed and kept word for word in the migration's log entry`)
@@ -714,14 +677,10 @@ export function planMigration(root, options = {}) {
   // The configuration.
   const { config: newConfig, unmapped } = convertConfig(legacy.config)
   // 1.0's base defaults to main; a repository without main gets the remote's default branch, or master.
-  const hasRef = (ref) => runGit(root, ['rev-parse', '--verify', '-q', ref]).stdout.trim() !== ''
-  if (!hasRef('refs/heads/main') && !hasRef('refs/remotes/origin/main')) {
-    const remoteHead = runGit(root, ['symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD']).stdout.trim().replace(/^origin\//, '')
-    const base = remoteHead || (hasRef('refs/heads/master') || hasRef('refs/remotes/origin/master') ? 'master' : '')
-    if (base) {
-      newConfig.base = base
-      plan.report.warnings.push(`there is no branch main, so "base" is set to "${base}" in ${CONFIG_FILE}`)
-    }
+  const base = detectBase(root)
+  if (base) {
+    newConfig.base = base
+    plan.report.warnings.push(`there is no branch main, so "base" is set to "${base}" in ${CONFIG_FILE}`)
   }
   const configText = `${JSON.stringify(newConfig, null, 2)}\n`
   put(CONFIG_FILE, [{ text: configText, frame: null }])
