@@ -2,6 +2,7 @@
 // VERSION is defined by scripts/bundle.mjs from package.json.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { ciCommand } from './ci.mjs'
 import { DEFAULTS, effectiveConfigJson, loadConfig } from './config.mjs'
 import { gatesCommand, verifyCommand } from './gates.mjs'
 import { handoffCommand } from './handoff.mjs'
@@ -22,6 +23,10 @@ Commands:
   check     validate the records in the working tree
             (--index: the staged files; --rev <rev>: a commit;
             --range <from>..<to>: also that every commit names its task)
+  ci [--base <rev> --head <rev> [--lane <branch>]]
+            the CI check of a pull request or a push, read from the GitHub
+            event; with --lane, a pull request from that lane, and without
+            it, a push of the commits from --base to --head
   config    print the effective configuration
   gates     list the commit gates and the verify gates
   handoff   the end-of-session check: records, hooks, a clean tree, the
@@ -114,6 +119,7 @@ export function main(argv) {
   if (command === 'version' || command === '--version') console.log(VERSION)
   else if (command === 'help' || command === '--help') process.stdout.write(HELP)
   else if (command === 'work' || command === 'status') workCommand(argv.slice(1))
+  else if (command === 'ci') ciCommand(argv.slice(1))
   else if (command === 'check') checkCommand(argv.slice(1), checkRange)
   else if (command === 'config') configCommand()
   else if (command === 'gates') gatesCommand()
