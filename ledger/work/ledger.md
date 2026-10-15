@@ -231,6 +231,13 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Evidence: `node scripts/test.mjs` on `main` after the merge: 679 of 679 on Node 24.18.0, 22.23.3 and 20.20.2. The 59 tests in [agents.test.mjs](../../test/agents.test.mjs) use recorded input for every event of both agents ([fixtures](../../test/fixtures/agents/claude-pre-tool-bash.json)); quoted text never triggers a refusal; the reminder fires once when called twice; every refusal kind, `agent.deny`, an edit on a protected branch, unknown input and merging into an existing `settings.json` are covered. Not verified: a live Claude Code or Codex session, and Windows.
 - Notes: The input formats come from the agents' documentation; Codex loads project hooks only for a trusted project. Known gaps, listed in the module header: `cp`, `mv`, `perl -i`, other editor tools and variables that disable other hook managers. Open: `update` adds the configuration back for an agent whose folder exists even when a project removed it on purpose; A2 decides with the other agents.
 
+### A1.1 The end-of-turn reminder under concurrent calls
+- Status: todo
+- Depends on: A1
+- Plan: [A-agents.md](../plan/A-agents.md#a1-the-agent-hook-core-claude-code-and-codex)
+- Evidence: —
+- Notes: CI on Linux with Node 20 (run 38681500663) failed "fires once when two configurations call it at the same time" in agents.test.mjs: three simultaneous stop hooks all stayed quiet, where exactly one should remind. Find the race in the session state (the start record or the change check), fix it, and make the test prove it repeatedly.
+
 ### A2 Cursor, Gemini CLI and GitHub Copilot
 - Status: todo
 - Depends on: A1
