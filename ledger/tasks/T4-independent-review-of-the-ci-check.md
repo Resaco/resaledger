@@ -1,6 +1,7 @@
 # T4 Independent review of the CI check
 
-- Status: todo
+- Status: doing
+- Lane: main
 - Depends on: C2, C3
 - Plan: [T-acceptance.md](../plan/T-acceptance.md#t4-independent-review-of-the-ci-check)
 - Evidence: —
