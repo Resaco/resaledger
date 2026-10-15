@@ -19,13 +19,15 @@ No dependencies, Node 20 or newer. Works with Claude Code, Codex, Cursor, Gemini
 
 ## Quickstart
 
-In a git repository with at least one commit:
+You set it up once, in a git repository with at least one commit, or ask your agent to:
 
 ```bash
 npx resaledger init
 ```
 
-`init` runs your project's checks once and keeps the ones that pass as gates, writes the configuration, a `ledger/` folder, the git hooks and a short protocol in `AGENTS.md`, and prints the command that commits the setup. Run that command. Then the daily loop:
+`init` runs your project's checks once and keeps the ones that pass as gates, writes the configuration, a `ledger/` folder, the git hooks and a short protocol in `AGENTS.md`, and prints the command that commits the setup. Run that command.
+
+After that, you mostly talk to your agents. Each one reads the protocol in `AGENTS.md` when its session starts, so when you say "do T1", it runs the daily loop itself, and the hooks hold it to it. The same commands work by hand:
 
 ```bash
 npx resaledger new "Store uploads on disk"            # creates task T1
@@ -36,11 +38,11 @@ npx resaledger verify                                 # your checks, then a stam
 npx resaledger handoff                                # may this session end?
 ```
 
-Agents follow the same loop from the block in `AGENTS.md`, and `npx resaledger work` shows where everything stands. [Working alone](docs/guides/solo.md) walks through it with real output, including three agents in three worktrees.
+`npx resaledger work` shows where everything stands, for you or for the next agent. [Working alone](docs/guides/solo.md) walks through it with real output, including three agents in three worktrees.
 
 <img alt="A terminal session: init finds the lint and test scripts and keeps them as gates; a commit with no task is refused; task T1 is created, claimed, committed and verified; two more tasks are claimed into their own worktrees, merged without a conflict and verified; handoff passes." src="docs/assets/demo/demo.gif">
 
-The demo is a real run, recorded with [VHS](https://github.com/charmbracelet/vhs) from [`docs/assets/demo/demo.tape`](docs/assets/demo/demo.tape).
+The demo shows the commands an agent runs in its terminal during a session, typed out here so you can follow them. It is a real run, recorded with [VHS](https://github.com/charmbracelet/vhs) from [`docs/assets/demo/demo.tape`](docs/assets/demo/demo.tape).
 
 ## How it works
 
