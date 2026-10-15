@@ -218,12 +218,29 @@ describe('isCode', () => {
     ['work/fixtures/anim.gif', false],
     ['work/fixtures/pic.webp', false],
     ['work/fixtures/pic.avif', false],
-    ['work/fixturesx/input.json', false],
+    ['work/fixturesx/input.csv', false],
     ['work/deep/data/x.csv', true],
     ['work/deep/other.csv', false],
     ['workshop/tool.js', true],
     ['ledger/tasks/S1.md', false],
-    ['ledger/data.json', true]
+    ['ledger/data.json', true],
+    // A file in the workspace that code reads or runs is code, wherever it is (finding 8).
+    ['work/evidence/config.js', true],
+    ['work/evidence/settings.JSON', true],
+    ['work/evidence/run.sh', true],
+    ['work/notes/data.yaml', true],
+    ['work/fixturesx/input.json', true],
+    ['work/top.toml', true],
+    ['work/evidence/report.csv', false],
+    ['work/evidence/screen.svg', false],
+    // ... except a stamp, and anything under the record folders.
+    ['work/verified/0123456789abcdef.json', false],
+    ['work/verified/notes.json', true],
+    ['work/verified/nested/0123456789abcdef.json', true],
+    ['work/tasks/S1-data.json', false],
+    ['work/decisions/schema.yml', false],
+    ['work/log/run.sh', false],
+    ['work/plan/model.ts', false]
   ]
   for (const [path, expected] of table) {
     test(`${path} is ${expected ? '' : 'not '}code`, () => assert.equal(isCode(path, config), expected))
@@ -273,6 +290,10 @@ describe('fingerprint', () => {
     change('ledger/tasks/S3-serve.md', `${VALID['ledger/tasks/S3-serve.md']}\n## Notes\n\nMore.\n`, false)
     change('ledger/evidence/s1/output.txt', '15 of 15\n', false)
     change('README.md', '# Readme\n', false)
+    change('ledger/verified/0123456789abcdef.json', '{}\n', false)
+    // A workspace file that code reads is code (finding 8): adding it and changing it both count.
+    change('ledger/evidence/config.js', 'module.exports = { ok: true }\n', true)
+    change('ledger/evidence/config.js', 'module.exports = { ok: false }\n', true)
     // A file mode is part of the entry.
     r.git('update-index', '--chmod=+x', 'src/app.js')
     assert.notEqual(index(r), previous)

@@ -257,3 +257,60 @@ test('a records-only commit that names the task does not make its handoff stale'
   assert.equal(result.out, PASSED)
   assert.equal(result.status, 0)
 })
+
+/**
+ * A repository that adopts ResaLedger after `before` commits made without it: those commits
+ * change code and name no task. `setup(r)` runs after them, before the adoption commit.
+ */
+function adoptedRepository(before, setup = () => {}) {
+  const r = repository()
+  for (let index = 1; index <= before; index += 1) {
+    r.write('app.js', `console.log(${index})\n`)
+    committed(r.commit(`feat: version ${index}`))
+  }
+  setup(r)
+  for (const name of HOOK_NAMES) {
+    r.write(`.githooks/${name}`, renderHook(name, 'ledger'))
+    chmodSync(join(r.root, '.githooks', name), 0o755)
+  }
+  r.write('ledger/scripts/records.mjs', readFileSync(GUARD, 'utf8'))
+  r.write('.resaledger.json', `${JSON.stringify({ version: 2 }, null, 2)}\n`)
+  r.write('ledger/README.md', README)
+  committed(r.commit('chore: set up ResaLedger', 'Task: maintenance'))
+  committed(r.git('config', 'core.hooksPath', '.githooks'))
+  return r
+}
+
+const ADOPTED = '✔ handed off: records valid, no verify gates to pass, every task in progress has a current handoff note\n'
+
+test('adoption: the first handoff after ten commits made before ResaLedger, with no remote, passes', () => {
+  const r = adoptedRepository(10)
+  const result = handoff(r)
+  assert.equal(result.out, ADOPTED)
+  assert.equal(result.status, 0)
+})
+
+test('adoption: an unrecorded commit made after adopting is still found', () => {
+  const r = adoptedRepository(10)
+  r.write('app.js', 'console.log(11)\n')
+  committed(r.git('add', '-A'))
+  committed(r.git('commit', '-q', '--no-verify', '-m', 'feat: version 11'))
+  refused(
+    r,
+    `${short(r)}: "feat: version 11" changes code but names no task. Add a trailer line "Task: <id>" to the message body for the task it belongs to, or "Task: maintenance" for a change with no behaviour change`
+  )
+})
+
+test('adoption: an upstream older than the adoption commit does not reach the commits before it', () => {
+  let remote
+  const r = adoptedRepository(10, (r) => {
+    remote = r.remote()
+    committed(r.git('push', '-q', '-u', 'origin', 'HEAD~5:refs/heads/main'))
+    committed(r.git('branch', '-q', '--set-upstream-to', 'origin/main'))
+  })
+  assert.ok(remote)
+  assert.equal(r.git('rev-list', '--count', '@{upstream}..HEAD').out.trim(), '6')
+  const result = handoff(r)
+  assert.equal(result.out, ADOPTED)
+  assert.equal(result.status, 0)
+})

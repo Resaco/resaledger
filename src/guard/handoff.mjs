@@ -2,6 +2,7 @@
 // active, the tree is clean, the gates passed on this code, every task in progress has a current
 // handoff note, the unpushed commits are recorded and, in the team preset, the lane is pushed.
 import { spawnSync } from 'node:child_process'
+import { adoptionCommit, adoptionStart } from './adoption.mjs'
 import { loadConfig } from './config.mjs'
 import { stampPath, verifiedStamp } from './gates.mjs'
 import { hooksActive } from './githooks.mjs'
@@ -69,17 +70,28 @@ function handoffLaneStart(root, config, lane) {
 
 /**
  * The range of unpushed commits that handoff checks: from the upstream; else from the base
- * branch; else since the newest commit that added a stamp; else the last 50 commits.
- * `from` null means every ancestor of HEAD. The stamp for the code at HEAD, which this session
- * may just have committed, does not count: the range starts at the stamp before it.
+ * branch; else since the newest commit that added a stamp; else since the commit that added
+ * .resaledger.json; else the last 50 commits. No range reaches past the commit that added
+ * .resaledger.json, so the commits a project made before it adopted ResaLedger are never
+ * judged. `from` null means every ancestor of HEAD. The stamp for the code at HEAD, which
+ * this session may just have committed, does not count: the range starts at the stamp before it.
  */
 function handoffUnpushedRange(root, config, lane, currentStamp) {
+  const chosen = handoffChosenStart(root, config, lane, currentStamp)
+  const from = adoptionStart(root, chosen.from, 'HEAD')
+  return from === chosen.from ? chosen : { kind: 'adoption', from }
+}
+
+/** The start of the unpushed range before adoption bounds it: { kind, from }. */
+function handoffChosenStart(root, config, lane, currentStamp) {
   const start = handoffLaneStart(root, config, lane)
   if (start.kind !== 'none') return start
   const pathspec = [`${config.dir}/verified/`]
   if (currentStamp !== null) pathspec.push(`:(exclude)${currentStamp}`)
   const stamped = handoffGit(root, ['log', '-1', '--diff-filter=A', '--format=%H', 'HEAD', '--', ...pathspec])
   if (stamped.ok && stamped.out.trim() !== '') return { kind: 'stamp', from: stamped.out.trim() }
+  const adopted = adoptionCommit(root, 'HEAD')
+  if (adopted !== null) return { kind: 'adoption', from: adopted }
   return { kind: 'recent', from: handoffCommit(root, `HEAD~${HANDOFF_FALLBACK_COMMITS}`) }
 }
 

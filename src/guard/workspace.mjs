@@ -11,6 +11,10 @@ import { fail, repositoryRoot } from './util.mjs'
 
 const WORKSPACE_IMAGE = /\.(avif|gif|jpe?g|png|svg|webp)$/i
 const WORKSPACE_MARKDOWN = /\.(md|markdown)$/i
+// Files code reads or runs: inside the workspace they count as code, not as records (spec 5.10).
+const WORKSPACE_CODE = /\.(js|mjs|cjs|ts|tsx|jsx|json|ya?ml|sh|py|rb|go|rs|toml)$/i
+const WORKSPACE_STAMP = /^verified\/[0-9a-f]{16}\.json$/
+const WORKSPACE_RECORD_FOLDERS = ['tasks/', 'decisions/', 'log/', 'plan/']
 const WORKSPACE_HOOKS = '.githooks/'
 const WORKSPACE_MAX_BUFFER = 1024 * 1024 * 1024
 
@@ -224,8 +228,10 @@ export function checkWorkspace(workspace, reader, config) {
 
 /**
  * Whether a repository-relative path is code (spec 5.10): every file outside the workspace that
- * is not Markdown, plus the workspace's scripts/, the git hooks, the configuration and the
- * codePaths inside the workspace, except images there. Records and documentation are not code.
+ * is not Markdown, plus, inside the workspace, scripts/, the codePaths except images there, and
+ * every file with a code extension (such as .js, .json or .sh) other than a stamp in verified/
+ * or a file under tasks/, decisions/, log/ or plan/. Also the git hooks and the configuration.
+ * Records and documentation are not code.
  */
 export function isCode(path, config) {
   const key = workspaceKey(path)
@@ -234,7 +240,9 @@ export function isCode(path, config) {
   if (key.startsWith(workspace)) {
     const inside = key.slice(workspace.length)
     if (inside.startsWith('scripts/')) return true
-    return config.codePaths.some((codePath) => inside.startsWith(`${codePath}/`)) && !WORKSPACE_IMAGE.test(key)
+    if (config.codePaths.some((codePath) => inside.startsWith(`${codePath}/`))) return !WORKSPACE_IMAGE.test(key)
+    if (WORKSPACE_STAMP.test(inside) || WORKSPACE_RECORD_FOLDERS.some((folder) => inside.startsWith(folder))) return false
+    return WORKSPACE_CODE.test(key)
   }
   return !WORKSPACE_MARKDOWN.test(key)
 }

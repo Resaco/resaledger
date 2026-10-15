@@ -12,6 +12,7 @@ import { fingerprint, isCode, treeReader } from './workspace.mjs'
 const GATES_OUTPUT_LINES = 80
 const GATES_STAMP_VERSION = 1
 const GATES_SHOWN_PATHS = 5
+const GATES_STAMP_NAME = /^[0-9a-f]{16}\.json$/
 
 /**
  * Runs each command through the shell (sh, or cmd.exe on Windows) from the repository root,
@@ -133,6 +134,30 @@ function gatesUncommittedCode(root, config) {
 }
 
 /**
+ * The tracked code paths whose working-tree changes git hides: marked skip-worktree (tag S in
+ * `git ls-files -v`) or assume-unchanged (a lowercase tag). git status shows no change for them,
+ * so the gates could run on code that differs from the commit the stamp names.
+ */
+function gatesHiddenCode(root, config) {
+  const result = spawnSync('git', ['ls-files', '-v', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 })
+  if (result.error) throw result.error
+  if (result.status !== 0) fail(`git ls-files failed: ${result.stderr.trim()}`)
+  const paths = []
+  for (const record of result.stdout.split('\0')) {
+    if (record.length < 3) continue
+    const tag = record[0]
+    if ((tag === 'S' || (tag >= 'a' && tag <= 'z')) && isCode(record.slice(2), config)) paths.push(record.slice(2))
+  }
+  return [...new Set(paths)]
+}
+
+/** The first five paths, and how many more there are. */
+function gatesShown(paths) {
+  const shown = paths.slice(0, GATES_SHOWN_PATHS).join(', ')
+  return paths.length > GATES_SHOWN_PATHS ? `${shown} and ${paths.length - GATES_SHOWN_PATHS} more` : shown
+}
+
+/**
  * verify [--force]: runs the commit gates, then the verify gates, on the committed code and
  * writes the stamp for its fingerprint, deleting every other stamp. When the stamp already
  * exists with the same gates, runs nothing; --force runs the gates anyway.
@@ -158,9 +183,13 @@ export function verifyCommand(args = []) {
 
   const uncommitted = gatesUncommittedCode(root, config)
   if (uncommitted.length > 0) {
-    const shown = uncommitted.slice(0, GATES_SHOWN_PATHS).join(', ')
-    const more = uncommitted.length > GATES_SHOWN_PATHS ? ` and ${uncommitted.length - GATES_SHOWN_PATHS} more` : ''
-    fail(`uncommitted code: ${shown}${more}. Commit it first: the gates run on the committed code, and the stamp names it`)
+    fail(`uncommitted code: ${gatesShown(uncommitted)}. Commit it first: the gates run on the committed code, and the stamp names it`)
+  }
+  const hidden = gatesHiddenCode(root, config)
+  if (hidden.length > 0) {
+    fail(
+      `git hides working-tree changes to code: ${gatesShown(hidden)} ${hidden.length === 1 ? 'is' : 'are'} marked skip-worktree or assume-unchanged, so the gates could run on code the stamp does not name. Undo it with "git update-index --no-skip-worktree --no-assume-unchanged <path>" (or "git sparse-checkout disable" in a sparse checkout), commit any change it reveals, and run verify again`
+    )
   }
 
   let code
@@ -186,8 +215,17 @@ export function verifyCommand(args = []) {
   mkdirSync(folder, { recursive: true })
   const name = path.slice(path.lastIndexOf('/') + 1)
   writeFileSync(join(folder, name), gatesStampText(code, gates))
-  const pruned = readdirSync(folder).filter((entry) => entry.endsWith('.json') && entry !== name)
-  for (const entry of pruned) unlinkSync(join(folder, entry))
+  // Only regular files named like a stamp are stamps; anything else in verified/ is left alone.
+  const pruned = readdirSync(folder, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && GATES_STAMP_NAME.test(entry.name) && entry.name !== name)
+    .map((entry) => entry.name)
+  for (const entry of pruned) {
+    try {
+      unlinkSync(join(folder, entry))
+    } catch (error) {
+      fail(`wrote ${path}, but could not remove the old stamp ${config.dir}/verified/${entry} (${error.code ?? error.message}). Delete it yourself, then commit the stamps with the records`)
+    }
+  }
   const removed = pruned.length > 0 ? `, removed ${pruned.length} old stamp${pruned.length === 1 ? '' : 's'}` : ''
   console.log(`✔ all ${passed.length} gates passed: wrote ${path}${removed}. Commit it with the records.`)
 }
