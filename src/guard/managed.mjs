@@ -1,8 +1,9 @@
-// The files ResaLedger manages, as hashes: the guard, the git hooks and the AGENTS.md block.
+// The files ResaLedger manages, as hashes: the guard, the git hooks, the workflow and the AGENTS.md block.
 // `resaledger update` uses these to tell a released file from one changed by hand, and so does
 // the CI check (spec 10) when it judges a change to the guard or a hook.
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** The parts of a semantic version: { core: [major, minor, patch], pre: [...] }. */
@@ -70,4 +71,59 @@ export function releasedTable() {
     // A guard that cannot read itself knows only the earlier releases.
   }
   return table
+}
+
+/** Two released tables merged: { key: { version: hash } }, the second one's hashes added to the first's. */
+export function mergeReleased(first, second) {
+  const table = Object.fromEntries(Object.entries(first).map(([key, versions]) => [key, { ...versions }]))
+  for (const [key, versions] of Object.entries(second)) table[key] = { ...(table[key] ?? {}), ...versions }
+  return table
+}
+
+/** The text of a file in a folder, or null. */
+function managedRead(folder, ...parts) {
+  try {
+    return readFileSync(join(folder, ...parts), 'utf8')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The released hashes of an unpacked resaledger package (ci --release): { version, table }. The
+ * table holds the package's guard, hooks and workflow under its own version, and the earlier
+ * releases its templates/released.json records. Throws with the reason when the folder is not
+ * such a package.
+ */
+export function packageReleased(folder) {
+  let manifest = null
+  try {
+    manifest = JSON.parse(managedRead(folder, 'package.json') ?? 'null')
+  } catch {
+    // Reported below.
+  }
+  if (manifest?.name !== 'resaledger' || typeof manifest.version !== 'string') throw new Error(`${folder} is not a resaledger package: its package.json does not name resaledger and a version`)
+  const guard = managedRead(folder, 'dist', 'records.mjs')
+  if (guard === null) throw new Error(`${folder} is not a built resaledger package: dist/records.mjs is missing`)
+  const { version } = manifest
+  let recorded = {}
+  try {
+    recorded = JSON.parse(managedRead(folder, 'templates', 'released.json') ?? '{}')
+  } catch {
+    // A package without a readable table still names its own files.
+  }
+  const own = { guard: { [version]: contentHash(normalizeManaged(guard)) } }
+  const hooks = join(folder, 'templates', 'hooks')
+  for (const name of existsSync(hooks) ? readdirSync(hooks).sort() : []) {
+    const text = managedRead(hooks, name)
+    if (text !== null) own[`hooks/${name}`] = { [version]: contentHash(normalizeManaged(text)) }
+  }
+  const workflow = managedRead(folder, 'templates', 'workflow.yml')
+  if (workflow !== null) own.workflow = { [version]: contentHash(normalizeManaged(workflow)) }
+  const earlier = Object.fromEntries(
+    Object.entries(recorded ?? {})
+      .filter(([key, versions]) => /^(guard|hooks\/[\w-]+|workflow)$/.test(key) && versions && typeof versions === 'object')
+      .map(([key, versions]) => [key, Object.fromEntries(Object.entries(versions).filter(([, hash]) => typeof hash === 'string'))])
+  )
+  return { version, table: mergeReleased(earlier, own) }
 }

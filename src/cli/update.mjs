@@ -1,5 +1,5 @@
 // `resaledger update`: renews the files ResaLedger manages (spec section 15): the guard, the
-// git hooks or the guard's calls in a hook manager, the managed block in the root AGENTS.md,
+// git hooks or the guard's calls in a hook manager, the CI workflow, the managed block in the root AGENTS.md,
 // and ResaLedger's entries in the agents' hook configurations that hold them. A file is replaced only when its content is a released version of it, or this
 // package's own; a file changed by hand is shown and kept unless --force is given. The
 // README, the records, the configuration and the project's own text in AGENTS.md are never
@@ -8,6 +8,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path'
 import { AGENT_NAMES, agentConfigured } from '../guard/agents.mjs'
 import { CONFIG_FILE, parseConfig } from '../guard/config.mjs'
+import { ENFORCEMENT_WORKFLOW } from '../guard/enforcement.mjs'
 import { compareVersions, contentHash, normalizeManaged } from '../guard/managed.mjs'
 import { callMarker, detectHookManager, guardCall, HOOK_NAMES, integrateHookManager, renderHook } from './hooks.mjs'
 import { planAgentConfigs } from './init.mjs'
@@ -20,6 +21,7 @@ export const RELEASED_FILE = new URL('../../templates/released.json', import.met
 export const UPDATE_COMMIT_MESSAGE = [`chore: update ResaLedger to ${PACKAGE_VERSION}`, 'Task: maintenance']
 
 const TEMPLATES = new URL('../../templates/', import.meta.url)
+export const WORKFLOW_TEMPLATE = new URL('workflow.yml', TEMPLATES)
 const GUARD_VERSION_LINE = /^\/\/ ResaLedger (\S+)$/m
 const LEFTHOOK_FILES = ['lefthook.yml', 'lefthook.yaml', '.lefthook.yml', '.lefthook.yaml']
 
@@ -41,6 +43,8 @@ export function managedTemplates() {
   const templates = { guard: { text: readFileSync(BUILT_GUARD, 'utf8'), dirSensitive: false } }
   for (const name of HOOK_NAMES) templates[`hooks/${name}`] = { text: readFileSync(new URL(`hooks/${name}`, TEMPLATES), 'utf8'), dirSensitive: true }
   templates['agents-block'] = { text: readFileSync(new URL('agents-block.md', TEMPLATES), 'utf8'), dirSensitive: true }
+  // The workflow reads the folder from the configuration, so its text is the same in every repository.
+  templates.workflow = { text: readFileSync(WORKFLOW_TEMPLATE, 'utf8'), dirSensitive: false }
   return templates
 }
 
@@ -130,8 +134,9 @@ function readOrNull(root, path) {
 const NEWER = `run "npx resaledger@latest update" instead`
 
 /**
- * Plans the update without writing anything. options is { force, released, agents } (released
- * defaults to releasedHashes(); agents names agents whose configurations are added). Returns { refusals, dir, manager, files, writes (path →
+ * Plans the update without writing anything. options is { force, released, agents, workflow }
+ * (released defaults to releasedHashes(); agents names agents whose configurations are added;
+ * workflow adds the CI workflow, which the team preset has anyway). Returns { refusals, dir, manager, files, writes (path →
  * text), executable, integrate, instructions }. files holds { path, state, from?, note?,
  * diff? } with state 'replaced', 'restored', 'kept', 'manual' or 'unchanged'. Nothing may be
  * written when refusals is not empty.
@@ -263,7 +268,14 @@ export function planUpdate(root, options = {}) {
     } else plan.files.push({ path, state: 'unchanged', note: "the guard's calls" })
   }
 
-  // 3. The managed block in the root AGENTS.md; the rest of the file is the project's.
+  // 3. The CI workflow: renewed when it is there, restored in the team preset, added with --workflow.
+  const installedWorkflow = readOrNull(root, ENFORCEMENT_WORKFLOW)
+  if (installedWorkflow !== null || config.preset === 'team' || options.workflow) {
+    const workflow = readFileSync(WORKFLOW_TEMPLATE, 'utf8')
+    judgeFile(ENFORCEMENT_WORKFLOW, 'workflow', installedWorkflow, workflow, null, () => workflow)
+  }
+
+  // 4. The managed block in the root AGENTS.md; the rest of the file is the project's.
   const agentsPath = realRelative(root, 'AGENTS.md')
   const block = agentsBlock(dir)
   if (agentsPath === null) {
@@ -286,7 +298,7 @@ export function planUpdate(root, options = {}) {
     }
   }
 
-  // 4. ResaLedger's entries in the agents' hook configurations; the other entries are the project's.
+  // 5. ResaLedger's entries in the agents' hook configurations; the other entries are the project's.
   // Only configurations that hold ResaLedger's entries are renewed: one a project deleted stays
   // deleted, and "update --agents <names>" adds one.
   const agents = AGENT_NAMES.filter((agent) => agentConfigured(root, agent) || (options.agents ?? []).includes(agent))

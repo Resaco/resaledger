@@ -1,10 +1,25 @@
 # C3 Output, workflow and templates
 
-- Status: todo
+- Status: done
+- Lane: c3-ci-output
 - Depends on: C1
 - Plan: [C-ci.md](../plan/C-ci.md#c3-output-workflow-and-templates)
-- Evidence: —
+- Evidence: `node scripts/test.mjs` on the lane: 913 of 913 on Node 22.23.3 and 20.20.2; on Node 24.18.0, 912 of 913 under a load average near 30, the one failure the timing test in [ids.test.mjs](../../test/ids.test.mjs) ("50 branches ... within the time budget"), which passed when rerun alone. The 28 tests in [ci-output.test.mjs](../../test/ci-output.test.mjs) cover the summary and the comment rendered from [fixtures](../../test/fixtures/ci/pull-request.json) (a golden [Markdown file](../../test/fixtures/ci/pull-request.md)); the comment against a local `node:http` server set through `GITHUB_API_URL` (created, then updated in place by PATCH, a 500 and an unreachable API that print one warning and leave the result alone, no comment from a fork, without a token or on a push); `--release` with an unpacked package at 9.9.9 that turns a failing guard update into a listed one; `--only-base-pushes`; the workflow template parsed by a small reader in the test and compared with Ruby's YAML parser (no `pull_request_target`, read-only permissions plus `pull-requests: write`, `fetch-depth: 0`); its shell step run with bash in real repositories with a fake `npm` (release fetched, registry unreachable, guard and folder from the base); init in both presets and update with `--workflow`. Not verified: a live GitHub Actions run and a real `npm pack` from the registry.
 
 ## Notes
 
 From C2: let the workflow fetch the package version the head's guard names (`npm pack resaledger@<version>`) and give `ci` that guard, whose released table (its own hash and every earlier release) then counts as known, so an update to a real release passes without a decision. The workflow is the trust anchor already, protected by CODEOWNERS, and npm provenance ties the package to the release; a CI system without registry access falls back to a decision. Add the shipped workflow template to `released.json`.
+
+What was built:
+- `src/guard/report.mjs`: the plain text (moved out of `ci.mjs`), the Markdown for the job summary and the comment, `writeSummary` and `postComment`, which lists the comments, finds the one that starts with `<!-- resaledger:ci -->`, and PATCHes it, else POSTs one, with Node's `fetch` and a 10 s timeout. `ciCommand` is async now: it prints, writes the summary (also when the check cannot run), comments, then sets the exit code.
+- `ci --release <folder>`: `packageReleased` in `managed.mjs` hashes the unpacked package's `dist/records.mjs`, `templates/hooks/*` and `templates/workflow.yml` under its version and adds the entries of its `templates/released.json`; a folder that is not a built `resaledger` package stops the check.
+- `ci --only-base-pushes`: a push to a branch other than the base or a protected one passes with a "Not checked" note. The workflow cannot filter pushes by a branch only the configuration names, so it triggers on every push and passes this flag. Without the flag, a push is checked as in C1.
+- `templates/workflow.yml`: `pull_request` and `push`; `contents: read` at the top, `pull-requests: write` on the job; checkout of the head with `fetch-depth: 0` and `persist-credentials: false`; one shell step that reads `dir` from the base's `.resaledger.json` (validated), takes the base's guard with `git show`, and, when the head's guard names another version, runs `npm pack --ignore-scripts resaledger@<version>` in a temporary folder and passes `--release`. Event values reach the script only through `env`.
+- The workflow is managed like the hooks: the bundle embeds this version's workflow hash, `release-hashes.mjs` records `workflow`, `update` renews it when present, restores it in the team preset and adds it with `update --workflow`. Its text holds no folder name, so it is hashed without a dir: the enforcement check now passes `dir: null` for it (C2 passed the head's dir, which would have broken the hash for a dir such as `actions`).
+- init in the team preset writes the workflow (refusing a foreign file of that name) and `.github/pull_request_template.md`, unless a pull request template exists in any place GitHub reads one; then it warns and keeps it. It prints the CODEOWNERS lines from `templates/codeowners` as a next step. Solo prints `npx resaledger update --workflow` as an optional step; a flag on update was simpler than one on init, which refuses to run twice.
+
+Choices for the lead to record:
+- CODEOWNERS is printed by init in the team preset, from `templates/codeowners`, which D2's team guide can quote; init writes no CODEOWNERS file, because the owners' handles are the project's.
+- `--only-base-pushes`, and the workflow triggering on every push, as above.
+- The workflow is hashed without a workspace folder (`dir: null` in the enforcement check).
+- The Markdown escapes `<` in titles and evidence, so a record cannot hide text or forge the comment's marker; commands are code spans.

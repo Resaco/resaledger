@@ -52,10 +52,15 @@ Commands:
   check     validate the records in the working tree
             (--index: the staged files; --rev <rev>: a commit;
             --range <from>..<to>: also that every commit names its task)
-  ci [--base <rev> --head <rev> [--lane <branch>]]
+  ci [--base <rev> --head <rev> [--lane <branch>]] [--release <folder>]
+     [--only-base-pushes]
             the CI check of a pull request or a push, read from the GitHub
             event; with --lane, a pull request from that lane, and without
-            it, a push of the commits from --base to --head
+            it, a push of the commits from --base to --head. It writes the
+            job summary and comments on the pull request when it can.
+            --release counts an unpacked resaledger package as released;
+            --only-base-pushes checks only pushes to the base or a
+            protected branch
   config    print the effective configuration
   gates     list the commit gates and the verify gates
   handoff   the end-of-session check: records, hooks, a clean tree, the

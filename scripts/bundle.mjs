@@ -15,7 +15,8 @@
 // - VERSION is defined by the bundler from package.json; modules use it and never declare it.
 // - RELEASED is defined by the bundler too: the hashes of the released guards, hooks and
 //   workflows from templates/released.json (or --released), without this version's guard, which
-//   cannot hold its own hash, and with this version's hooks. CI judges enforcement changes by it.
+//   cannot hold its own hash, and with this version's hooks and workflow. CI judges enforcement
+//   changes by it.
 //
 // --check builds into a temporary folder, validates the result and writes nothing else.
 import { spawnSync } from 'node:child_process'
@@ -208,7 +209,7 @@ function uniqueNames(modules) {
 /**
  * The table the guard embeds as RELEASED: { key: { version: hash } } for the guard, the hooks
  * and the workflow. This version's guard is left out, so a rebuild after release-hashes.mjs
- * records it gives the same bytes; this version's hooks are added from the templates.
+ * records it gives the same bytes; this version's hooks and workflow are added from the templates.
  */
 function embeddedReleased(file, version) {
   let table = {}
@@ -224,6 +225,8 @@ function embeddedReleased(file, version) {
     const key = `hooks/${name}`
     table[key] = { ...(table[key] ?? {}), [version]: contentHash(normalizeManaged(readFileSync(join(hooks, name), 'utf8'))) }
   }
+  const workflow = join(PACKAGE, 'templates', 'workflow.yml')
+  if (existsSync(workflow)) table.workflow = { ...(table.workflow ?? {}), [version]: contentHash(normalizeManaged(readFileSync(workflow, 'utf8'))) }
   const result = {}
   for (const key of Object.keys(table).sort()) {
     if (!RELEASED_KEYS.test(key)) continue
