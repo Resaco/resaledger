@@ -4,6 +4,28 @@ All notable changes to ResaLedger are recorded here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.0.0-rc.3] - 2026-10-16
+
+Git LFS support, found when a 0.x workspace in a repository that uses Git LFS was migrated: ResaLedger's managed `pre-push` took the place of the hook Git LFS writes, so a push would have sent LFS pointers without their objects.
+
+### Added
+
+- **The pre-push hook runs Git LFS's pre-push** where Git LFS is in use: `filter=lfs` in a `.gitattributes` file of the index or of a pushed commit, or in git's own attributes (`.git/info/attributes`, `core.attributesFile` or its default). It runs after the guard's own checks pass, with the same remote, URL and refs, so a refused push uploads nothing; without `git-lfs` the push is refused with Git LFS's advice. A repository without Git LFS runs nothing of it.
+- **`init` and `migrate` recognise the hooks Git LFS wrote into `.githooks/`.** They replace only Git LFS's `pre-push` and leave its other hooks alone; `migrate` prints `git lfs update --force` to bring Git LFS's hooks back after an undo. The solo and migration guides say what `git lfs install` prints in a clone, and why that is expected.
+
+### Changed
+
+- **`init` refuses a hook manager's `pre-push` that already runs `git lfs pre-push`**, which would read git's input before the guard; the lefthook and pre-commit snippets say the same.
+- **`init` and `migrate` refuse while an ignore rule hides a hook they must commit**, naming the rule. A hook folder that git already tracks under an ignored folder is committed with `git add -f`.
+
+### Fixed
+
+- **`migrate` refuses a dangling symlink in place of a Git LFS hook** instead of stopping with an error.
+
+### Known limits
+
+- The Git LFS path is tested on Linux and macOS, not on Windows.
+
 ## [1.0.0-rc.2] - 2026-10-16
 
 The second release candidate, with the fixes from the first installations of rc.1 in real repositories and the first migrations of 0.x workspaces.
@@ -70,6 +92,7 @@ The release candidate for ResaLedger 1.0.0, the first release under this name. I
 
 `npx resaledger migrate` converts an agent-ledger 0.1, 0.2 or 0.3 workspace in place. It refuses a dirty tree, builds everything in memory, checks that no line of the old records is lost, rewrites links into the old files, and never commits; it prints the commit command and the undo command (`git restore -- :/ && git clean -fd -- :/`). Merge or close open lanes first, or rebase them onto the migrated base afterwards: a task in progress takes the one open lane whose commits name it. The full mapping is in [section 14 of the specification](ledger/plan/spec.md#14-migration-from-0x).
 
-[Unreleased]: https://github.com/Resaco/resaledger/compare/v1.0.0-rc.2...HEAD
+[Unreleased]: https://github.com/Resaco/resaledger/compare/v1.0.0-rc.3...HEAD
+[1.0.0-rc.3]: https://github.com/Resaco/resaledger/compare/v1.0.0-rc.2...v1.0.0-rc.3
 [1.0.0-rc.2]: https://github.com/Resaco/resaledger/compare/v1.0.0-rc.1...v1.0.0-rc.2
 [1.0.0-rc.1]: https://github.com/Resaco/resaledger/releases/tag/v1.0.0-rc.1
