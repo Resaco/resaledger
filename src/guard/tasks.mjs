@@ -9,6 +9,8 @@ export const TASK_STATUSES = ['todo', 'doing', 'blocked', 'done', 'dropped']
 /** The field names spec 5.3 defines, spelled as they are written. */
 export const TASK_FIELDS = ['Status', 'Lane', 'Depends on', 'Plan', 'Evidence', 'Waiting for', 'Reason', 'Issue', 'Taken over from']
 
+// A stamp's path: <dir>/verified/<16 hex digits>.json (spec 5.7).
+const TASK_STAMP_PATH = /(^|\/)verified\/[0-9a-f]{16}\.json$/
 const TASK_SECTIONS = { plan: 'Plan', handoff: 'Handoff', notes: 'Notes' }
 const TASK_TITLE_MAX = 100
 const TASK_HANDOFF_MAX = 1500
@@ -248,6 +250,8 @@ export function validateTask(task, context) {
     if (link.path === '') continue
     const path = resolveLinkPath(task.file, link.path)
     if (path === null) report(link.line, `the link ${link.target} points outside the repository. Link to a file inside it`)
+    else if (TASK_STAMP_PATH.test(path))
+      report(link.line, `the link ${link.target} points to a stamp, which the next verify replaces, so the link would break. Name the stamp in backticks instead: \`${path.slice(path.lastIndexOf('/') + 1)}\``)
     else if (!context.exists(path)) report(link.line, `the link ${link.target} points to ${path}, which does not exist. Fix the path or add the file`)
     else if (link.anchor && path.endsWith('.md') && !(planField && link.line === planField.line)) {
       // The Plan link's anchor is checked above, with a hint; every other anchor here.

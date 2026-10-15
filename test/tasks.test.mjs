@@ -321,6 +321,14 @@ describe('validateTask: links', () => {
     assert.equal(problem.line, 7)
   })
 
+  test('refuses a link to a stamp, which the next verify replaces, and names the stamp to quote', () => {
+    fails(
+      FILE,
+      taskText('S4 Store projects', ['Status: done', 'Evidence: `npm test`, stamp [3f2a9c1e5b7d4a60.json](../verified/3f2a9c1e5b7d4a60.json)']),
+      /points to a stamp, which the next verify replaces, so the link would break\. Name the stamp in backticks instead: `3f2a9c1e5b7d4a60\.json`/
+    )
+  })
+
   test('refuses a link that climbs out of the repository', () => {
     fails(FILE, taskText('S4 Store projects', ['Status: todo'], '\n## Notes\n\n[x](../../../outside.md)\n'), /outside the repository/)
   })

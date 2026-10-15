@@ -21,6 +21,16 @@ function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 }
 
+/** A count and its noun: "1 task", "2 tasks"; many is the plural when it is not word + "s". */
+function plural(count, word, many = `${word}s`) {
+  return `${count} ${count === 1 ? word : many}`
+}
+
+/** The records counted, as "1 task, 2 decisions, 0 log entries". */
+function recordCounts(tasks, decisions, logs) {
+  return `${plural(tasks, 'task')}, ${plural(decisions, 'decision')}, ${plural(logs, 'log entry', 'log entries')}`
+}
+
 /** Prints the message to stderr and stops with exit code 1. */
 function fail(message) {
   console.error(`resaledger: ${message}`)
@@ -635,6 +645,17 @@ function parseFields(lines, start) {
   return { fields, end: index }
 }
 
+/** The "- Name: value" lines from line index start on, outside code blocks, as { name, line }. */
+function fieldLinesAfter(lines, start) {
+  const fenced = fencedLines(lines)
+  const found = []
+  for (let index = start; index < lines.length; index += 1) {
+    const field = fenced[index] ? null : lines[index].match(FIELD)
+    if (field) found.push({ name: field[1].trim(), line: index + 1 })
+  }
+  return found
+}
+
 /** Whether a field value means "empty": nothing, or a dash. */
 function isEmptyValue(value) {
   return EMPTY_VALUES.has(value.trim())
@@ -663,13 +684,16 @@ function isCalendarDate(value) {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
 }
 
-/** The first H1 of a text and the bullet fields straight after it, with a problem for each repeated field. */
+/**
+ * The first H1 of a text and the bullet fields straight after it, with a problem for each
+ * repeated field; later holds the "- Name: value" lines below the list's end.
+ */
 function titleAndFields(file, text) {
   const lines = splitLines(text)
   const title = headings(text).find((heading) => heading.level === 1)
   const problems = []
-  if (!title) return { title: null, titleLine: 0, fields: [], problems }
-  const { fields } = parseFields(lines, title.line)
+  if (!title) return { title: null, titleLine: 0, fields: [], later: [], problems }
+  const { fields, end } = parseFields(lines, title.line)
   const seen = new Set()
   for (const field of fields) {
     const key = field.name.toLowerCase()
@@ -678,7 +702,19 @@ function titleAndFields(file, text) {
     }
     seen.add(key)
   }
-  return { title: title.text, titleLine: title.line, fields, problems }
+  return { title: title.text, titleLine: title.line, fields, later: fieldLinesAfter(lines, end), problems }
+}
+
+/** A problem for each known field below the field list that the list lacks: it is read as text, not as a field. */
+function lateFieldProblems(record, known) {
+  const listed = new Set(record.fields.map((field) => field.name))
+  return record.later
+    .filter((field) => known.includes(field.name) && !listed.has(field.name))
+    .map((field) => ({
+      file: record.file,
+      line: field.line,
+      message: `"- ${field.name}:" is below the field list, so it is read as text, not as a field; move it up into the list after the heading, with no blank line before it`
+    }))
 }
 
 /** The first field with exactly this name, or undefined. */
@@ -757,6 +793,7 @@ function validateDecision(decision, context) {
   }
 
   problems.push(...recordFieldNameProblems(decision, DECISION_FIELDS))
+  problems.push(...lateFieldProblems(decision, DECISION_FIELDS))
   problems.push(...datedFileProblems(file, 'decisions', dateValue, '2026-10-14-bullet-fields.md'))
   return problems
 }
@@ -897,6 +934,8 @@ const TASK_STATUSES = ['todo', 'doing', 'blocked', 'done', 'dropped']
 /** The field names spec 5.3 defines, spelled as they are written. */
 const TASK_FIELDS = ['Status', 'Lane', 'Depends on', 'Plan', 'Evidence', 'Waiting for', 'Reason', 'Issue', 'Taken over from']
 
+// A stamp's path: <dir>/verified/<16 hex digits>.json (spec 5.7).
+const TASK_STAMP_PATH = /(^|\/)verified\/[0-9a-f]{16}\.json$/
 const TASK_SECTIONS = { plan: 'Plan', handoff: 'Handoff', notes: 'Notes' }
 const TASK_TITLE_MAX = 100
 const TASK_HANDOFF_MAX = 1500
@@ -1136,6 +1175,8 @@ function validateTask(task, context) {
     if (link.path === '') continue
     const path = resolveLinkPath(task.file, link.path)
     if (path === null) report(link.line, `the link ${link.target} points outside the repository. Link to a file inside it`)
+    else if (TASK_STAMP_PATH.test(path))
+      report(link.line, `the link ${link.target} points to a stamp, which the next verify replaces, so the link would break. Name the stamp in backticks instead: \`${path.slice(path.lastIndexOf('/') + 1)}\``)
     else if (!context.exists(path)) report(link.line, `the link ${link.target} points to ${path}, which does not exist. Fix the path or add the file`)
     else if (link.anchor && path.endsWith('.md') && !(planField && link.line === planField.line)) {
       // The Plan link's anchor is checked above, with a hint; every other anchor here.
@@ -1548,7 +1589,7 @@ function checkCommand(args, rangeCheck = null) {
     for (const { file, line, message } of problems) console.error(`✖ ${file}${line ? `:${line}` : ''}: ${message}`)
     process.exit(1)
   }
-  console.log(`✔ records valid: ${workspace.tasks.length} tasks, ${workspace.decisions.length} decisions, ${workspace.logs.length} log entries`)
+  console.log(`✔ records valid: ${recordCounts(workspace.tasks.length, workspace.decisions.length, workspace.logs.length)}`)
   for (const { file, message } of unknownKeyNotices(config)) console.log(`! ${file}: ${message}`)
   if (range === null) return
   const lane = workspaceCurrentBranch(root)
@@ -1786,8 +1827,8 @@ function verifyCommand(args = []) {
       fail(`wrote ${path}, but could not remove the old stamp ${config.dir}/verified/${entry} (${error.code ?? error.message}). Delete it yourself, then commit the stamps with the records`)
     }
   }
-  const removed = pruned.length > 0 ? `, removed ${pruned.length} old stamp${pruned.length === 1 ? '' : 's'}` : ''
-  console.log(`✔ all ${passed.length} gates passed: wrote ${path}${removed}. Commit it with the records.`)
+  const removed = pruned.length > 0 ? `, removed ${plural(pruned.length, 'old stamp')}` : ''
+  console.log(`✔ ${passed.length === 1 ? 'the gate' : `all ${passed.length} gates`} passed: wrote ${path}${removed}. Commit it with the records.`)
 }
 
 /** gates: lists the commit gates and the verify gates. */
@@ -4697,7 +4738,7 @@ function agentsShellRefusal(text, context, folder = context.cwd) {
     for (const rule of context.config.agent.deny) {
       const regex = rule.regex ?? new RegExp(rule.pattern)
       if (texts.some((candidate) => regex.test(candidate))) {
-        return `this command matches the project's agent.deny rule ${JSON.stringify(rule.pattern)}${rule.reason ? `: ${rule.reason}` : ''}`
+        return `this command matches the project's agent.deny rule "${rule.pattern}"${rule.reason ? `: ${rule.reason}` : ''}`
       }
     }
   }
@@ -5951,9 +5992,15 @@ function fileChanges(beforeReader, afterReader, beforeDir, afterDir, released) {
  * names on its "- Weakens:" line: [{ file, by, ids }].
  */
 function addedDecisions(mergeBaseReader, headReader, dir) {
+  const folder = `${dir}/decisions`
+  // Directly in decisions/, as the records check reads them; a deeper file is no decision.
+  const direct = (reader) => reader.list(folder).filter((file) => /\.md$/i.test(file) && !file.slice(folder.length + 1).includes('/'))
+  // A decision the merge base has under any name, renamed or copied, is not added by this change.
+  const text = (reader, file) => (reader.read(file) ?? '').replace(/\r\n?/g, '\n').trim()
+  const known = new Set(direct(mergeBaseReader).map((file) => text(mergeBaseReader, file)))
   const decisions = []
-  for (const file of headReader.list(`${dir}/decisions`)) {
-    if (!/\.md$/i.test(file) || mergeBaseReader.read(file) !== null) continue
+  for (const file of direct(headReader)) {
+    if (mergeBaseReader.read(file) !== null || known.has(text(headReader, file))) continue
     const decision = parseDecision(file, headReader.read(file) ?? '')
     const field = (name) => decision.fields.find((item) => item.name === name)
     const weakens = field(ENFORCEMENT_FIELD)
@@ -6020,33 +6067,28 @@ function ciShort(commit) {
   return commit ? commit.slice(0, 7) : 'none'
 }
 
-/** A count and its noun: "1 task", "2 tasks". */
-function ciPlural(count, word, many = `${word}s`) {
-  return `${count} ${count === 1 ? word : many}`
-}
-
 /** The one-line summary of a check, after its ✔ or ✖. */
 function ciCheckLine(check, result) {
-  const problems = check.problems.length > 0 ? `${ciPlural(check.problems.length, 'problem')}; ` : ''
+  const problems = check.problems.length > 0 ? `${plural(check.problems.length, 'problem')}; ` : ''
   const note = check.note ? ` (${check.note})` : ''
   const { counts } = check
   switch (check.name) {
     case 'records':
-      return `records: ${problems}${ciPlural(counts.tasks, 'task')}, ${ciPlural(counts.decisions, 'decision')}, ${ciPlural(counts.logs, 'log entry', 'log entries')}${note}`
+      return `records: ${problems}${recordCounts(counts.tasks, counts.decisions, counts.logs)}${note}`
     case 'commits':
       if (check.skipped) return `commits: not checked${note}`
-      return `commits: ${problems}${ciPlural(counts.commits, 'commit')} ${result.event === 'push' ? 'pushed' : 'from the merge base to the head'}${note}`
+      return `commits: ${problems}${plural(counts.commits, 'commit')} ${result.event === 'push' ? 'pushed' : 'from the merge base to the head'}${note}`
     case 'ownership':
-      return `ownership: ${problems}${ciPlural(counts.changed, 'task')} changed${note}`
+      return `ownership: ${problems}${plural(counts.changed, 'task')} changed${note}`
     case 'ids':
-      return `ids: ${problems}${ciPlural(counts.added, 'new id')}, against ${ciPlural(counts.branches, 'branch', 'branches')}${note}`
+      return `ids: ${problems}${plural(counts.added, 'new id')}, against ${plural(counts.branches, 'branch', 'branches')}${note}`
     case 'moved':
       return `tasks moved: ${counts.moved}`
     case 'enforcement': {
       if (check.skipped) return `enforcement: not compared (${check.note})`
       if (counts.changes === 0) return 'enforcement: unchanged'
-      const undecided = check.problems.length > 0 ? `${ciPlural(check.problems.length, 'weakening change')} no decision names; ` : ''
-      return `enforcement: ${undecided}${ciPlural(counts.changes, 'change')}, ${counts.weakening} weakening`
+      const undecided = check.problems.length > 0 ? `${plural(check.problems.length, 'weakening change')} no decision names; ` : ''
+      return `enforcement: ${undecided}${plural(counts.changes, 'change')}, ${counts.weakening} weakening`
     }
     case 'gates': {
       if (check.skipped) return `gates: none${note}`
@@ -6079,12 +6121,14 @@ function ciProblemLine({ file, line, message }) {
   return `${file ? `${file}${line ? `:${line}` : ''}: ` : ''}${message}`
 }
 
+// The commit the rules came from, by rules.from: a pull request's base or head, a push's commits.
+const CI_RULES_SOURCES = { base: 'base', head: 'head', before: 'commit before the push', after: 'last pushed commit' }
+
 /** Where the rules came from, as a sentence. */
 function ciRulesLine(result) {
   const { rules, release } = result
-  const from = rules.adds
-    ? `This change adds ResaLedger, so it is judged by its own rules, from the ${rules.from} ${ciShort(rules.commit)}.`
-    : `Rules from the ${rules.from} ${ciShort(rules.commit)}.`
+  const source = `the ${CI_RULES_SOURCES[rules.from] ?? rules.from} ${ciShort(rules.commit)}`
+  const from = rules.adds ? `This change adds ResaLedger, so it is judged by its own rules, from ${source}.` : `Rules from ${source}.`
   return release ? `${from} ResaLedger ${release.version} counts as released (--release).` : from
 }
 
@@ -6137,7 +6181,7 @@ function ciMarkdownCode(text) {
 function ciMarkdownTitle(result) {
   const what = result.event === 'push' ? `push${result.ref ? ` to ${result.ref.replace(/^refs\/heads\//, '')}` : ''}` : 'this pull request'
   const failed = result.checks.filter((check) => !check.ok).length
-  const verdict = result.skipped ? 'not checked' : failed === 0 ? '✔ passed' : `✖ ${ciPlural(failed, 'check')} failed`
+  const verdict = result.skipped ? 'not checked' : failed === 0 ? '✔ passed' : `✖ ${plural(failed, 'check')} failed`
   return `### ResaLedger · ${ciMarkdownText(what)} · ${verdict}`
 }
 
@@ -6146,7 +6190,7 @@ function ciCommitsSummary(result) {
   const check = result.checks.find(({ name }) => name === 'commits')
   if (!check) return null
   if (check.skipped) return `**Commits:** not checked${check.note ? ` (${ciMarkdownText(check.note)})` : ''}`
-  const verdict = check.ok ? 'all pass' : ciPlural(check.problems.length, 'problem')
+  const verdict = check.ok ? 'all pass' : plural(check.problems.length, 'problem')
   return `**Commits:** ${check.counts.commits} checked, ${verdict}`
 }
 
@@ -6402,6 +6446,24 @@ function ciCommitsCheck(root, from, to, config, lane, skipGitHubMerges, note) {
   return { name: 'commits', ok: problems.length === 0, problems, counts: { commits }, note }
 }
 
+/**
+ * The decisions and log entries the merge base has and the head lacks, as problems: they are
+ * only ever added (spec 6.2), and a renamed one would also pass for a new decision.
+ */
+function ciRemovedRecords(root, mergeBase, head, config) {
+  const before = treeReader({ kind: 'commit', rev: mergeBase, root })
+  const after = treeReader({ kind: 'commit', rev: head, root })
+  const problems = []
+  for (const [folder, kind] of [['decisions', 'decision'], ['log', 'log entry']]) {
+    const prefix = `${config.dir}/${folder}/`
+    for (const file of before.list(`${config.dir}/${folder}`)) {
+      if (!/\.md$/i.test(file) || file.slice(prefix.length).includes('/') || after.exists(file)) continue
+      problems.push({ file, line: 0, message: `this ${kind} is deleted or renamed, but the merge base has it. Decisions and log entries are only added: restore it${kind === 'decision' ? ', and supersede it with a new decision' : ''}` })
+    }
+  }
+  return problems
+}
+
 /** The text of a task's Evidence field, or null. */
 function ciEvidence(task) {
   if (!task.evidence) return null
@@ -6522,6 +6584,7 @@ function ciPullRequest(root, options) {
     accepted: [baseTasks],
     baseName: config.base
   })
+  ownership.push(...ciRemovedRecords(root, mergeBase, head, config))
   const changed = [...headTasks].filter(([id, { text }]) => mergeBaseTasks.get(id)?.text !== text).length
   checks.push({ name: 'ownership', ok: ownership.length === 0, problems: ownership, counts: { changed }, note: null })
   checks.push(ciIdsCheck(root, config, { mergeBaseTasks, headTasks, baseTasks, base, head, lane, fork: options.fork }))
@@ -7244,10 +7307,11 @@ function createRecord(kind, title) {
   if (kind === 'decision') {
     const path = createDatedPath(root, config, 'decisions', title, 'decision')
     const author = createAuthorName()
-    createWrite(root, path, `# ${title}\n\n- Date: ${createToday()}\n- Decided by: ${author ?? CREATE_PLACEHOLDER}\n- Status: accepted\n\n`)
+    // The file ends on the field list, so that a field appended at once, such as Weakens, joins it.
+    createWrite(root, path, `# ${title}\n\n- Date: ${createToday()}\n- Decided by: ${author ?? CREATE_PLACEHOLDER}\n- Status: accepted\n`)
     console.log(`✔ created ${path}`)
     const missing = author ? '' : ' Fill in "Decided by" too: git has no user.name here.'
-    console.log(`Next: write what was decided and why below the fields.${missing} Then run ${guard} check.`)
+    console.log(`Next: add any more fields, such as "- Weakens: <id>", straight below the list, then a blank line and what was decided and why.${missing} Then run ${guard} check.`)
     return
   }
   const path = createDatedPath(root, config, 'log', title, 'entry')
