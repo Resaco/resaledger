@@ -1,0 +1,6 @@
+# 2026-10-15 · The review of the CI check fixed, the docs, the demo
+
+- Lane: main
+- Tasks: T4, T4.1, T4.2, T4.3, T4.4, T4.5, T4.6, T4.7, D1, D2, D3, D4, L1, L2, R1.1, V1.1, M4.2, W4.1, I3.1, C1.1
+
+A second model reviewed the CI check (T4) and reproduced fifteen findings. The blocker: a branch that deleted `.resaledger.json` and added it again moved the adoption start past its own commits, so unrecorded code passed `ci`, `handoff` and pre-push; a start that has the configuration is now never moved. The four major findings and ten minor ones were fixed in lanes: the gates run without the token, decisions count by their text, ownership is checked against the holding lane's branch, a moved workspace is read in its own folder, the lane rule follows merges, and double claims fail. The format reference, the guides, the repository's own files, the README and a terminal demo recorded from a real run were written; testing the guides found real gaps (a lane open during the migration, claims in other worktrees, unknown configuration keys, stamps linked from evidence), each fixed as its own task. The Windows failures turned out to be 8.3 short names in the runner's temporary folder. 1020 tests pass on Node 24, 22 and 20.
