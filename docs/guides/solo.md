@@ -195,7 +195,7 @@ The stamp stays valid when you commit only records, because records are not code
 
 ## Three agents in three worktrees
 
-Each agent gets its own lane: a branch in its own worktree. Lanes never edit the same task file, so their records merge without conflicts. You do not switch presets for this.
+Each agent gets its own lane: a branch in its own worktree. Lanes never edit the same task file, so their records merge without conflicts. The pre-commit hook refuses a commit that changes a task another worktree has claimed, even before that claim is committed. You do not switch presets for this.
 
 Plan three tasks and commit the plans:
 
