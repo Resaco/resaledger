@@ -30,6 +30,9 @@ const EMPTY_VALUES = new Set(['', '—', '–', '-'])
 const MARKDOWN = /\.(md|markdown)$/i
 const LEGACY_FIELD = /^- ([A-Z][\p{L}]*(?: [\p{L}]+)*):(?:[ \t]+(.*))?$/u
 const DATE = /^\d{4}-\d{2}-\d{2}$/
+// "Blocked on the owner: …", "Waits for the owner." and the like, at the start of a 0.x note or of
+// a sentence in it: what a blocked task waits for, which 1.0 records in its own field.
+const WAITING_PHRASE = /(?:^|[.;]\s+)(?:waits? (?:for|on)|waiting (?:for|on)|blocked (?:on|by))\s*:?\s+(?:the\s+)?([^.:;,()\n]{1,60}?)\s*(?=[.:;,(]|$)/i
 
 export const COMMIT_COMMAND = 'git add -A && git commit -m "chore: migrate to ResaLedger 1.0" -m "Task: maintenance"'
 // Root pathspecs, so that the undo is whole when it is run from a subfolder.
@@ -111,6 +114,15 @@ function trimBlankLines(lines) {
 
 function isEmptyLegacyValue(value) {
   return EMPTY_VALUES.has(String(value ?? '').trim())
+}
+
+/** What a 0.x blocked task waits for, from the first "Waits for …" or "Blocked on …" phrase in its notes, or null. */
+function waitingFromNotes(lines) {
+  for (const line of lines) {
+    const match = WAITING_PHRASE.exec(line)
+    if (match) return match[1].trim()
+  }
+  return null
 }
 
 /** Today's date in the local time zone, as YYYY-MM-DD. */
@@ -416,7 +428,7 @@ export function planMigration(root, options = {}) {
     renames: [],
     executable: new Set(),
     logEntry: null,
-    report: { created: [], changed: [], deleted: [], renamed: [], warnings: [], links: [], unmappedKeys: [], counts: {} },
+    report: { created: [], changed: [], deleted: [], renamed: [], warnings: [], links: [], waiting: [], unmappedKeys: [], counts: {} },
     problems: [],
     refusals: []
   }
@@ -487,6 +499,10 @@ export function planMigration(root, options = {}) {
       if (at !== -1) extra.splice(at, 1)
     }
     const doing = task.fields.Status === 'doing'
+    const notes = [
+      ...(isEmptyLegacyValue(task.fields.Notes) ? [] : [task.fields.Notes]),
+      ...attached.filter((item) => item.name === 'Notes').map((item) => item.line.trim())
+    ]
     const out = [`# ${task.id} ${task.title}`.trimEnd(), '']
     for (const [name, value] of Object.entries(task.fields)) {
       if (name === 'Notes') continue
@@ -496,11 +512,15 @@ export function planMigration(root, options = {}) {
         if (lane) out.push(`- Lane: ${lane}`)
         else plan.report.warnings.push(`${task.id} is doing, and HEAD is detached, so it has no lane; add "- Lane: <branch>" to its task file`)
       }
+      // 1.0 asks a blocked task what it waits for; 0.x said it in the notes, which stay as they are.
+      if (name === 'Status' && value === 'blocked' && !('Waiting for' in task.fields)) {
+        const waiting = waitingFromNotes(notes)
+        if (waiting) {
+          out.push(`- Waiting for: ${waiting}`)
+          plan.report.waiting.push({ id: task.id, value: waiting })
+        }
+      }
     }
-    const notes = [
-      ...(isEmptyLegacyValue(task.fields.Notes) ? [] : [task.fields.Notes]),
-      ...attached.filter((item) => item.name === 'Notes').map((item) => item.line.trim())
-    ]
     const rest = trimBlankLines(extra)
     if (doing) {
       if (notes.length > 0) out.push('', '## Handoff', '', ...notes)

@@ -88,6 +88,7 @@ export function migrateCommand(args) {
     rewritten.filter((link) => link.note).map((link) => `${link.file}:${link.line}: ${link.target} → ${link.rewritten} (${link.note})`)
   )
   list('Links that could not be rewritten', unresolved.map((link) => `${link.file}:${link.line}: ${link.target} (${link.unresolved})`))
+  list('Waiting for, taken from the notes of blocked tasks', report.waiting.map(({ id, value }) => `${id}: ${value}`))
   list('Warnings', report.warnings.map((warning) => `! ${warning}`))
   if (plan.problems.length > 0) {
     console.error(`\nProblems with the 1.0 rules in the result (${plan.problems.length}):`)

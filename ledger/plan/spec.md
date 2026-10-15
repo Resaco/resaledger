@@ -524,7 +524,7 @@ Distribution:
 
 | 0.x | 1.0 |
 | --- | --- |
-| `work/ledger.md`, one `### <id> <title>` per task | `tasks/<id>-<slug>.md` with the same fields. A `doing` task gets Lane (an existing `Lane:` field wins, else the current branch), and its Notes become its Handoff. Other fields are kept as they are. Lines under a task that are not its fields go, word for word, into its `## Notes`. |
+| `work/ledger.md`, one `### <id> <title>` per task | `tasks/<id>-<slug>.md` with the same fields. A `doing` task gets Lane (an existing `Lane:` field wins, else the current branch), and its Notes become its Handoff. Other fields are kept as they are. A `blocked` task gets Waiting for from the first "Waits for …" or "Blocked on …" phrase in its Notes, and `migrate` lists each one; with no such phrase, it is a 1.0 problem to fix. Lines under a task that are not its fields go, word for word, into its `## Notes`. |
 | The ledger's preamble and its `## <phase>` headings | Their text is kept word for word in the migration's log entry. |
 | `work/log.md`, one `## <date> · <title>` per entry | `log/<date>-<slug>.md` |
 | `DECISIONS.md`, one table row per decision | `decisions/<date>-<slug>.md`, with Decided by from the third column. Text before or after the table goes to the migration's log entry. |

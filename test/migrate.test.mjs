@@ -571,6 +571,29 @@ describe('other shapes of a 0.x repository', () => {
     assert.equal(existsSync(join(r.root, 'CLAUDE.md')), false)
   })
 
+  test('a blocked task gets Waiting for from its notes when they say it, and is a problem when they do not', () => {
+    const blocked = (id, title, notes) => `\n### ${id} ${title}\n- Status: blocked\n- Depends on: —\n- Plan: —\n- Evidence: —\n- Notes: ${notes}\n`
+    const ledger =
+      LEDGER +
+      blocked('B1', 'Waits in a later sentence', 'Live impact: none. Waits for the owner. The rest of the note stays.') +
+      blocked('B2', 'Blocked at the start', 'Blocked on research: what the API offers.') +
+      blocked('B3', 'Waiting with a colon', 'Waiting for: A2 to merge') +
+      blocked('B4', 'Says nothing', 'The deploy needs a decision first.')
+    const r = legacyRepository({ files: { [`${DIR}/work/ledger.md`]: ledger } })
+    const dry = migrate(r, '--dry-run')
+    assert.equal(dry.status, 1, dry.out)
+    assert.match(dry.out, /Waiting for, taken from the notes of blocked tasks \(3\):\n {2}B1: owner\n {2}B2: research\n {2}B3: A2 to merge\n/)
+    assert.match(dry.out, /B4-says-nothing\.md:3: a blocked task needs "- Waiting for: <who or what>"/)
+    assert.doesNotMatch(dry.out, /B[123]-[\w-]+\.md:\d+: a blocked task needs/)
+
+    const result = migrate(r, '--accept-problems')
+    assert.equal(result.status, 0, result.out)
+    assert.equal(
+      r.read(`${DIR}/tasks/B1-waits-in-a-later-sentence.md`),
+      '# B1 Waits in a later sentence\n\n- Status: blocked\n- Waiting for: owner\n- Depends on: —\n- Plan: —\n- Evidence: —\n\n## Notes\n\nLive impact: none. Waits for the owner. The rest of the note stays.\n'
+    )
+  })
+
   test('in a detached HEAD a doing task without a Lane is a problem, with a warning', () => {
     const r = legacyRepository()
     r.git('checkout', '-q', '--detach')
