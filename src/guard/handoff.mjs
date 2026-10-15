@@ -8,7 +8,7 @@ import { hooksActive } from './githooks.mjs'
 import { currentLane } from './lanes.mjs'
 import { checkRange, taskTrailers } from './range.mjs'
 import { fail, repositoryRoot } from './util.mjs'
-import { checkWorkspace, fingerprint, loadWorkspace, treeReader } from './workspace.mjs'
+import { checkWorkspace, fingerprint, isCode, loadWorkspace, treeReader } from './workspace.mjs'
 
 const HANDOFF_SHOWN_PATHS = 5
 const HANDOFF_NAMING_COMMITS = 200
@@ -95,6 +95,15 @@ function handoffNamingCommits(root, rangeArgs) {
     })
 }
 
+/**
+ * Whether a commit changes code. A records-only commit that names a task, such as a claim or a
+ * stamp, does not make its handoff stale: the note follows the work, not the bookkeeping.
+ */
+function handoffChangesCode(root, config, hash) {
+  const { ok, out } = handoffGit(root, ['diff-tree', '--no-commit-id', '--root', '-r', '--name-only', '-z', hash])
+  return ok && out.split('\0').some((path) => path !== '' && isCode(path, config))
+}
+
 /** Problems with the handoff notes of the doing tasks this lane holds. */
 function handoffNoteProblems(root, config, lane, tasks, dirty) {
   const held = tasks.filter((task) => task.status === 'doing' && task.lane === lane && task.id)
@@ -115,7 +124,7 @@ function handoffNoteProblems(root, config, lane, tasks, dirty) {
       })
       continue
     }
-    const naming = commits.find((commit) => commit.ids.includes(task.id))
+    const naming = commits.find((commit) => commit.ids.includes(task.id) && handoffChangesCode(root, config, commit.hash))
     if (!naming || dirtyFiles.has(task.file)) continue
     const changed = handoffGit(root, ['log', '-1', '--format=%H', 'HEAD', '--', task.file])
     const fileCommit = changed.ok ? changed.out.trim() : ''

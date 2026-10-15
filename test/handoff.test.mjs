@@ -247,3 +247,11 @@ test('help lists handoff', () => {
   const r = workspace()
   assert.match(r.node('ledger/scripts/records.mjs', 'help').out, /\n {2}handoff {3}the end-of-session check/)
 })
+
+test('a records-only commit that names the task does not make its handoff stale', () => {
+  const r = verifiedSession()
+  commit(r, { 'ledger/log/2026-10-15-orders.md': '# 2026-10-15 · Orders\n\nStored the orders.\n' }, 'docs: log the orders work', 'Task: S1')
+  const result = handoff(r)
+  assert.equal(result.out, PASSED)
+  assert.equal(result.status, 0)
+})
