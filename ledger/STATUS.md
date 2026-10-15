@@ -8,7 +8,7 @@ Building. The foundation (F) and the record format (R) are done; the guarantees 
 
 ## Active work
 
-[M1](work/ledger.md#m1-reading-0x-workspaces), [H1](work/ledger.md#h1-pre-commit) and [V3](work/ledger.md#v3-handoff), with workers. [G2](work/ledger.md#g2-final-logo-and-cover): the finished identity waits for the owner's approval.
+[H1](work/ledger.md#h1-pre-commit), [V3](work/ledger.md#v3-handoff) and [M2](work/ledger.md#m2-converting-safely), with workers. [G2](work/ledger.md#g2-final-logo-and-cover): the finished identity waits for the owner's approval.
 
 ## Last verified
 
@@ -16,7 +16,7 @@ Building. The foundation (F) and the record format (R) are done; the guarantees 
 
 ## Next step
 
-Review M1, H1 and V3 when their workers report, then start H2 and I1; start F2 when a slot frees (the 0.x guard allows three tasks in progress).
+Review H1, V3 and M2 when their workers report, then start H2 and I1; start F2 when a slot frees (the 0.x guard allows three tasks in progress).
 
 ## Waiting for the owner
 

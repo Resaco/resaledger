@@ -524,23 +524,25 @@ Distribution:
 
 | 0.x | 1.0 |
 | --- | --- |
-| `work/ledger.md`, one `### <id> <title>` per task | `tasks/<id>-<slug>.md` with the same fields. A `doing` task gets Lane (the current branch), and its Notes become its Handoff. |
-| `## <phase>` headings in the ledger | Their text, if any, is kept in the migration's log entry. |
+| `work/ledger.md`, one `### <id> <title>` per task | `tasks/<id>-<slug>.md` with the same fields. A `doing` task gets Lane (an existing `Lane:` field wins, else the current branch), and its Notes become its Handoff. Other fields are kept as they are. Lines under a task that are not its fields go, word for word, into its `## Notes`. |
+| The ledger's preamble and its `## <phase>` headings | Their text is kept word for word in the migration's log entry. |
 | `work/log.md`, one `## <date> · <title>` per entry | `log/<date>-<slug>.md` |
-| `DECISIONS.md`, one table row per decision | `decisions/<date>-<slug>.md`, with Decided by from the third column |
+| `DECISIONS.md`, one table row per decision | `decisions/<date>-<slug>.md`, with Decided by from the third column. Text before or after the table goes to the migration's log entry. |
 | `STATUS.md` | Phase and Waiting for the owner go to the README under `## At migration`. The whole file is kept word for word in the migration's log entry. |
-| Workspace `README.md` | Stays; What is being built becomes Goal. |
-| `standards.md` | Its manual gates move to the README's Manual checks; the file is removed. |
-| Workspace `AGENTS.md` | Its Project rules move into the root `AGENTS.md`, above the managed block; the file is removed. |
+| Workspace `README.md` | Stays; What is being built becomes Goal. Its other sections stay as they are. |
+| `standards.md` | Its manual gates move to the README's Manual checks, and any section that the 0.x template did not have moves to the README under its own heading. The template's own sections are kept in the migration's log entry; the file is removed. |
+| Workspace `AGENTS.md` | Its Project rules, and any section the 0.x template did not have, move into the root `AGENTS.md`, above the managed block. The template's own sections are kept in the migration's log entry; the file is removed. |
 | `work/verified.json` | Removed. Run `verify`. |
 | `progress/` | Stays where it is, so links keep working. |
 | `plan/` | Unchanged. |
 | The `.gitattributes` union rules | Removed. |
-| `.agent-ledger.json` version 1 | `.resaledger.json` version 2. Gates, codePaths, aiAttribution, commitStyle and deny rules are kept; the preset is solo. |
+| `.agent-ledger.json` version 1 | `.resaledger.json` version 2. Gates, codePaths, aiAttribution, commitStyle and deny rules are kept; `branches.protected` becomes `protected`, `branches.pattern` becomes `branchPattern`, and `requirePushed` stays; the preset is solo. A key with no 1.0 meaning (such as `gates.skipPaths`) is reported and written into the migration's log entry. |
 | Guard, hooks, pointer blocks, Claude Code hook entries | Replaced by 1.0's. |
 | `mode: guard` | Refused, with an explanation: guard-only mode is not in 1.0 ([section 17](#17-not-in-10)). |
 
-**Links.** `work/ledger.md` and `tasks/` are both one folder deep, so plan and evidence links keep their paths. Links into the ledger (`work/ledger.md#s4-…`) and into `DECISIONS.md` are rewritten to the new files. Anything it cannot rewrite is listed.
+**Links.** `work/ledger.md` and `tasks/` are both one folder deep, so plan and evidence links keep their paths. Links into the ledger (`work/ledger.md#s4-…`), into the log (`work/log.md#2026-…`) and into `DECISIONS.md` are rewritten to the new files. Anything it cannot rewrite is listed.
+
+**Everything else in the workspace folder**, such as other Markdown files, design folders and images, stays where it is, untouched.
 
 **Safety on a repository it has never seen.**
 

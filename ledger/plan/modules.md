@@ -40,8 +40,10 @@ The guard is written as modules in `src/guard/` and bundled into one file ([F1](
 | `claim.mjs` | W4 | `claimCommand(args)` |
 | `changes.mjs` | W5 | `changesCommand(args)` |
 | `ci.mjs` | C1–C3 | `ciCommand(args)` and its helpers |
-| `agents.mjs` | A1, A2 | `hookCommand(agent, event)` and the input adapters |
+| `agents.mjs` | A1, A2 | `hookCommand(agent, event)` and the input adapters. The command line in every agent's configuration is `node <dir>/scripts/records.mjs hook <agent> <event>`, with `<agent>` one of `claude`, `codex`, `cursor`, `gemini`, `copilot` and `<event>` one of `session-start`, `pre-tool`, `stop` |
 | `cli/hooks.mjs` (package side) | H3 | `HOOK_NAMES`; `renderHook(name, dir)`; `detectHookManager(root)`; `integrateHookManager(root, manager, dir) → { changed, instructions }` |
+| `cli/legacy.mjs` (package side) | M1 | Pure readers of 0.x workspaces; `readLegacyWorkspace(root)`, the `parseLegacy…` parsers and `lostLegacyLines(text, lines)` |
+| `templates/agents-block.md` | M2, then A3 | The managed block in the root `AGENTS.md`, with `{{dir}}` filled in; `init`, `update` and `migrate` write it |
 | `main.mjs` | F1, then every command task | Parses arguments and calls the commands. It is the bundle's last module. |
 
 ## The workspace object
