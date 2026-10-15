@@ -64,3 +64,16 @@ Acceptance:
 - with reduced motion, a still frame explains the same thing;
 - the hygiene test passes;
 - the owner approves the motion.
+
+### G4 More README graphics
+
+Goal: the README shows who ResaLedger is for and why an agent cannot get past it, at a glance, in the same style as the cover and the animation.
+
+Design:
+- **Use cases,** as three cards in one image: one person with three agents in worktrees; a team with pull requests and CI as the judge; an operations repository where the work is content and data rather than code. Each card has a small lane drawing and two lines of text.
+- **Where a bad commit stops:** the four layers, `AGENTS.md`, the agent hooks, the git hooks and CI, stacked, with what each one stops.
+- Static SVG in a dark and a light file, paths only, with the grain as a still texture; the README keeps the same information as text.
+
+Acceptance:
+- the owner approves both images;
+- each file passes the same checks as the animation, apart from the animation itself.

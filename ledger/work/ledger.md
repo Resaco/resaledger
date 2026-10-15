@@ -54,7 +54,14 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Depends on: G2
 - Plan: [G-brand.md](../plan/G-brand.md#g3-animated-explanations-of-how-it-works)
 - Evidence: [how-it-works.test.mjs](../../test/how-it-works.test.mjs) passes on [the two files](../../docs/assets/how-it-works/how-it-works-dark.svg): each is under 75 KB, runs no script, loads nothing from outside and has a still frame for reduced motion. The lead stepped through the loop frame by frame in Chromium; the storyboard's six beats are there.
-- Notes: Waits for the owner: whether this one 11-second loop stays, or becomes three loops, one per promise, as the plan says; and a look at it in the README on GitHub after the next push, in Chrome, Firefox and Safari. The generator stays with the private brand files, as G2's tools do.
+- Notes: Waits for the owner to see it play in the README on GitHub. The owner chose this one loop over three on 15 October. The generator stays with the private brand files, as G2's tools do.
+
+### G4 More README graphics: use cases, and where a bad commit stops
+- Status: todo
+- Depends on: G2
+- Plan: [G-brand.md](../plan/G-brand.md#g4-more-readme-graphics)
+- Evidence: —
+- Notes: The owner asked for more graphics on 15 October, after a look at what popular repositories' READMEs share.
 
 ## F: Foundation
 
