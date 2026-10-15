@@ -13,7 +13,7 @@ import { callMarker, detectHookManager, guardCall, HOOK_NAMES, integrateHookMana
 import { planAgentConfigs } from './init.mjs'
 import { LEGACY_CONFIG_FILE } from './legacy.mjs'
 import { lineDiff } from './migrate.mjs'
-import { agentsBlock, BUILT_GUARD, HOOKS_FOLDER, MANAGED_END, MANAGED_START, realRelative } from './setup.mjs'
+import { agentsBlock, BUILT_GUARD, GITATTRIBUTES_FILE, HOOKS_EOL_RULE, HOOKS_FOLDER, MANAGED_END, MANAGED_START, realRelative, withHooksEolRule } from './setup.mjs'
 
 export const PACKAGE_VERSION = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version
 export const RELEASED_FILE = new URL('../../templates/released.json', import.meta.url)
@@ -254,6 +254,14 @@ export function planUpdate(root, options = {}) {
       const wanted = renderHook(name, dir)
       judgeFile(path, `hooks/${name}`, readOrNull(root, path), wanted, dir, () => wanted)
       plan.executable.add(path)
+    }
+    // An install from before the rule existed gets it; an equivalent rule of the project's counts.
+    const attributes = readOrNull(root, GITATTRIBUTES_FILE)
+    const withRule = withHooksEolRule(attributes)
+    if (withRule === attributes) plan.files.push({ path: GITATTRIBUTES_FILE, state: 'unchanged' })
+    else {
+      plan.files.push({ path: GITATTRIBUTES_FILE, state: attributes === null ? 'restored' : 'replaced', note: `the line "${HOOKS_EOL_RULE}" added` })
+      plan.writes.set(GITATTRIBUTES_FILE, withRule)
     }
   } else if (plan.manager === 'husky') {
     for (const name of HOOK_NAMES) {

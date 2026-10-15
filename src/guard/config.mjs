@@ -91,13 +91,18 @@ function jsonErrorLine(text, error) {
   return 0
 }
 
-/** A path inside the repository in its normal form, or null when it is absolute, empty or leaves it. */
-function normaliseInsidePath(value) {
-  if (value.includes('\\') || /^[A-Za-z]:/.test(value) || value.startsWith('/')) return null
-  const parts = value.split('/').filter((part) => part !== '' && part !== '.')
-  if (parts.length === 0 || parts.includes('..')) return null
-  return parts.join('/')
+// One folder name: letters, digits, '.', '_' and '-', not starting with '-'. The names are
+// pasted into hook scripts, YAML snippets and commands, so nothing in them may need quoting.
+const SAFE_SEGMENT = /^[A-Za-z0-9._][A-Za-z0-9._-]*$/
+
+/** True when value is a relative, '/'-separated folder path that is safe in a shell word, a YAML scalar and a path. */
+export function isSafeFolderPath(value) {
+  if (typeof value !== 'string' || value === '') return false
+  return value.split('/').every((segment) => SAFE_SEGMENT.test(segment) && segment !== '.' && segment !== '..')
 }
+
+/** The rule isSafeFolderPath checks, in words, for messages. */
+export const SAFE_FOLDER_RULE = "'/'-separated names of letters, digits, '.', '_' and '-', none of them empty, '.' or '..', and none starting with '-'"
 
 function isJsonObject(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -209,10 +214,9 @@ export function parseConfig(text) {
   if ('dir' in raw) {
     if (typeof raw.dir !== 'string') report(['dir'], `"dir" must be a string, such as "${DEFAULTS.dir}"`)
     else {
-      const normal = normaliseInsidePath(raw.dir)
-      if (normal === null)
-        report(['dir'], `"dir" must be a relative folder inside the repository, such as "${DEFAULTS.dir}", not ${JSON.stringify(raw.dir)}`)
-      else dir = normal
+      if (!isSafeFolderPath(raw.dir))
+        report(['dir'], `"dir" must be a relative folder inside the repository, such as "${DEFAULTS.dir}" or "docs/ledger", written as ${SAFE_FOLDER_RULE}; not ${JSON.stringify(raw.dir)}`)
+      else dir = raw.dir
     }
   }
 
@@ -245,9 +249,9 @@ export function parseConfig(text) {
   const aiAttribution = oneOf('aiAttribution', AI_ATTRIBUTIONS, DEFAULTS.aiAttribution)
 
   const codePaths = strings(raw, 'codePaths', ['codePaths'], (item, path) => {
-    const normal = normaliseInsidePath(item)
-    if (normal === null) report(path, `"${configKeyName(path)}" must be a relative folder inside the workspace, not ${JSON.stringify(item)}`)
-    return normal
+    if (isSafeFolderPath(item)) return item
+    report(path, `"${configKeyName(path)}" must be a relative folder inside the workspace, written as ${SAFE_FOLDER_RULE}; not ${JSON.stringify(item)}`)
+    return null
   })
 
   const gatesSection = section('gates')

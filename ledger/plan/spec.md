@@ -148,7 +148,7 @@ Every other key has a default. Keys marked † take their default from the prese
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `version` | required | The format version: 2 is 1.0. The guard refuses a version it does not know. |
-| `dir` | `"ledger"` | The workspace folder. |
+| `dir` | `"ledger"` | The workspace folder: a relative path of `/`-separated names made of letters, digits, `.`, `_` and `-`, with no empty, `.` or `..` name and none that starts with `-`. The hooks and commands paste it in, so nothing in it may need quoting. |
 | `preset` | `"solo"` | `solo` or `team`. |
 | `base` | `"main"` | The branch work merges into. |
 | `protected` † | solo `[]`, team `[base]` | Branches nobody commits or pushes to directly. |
@@ -159,7 +159,7 @@ Every other key has a default. Keys marked † take their default from the prese
 | `wip` | `3` | Tasks in progress per lane. |
 | `commitStyle` | `"free"` | `conventional` requires Conventional Commits headers. |
 | `aiAttribution` | `"allow"` | `forbid` rejects co-author and similar trailers that name a model or a vendor. |
-| `codePaths` | `[]` | Folders inside the workspace whose files count as code. |
+| `codePaths` | `[]` | Folders inside the workspace whose files count as code, written by the same rule as `dir`. |
 | `gates.commit` | `[]` | Fast checks. pre-commit runs them on every code commit. |
 | `gates.verify` | `[]` | Slow checks. `verify` runs them after the commit gates, and so does CI. |
 | `ci.runGates` | `true` | CI runs the gates. With `false`, CI only checks that the head carries a stamp for its own code. |
@@ -514,7 +514,10 @@ Rules taken from how the five agents behave today. Hooks stay fast, because the 
 2. **Finds the gates.** `package.json` scripts (lint, typecheck, test, build, with the package manager taken from the lockfile), `Makefile` targets, `pyproject.toml` (ruff, mypy, pytest, under `uv run` when there is a `uv.lock`), `Cargo.toml` (fmt, clippy, test) and `go.mod` (vet, test). Fast checks go to `commit` and slow ones to `verify`. It runs each one and keeps only those that pass; a failing check is reported, never added in a weaker form. `--no-run` skips the runs.
 3. **Finds the rest.** The agents in use, the commit style (Conventional Commits when most of the last 50 commits follow it or a commitlint configuration exists) and hook managers (husky, lefthook, pre-commit, simple-git-hooks). With a hook manager present, it adds the guard's calls there instead of setting `core.hooksPath`.
 4. **Asks only what it cannot infer**: solo or team (default solo, `--team`) and the goal in one sentence, or it leaves a marker. `--yes` takes the defaults, for agents running `init`.
-5. Writes the files ([5.1](#51-layout)), runs `check`, and prints what it did and the first command to run.
+5. Writes the files ([5.1](#51-layout)), runs `check`, and prints what it did and the first command to run. With the hooks in `.githooks/`, the root `.gitattributes` gets `.githooks/* text eol=lf`, so that Git for Windows does not check the hooks out with CRLF; the file's other lines stay, and an equivalent rule (such as `* text=auto eol=lf`) is enough. `update` adds the line to an install that lacks it.
+6. Prints the commit of the setup as commands to copy. When the current branch is protected, as the base is in the team preset, the hooks it has just installed refuse that commit, so the commands first create the branch `resaledger-setup`, commit there and push it, and the next step is a pull request into the protected branch. That first pull request is judged by its own rules ([section 10](#10-ci)).
+
+`--dir` is refused before anything is written unless it follows the rule for `dir` ([5.2](#52-configuration)).
 
 Distribution:
 
@@ -539,7 +542,7 @@ Distribution:
 | `work/verified.json` | Removed. Run `verify`. |
 | `progress/` | Stays where it is, so links keep working. |
 | `plan/` | Unchanged. |
-| The `.gitattributes` union rules | Removed. |
+| The `.gitattributes` union rules | Removed. The file gets `.githooks/* text eol=lf`, as `init` writes it. |
 | `.agent-ledger.json` version 1 | `.resaledger.json` version 2. Gates, codePaths, aiAttribution, commitStyle and deny rules are kept; `branches.protected` becomes `protected`, `branches.pattern` becomes `branchPattern`, and `requirePushed` stays; the preset is solo. A key with no 1.0 meaning (such as `gates.skipPaths`) is reported and written into the migration's log entry. |
 | Guard, hooks, pointer blocks, Claude Code hook entries | Replaced by 1.0's. |
 | `mode: guard` | Refused, with an explanation: guard-only mode is not in 1.0 ([section 17](#17-not-in-10)). |
@@ -554,8 +557,10 @@ Distribution:
 2. Parses everything and builds the new files in memory first.
 3. Validates the result with the 1.0 rules, and checks that every non-empty line of the old records appears in the new files, allowing for the known reshaping. Any loss stops it.
 4. Shows what it will do (`--dry-run` stops here), writes the files and runs `check`.
-5. Never commits. It prints the commit to make; `git restore .` undoes everything.
+5. Never commits. It prints the commit to make, on the branch `resaledger-setup` when the current branch is protected, as `init` does; `git restore .` undoes everything.
 6. Warns when it sees branches with record changes that are not merged: migrate when no lane is open.
+
+A 0.x `dir` that breaks the 1.0 rule for `dir` ([5.2](#52-configuration)) is refused: rename the folder first.
 
 It is to be tested on synthetic workspaces that cover every quirk of the real ones, and on copies of real 0.3 workspaces made in a temporary directory and never committed.
 

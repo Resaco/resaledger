@@ -5,13 +5,13 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline/promises'
-import { CONFIG_FILE, DEFAULTS, parseConfig } from '../guard/config.mjs'
+import { CONFIG_FILE, DEFAULTS, isSafeFolderPath, parseConfig } from '../guard/config.mjs'
 import { hooksActive } from '../guard/githooks.mjs'
 import { SETUP_MARKER } from '../guard/records.mjs'
 import { applyInit, commitCommand, initOptions, parseInitArgs, planInit, presetFromAnswer } from './init.mjs'
 import { LEGACY_CONFIG_FILE } from './legacy.mjs'
 import { applyMigration, COMMIT_COMMAND, planMigration, UNDO_COMMAND } from './migrate.mjs'
-import { ensureGuard, hooksNote, turnOnHooks } from './setup.mjs'
+import { currentBranch, ensureGuard, hooksNote, setupCommitSteps, turnOnHooks } from './setup.mjs'
 import { applyUpdate, planUpdate, UPDATE_COMMIT_MESSAGE } from './update.mjs'
 
 const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
@@ -134,7 +134,7 @@ export function migrateCommand(args) {
     console.error('core.hooksPath was not changed.')
     process.exit(1)
   }
-  const dir = JSON.parse(plan.writes.get('.resaledger.json')).dir
+  const dir = JSON.parse(plan.writes.get(CONFIG_FILE)).dir
   const hooks = turnOnHooks(root)
   const undoHooks = hooks.state === 'activated' ? ' && git config --unset core.hooksPath' : ''
   if (hooks.state !== 'active') console.log(`\n${hooksNote(hooks, dir)}`)
@@ -162,9 +162,11 @@ export function migrateCommand(args) {
     console.log(
       `\nBefore you commit, fix the ${plan.problems.length} problems listed above: the pre-commit hook refuses the commit until they are fixed. See them again with: node ${dir}/scripts/records.mjs check`
     )
+  const migrated = parseConfig(plan.writes.get(CONFIG_FILE)).config
+  const steps = migrated ? setupCommitSteps(currentBranch(root), migrated, COMMIT_COMMAND, 'the migration') : [`Commit the migration:\n       ${COMMIT_COMMAND}`]
   console.log(`
-Review the change, then commit it:
-  ${COMMIT_COMMAND}
+Review the change, then:
+${steps.map((step, index) => `  ${index + 1}. ${step}`).join('\n')}
 Then run "node ${dir}/scripts/records.mjs verify" to write the first stamp.
 To undo everything instead:
   ${UNDO_COMMAND}${undoHooks}`)
@@ -237,7 +239,7 @@ export async function initCommand(args) {
   const steps = []
   const sections = [...(plan.goalMarker ? ['Goal'] : []), 'Environments', 'Manual checks']
   steps.push(`Write the project's own text in ${dir}/README.md where a ${SETUP_MARKER} marker is (${sections.join(', ')}); "handoff" asks for it.`)
-  steps.push(`Commit the setup:\n       ${commitCommand(files)}`)
+  steps.push(...setupCommitSteps(currentBranch(root), plan.config, commitCommand(files)))
   steps.push(`Start working: node ${dir}/scripts/records.mjs work`)
   console.log(`\nNext steps:\n${steps.map((step, index) => `  ${index + 1}. ${step}`).join('\n')}`)
   if (check.status !== 0) process.exit(1)
@@ -321,7 +323,7 @@ export function guardCommand(argv) {
   else {
     try {
       const raw = JSON.parse(text)
-      if (typeof raw?.dir === 'string' && raw.dir !== '') dir = raw.dir
+      if (isSafeFolderPath(raw?.dir)) dir = raw.dir
     } catch {}
   }
   const guard = join(root, dir, 'scripts', 'records.mjs')

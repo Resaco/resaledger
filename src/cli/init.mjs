@@ -5,11 +5,11 @@ import { spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { AGENT_NAMES, agentConfigFile, agentConfigSnippet, detectAgents, mergeAgentConfig } from '../guard/agents.mjs'
-import { CONFIG_FILE, CONFIG_VERSION, DEFAULTS, parseConfig } from '../guard/config.mjs'
+import { CONFIG_FILE, CONFIG_VERSION, DEFAULTS, isSafeFolderPath, parseConfig, SAFE_FOLDER_RULE } from '../guard/config.mjs'
 import { SETUP_MARKER } from '../guard/records.mjs'
 import { detectHookManager, HOOK_NAMES, integrateHookManager, renderHook } from './hooks.mjs'
 import { LEGACY_CONFIG_FILE } from './legacy.mjs'
-import { agentsBlock, BUILT_GUARD, claudeFile, detectBase, hasAgentsImport, HOOKS_FOLDER, realRelative, turnOnHooks, withAgentsBlock } from './setup.mjs'
+import { agentsBlock, BUILT_GUARD, claudeFile, detectBase, GITATTRIBUTES_FILE, hasAgentsImport, HOOKS_FOLDER, realRelative, turnOnHooks, withAgentsBlock, withHooksEolRule } from './setup.mjs'
 
 const README_TEMPLATE = new URL('../../templates/readme.md', import.meta.url)
 export const GOAL_MARKER = `${SETUP_MARKER}: what is being built, for whom, and what counts as finished, in one or two sentences.`
@@ -37,6 +37,7 @@ export function parseInitArgs(args) {
     else if (arg === '--dir' || arg.startsWith('--dir=')) {
       const value = arg === '--dir' ? args[++index] : arg.slice('--dir='.length)
       if (value === undefined || value === '' || value.startsWith('--')) return { flags, error: '--dir needs a folder name, such as --dir records' }
+      if (!isSafeFolderPath(value)) return { flags, error: `--dir ${JSON.stringify(value)} is not a folder name ResaLedger accepts; use ${SAFE_FOLDER_RULE}, such as --dir records or --dir docs/ledger` }
       flags.dir = value
     } else if (arg === '--agents' || arg.startsWith('--agents=')) {
       const parsed = parseAgentsValue(arg === '--agents' ? args[++index] : arg.slice('--agents='.length))
@@ -175,7 +176,7 @@ export function planAgentConfigs(root, agents, dir, writes) {
 /**
  * Plans the setup without writing anything. options is { preset, dir, goal, guardPath, agents };
  * agents null finds the agents in use. Returns { refusals, writes (path → text), executable,
- * created, changed, managerFiles, manager, instructions, warnings, dir, preset, goalMarker, agents }. Nothing may be written when
+ * created, changed, managerFiles, manager, instructions, warnings, dir, preset, config, goalMarker, agents }. Nothing may be written when
  * refusals is not empty.
  */
 export function planInit(root, options = {}) {
@@ -191,6 +192,7 @@ export function planInit(root, options = {}) {
     warnings: [],
     dir: null,
     preset: options.preset ?? 'solo',
+    config: null,
     goalMarker: !options.goal,
     agents: []
   }
@@ -238,6 +240,7 @@ export function planInit(root, options = {}) {
       plan.writes.set(path, text)
       plan.executable.add(path)
     }
+    plan.writes.set(GITATTRIBUTES_FILE, withHooksEolRule(readText(root, GITATTRIBUTES_FILE)))
   }
   touched.push(...plan.managerFiles)
 
@@ -250,6 +253,7 @@ export function planInit(root, options = {}) {
   const configText = `${JSON.stringify(config, null, 2)}\n`
   const parsed = parseConfig(configText)
   if (!parsed.config) for (const problem of parsed.problems) refuse(`the planned ${CONFIG_FILE} is invalid, which is a bug in resaledger: ${problem.message}`)
+  plan.config = parsed.config
   plan.writes.set(CONFIG_FILE, configText)
   plan.writes.set(`${dir}/README.md`, renderReadme(projectName(root), options.goal ?? ''))
   if (existsSync(guardPath)) {

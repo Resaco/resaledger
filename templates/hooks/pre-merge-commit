@@ -22,4 +22,4 @@ if [ -z "$runtime" ]; then
   echo "resaledger: neither node nor bun was found, so this merge cannot be checked; install Node 20 or newer" >&2
   exit 1
 fi
-exec "$runtime" "{{dir}}/scripts/records.mjs" pre-merge-commit
+exec "$runtime" '{{dir}}/scripts/records.mjs' pre-merge-commit

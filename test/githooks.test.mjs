@@ -64,12 +64,14 @@ test('the rendered hooks carry the marker, call the guard in the workspace folde
       const lines = text.split('\n')
       assert.equal(lines[0], '#!/bin/sh')
       assert.equal(lines[1], `# resaledger: ${name} hook, managed by ResaLedger; do not edit`)
-      assert.match(text, new RegExp(`exec "\\$runtime" "${dir}/scripts/records\\.mjs" ${name}`))
+      // Single quotes: nothing in dir is expanded, even if a check upstream missed it.
+      assert.match(text, new RegExp(`exec "\\$runtime" '${dir}/scripts/records\\.mjs' ${name}`))
     }
   }
   assert.match(renderHook('commit-msg', 'ledger'), /commit-msg "\$1"\n$/)
   assert.match(renderHook('pre-push', 'ledger'), /pre-push "\$@"\n$/)
   assert.throws(() => renderHook('post-merge', 'ledger'), /unknown hook/)
+  assert.throws(() => renderHook('pre-commit', "x'; touch pwned; '"), /is not '\/'-separated names/)
 })
 
 test('the hook templates are POSIX sh without bash-only syntax', () => {

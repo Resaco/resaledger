@@ -78,7 +78,7 @@ test('explicit keys beat the preset', () => {
 test('every key can be set', () => {
   const config = valid({
     version: 2,
-    dir: './work/ledger/',
+    dir: 'work/ledger',
     preset: 'team',
     base: 'staging',
     branchPattern: '^(feat|fix)/',
@@ -86,7 +86,7 @@ test('every key can be set', () => {
     wip: 1,
     commitStyle: 'conventional',
     aiAttribution: 'forbid',
-    codePaths: ['scripts/', 'tools'],
+    codePaths: ['scripts', 'tools'],
     gates: { commit: ['npm run lint'], verify: ['npm test', 'npm run build'] },
     ci: { runGates: false },
     phases: ['S', 'API'],
@@ -155,15 +155,24 @@ test('a missing or unknown version stops with what to run', () => {
   assert.match(invalid({ version: '2' }).message, /this guard reads version 2/)
 })
 
-test('dir must stay inside the repository and is normalised', () => {
-  assert.equal(valid({ version: 2, dir: 'ledger/' }).dir, 'ledger')
-  assert.equal(valid({ version: 2, dir: './docs//ledger' }).dir, 'docs/ledger')
-  for (const dir of ['../ledger', 'docs/../../ledger', '/abs/ledger', 'C:/ledger', 'docs\\ledger', '', '.', './']) {
+test('dir must be a safe relative folder inside the repository', () => {
+  assert.equal(valid({ version: 2, dir: 'docs/ledger' }).dir, 'docs/ledger')
+  assert.equal(valid({ version: 2, dir: '.ledger/v1.0_x-y' }).dir, '.ledger/v1.0_x-y')
+  const unsafe = ['../ledger', 'docs/../../ledger', '/abs/ledger', 'C:/ledger', 'docs\\ledger', '', '.', './', './ledger', 'ledger/', 'docs//ledger', '-ledger', 'docs/-x']
+  const shell = ['x"; touch pwned; "', "x'y", 'a b', 'x$(id)', 'x`id`', 'x;y', 'x\ny', 'x:y', 'x#y', 'x*', 'läger']
+  for (const dir of [...unsafe, ...shell]) {
     const problem = invalid({ version: 2, dir })
     assert.equal(problem.line, 3, dir)
     assert.match(problem.message, /"dir" must be a relative folder inside the repository/, dir)
   }
   assert.match(invalid({ version: 2, dir: 5 }).message, /"dir" must be a string/)
+})
+
+test('codePaths follow the same rule as dir', () => {
+  assert.deepEqual(valid({ version: 2, codePaths: ['fixtures', 'deep/data_1.x'] }).codePaths, ['fixtures', 'deep/data_1.x'])
+  for (const item of ['../out', 'tools/', './tools', 'a b', 'x"y', '-x', 'src/**']) {
+    assert.match(invalid({ version: 2, codePaths: [item] }).message, /"codePaths\[0\]" must be a relative folder inside the workspace/, item)
+  }
 })
 
 test('a bad regular expression is a problem with its line', () => {
