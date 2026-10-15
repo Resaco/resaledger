@@ -1959,7 +1959,7 @@ function laneTasks(reader, dir) {
 /** A folder's real path for comparison, or null when it does not exist. */
 function lanesRealPath(path) {
   try {
-    return realpathSync(path)
+    return realpathSync.native(path)
   } catch {
     return null
   }
@@ -4522,7 +4522,7 @@ function agentsRealPath(path) {
     existing = parent
   }
   try {
-    return resolve(realpathSync(existing), ...rest)
+    return resolve(realpathSync.native(existing), ...rest)
   } catch {
     return path
   }
@@ -4928,11 +4928,33 @@ function agentHookEntries(agent, dir) {
   return entries
 }
 
+// Gemini CLI reads GEMINI.md unless context.fileName names other files, so the list keeps
+// GEMINI.md and adds AGENTS.md.
+const GEMINI_CONTEXT_FILES = ['AGENTS.md', 'GEMINI.md']
+
 /** The JSON to add by hand, for a file the merge cannot read. */
 function agentConfigSnippet(agent, dir) {
   const { version } = AGENT_CONFIGS[agent]
   const entries = agentHookEntries(agent, dir)
-  return JSON.stringify({ ...(version ? { version } : {}), hooks: Object.fromEntries(Object.entries(entries).map(([name, entry]) => [name, [entry]])) }, null, 2)
+  const context = agent === 'gemini' ? { context: { fileName: GEMINI_CONTEXT_FILES } } : {}
+  return JSON.stringify({ ...(version ? { version } : {}), ...context, hooks: Object.fromEntries(Object.entries(entries).map(([name, entry]) => [name, [entry]])) }, null, 2)
+}
+
+/**
+ * Makes Gemini CLI's context.fileName include AGENTS.md, keeping the other keys and the file
+ * names already listed. Changes settings in place; returns an error text, or null.
+ */
+function geminiWithAgentsFile(settings) {
+  if ('context' in settings && !agentsIsObject(settings.context)) return 'has a "context" value that is not an object'
+  const context = settings.context ?? {}
+  const names = context.fileName
+  if (names === undefined) context.fileName = [...GEMINI_CONTEXT_FILES]
+  else if (typeof names === 'string') context.fileName = names === 'AGENTS.md' ? names : [names, 'AGENTS.md']
+  else if (Array.isArray(names) && names.every((name) => typeof name === 'string')) {
+    if (!names.includes('AGENTS.md')) names.push('AGENTS.md')
+  } else return 'has a "context.fileName" value that is neither a file name nor a list of them'
+  settings.context = context
+  return null
 }
 
 /** An entry under an event without ResaLedger's handlers: { own, rest }, rest null when nothing is left. */
@@ -4947,7 +4969,8 @@ function agentsWithoutOwn(entry, flat) {
 /**
  * Merges ResaLedger's entries into an agent's configuration text (null when the file is
  * missing). Only handlers whose command is ResaLedger's are added, replaced or removed;
- * everything else keeps its meaning and its order. Returns { text, changed } or { error }.
+ * everything else keeps its meaning and its order. Gemini CLI's context.fileName also gets
+ * AGENTS.md. Returns { text, changed } or { error }.
  */
 function mergeAgentConfig(agent, text, dir) {
   const { flat, version } = AGENT_CONFIGS[agent]
@@ -4962,6 +4985,10 @@ function mergeAgentConfig(agent, text, dir) {
   if (!agentsIsObject(settings)) return { error: 'is not a JSON object' }
   const before = JSON.stringify(settings, null, 2)
   if ('hooks' in settings && !agentsIsObject(settings.hooks)) return { error: 'has a "hooks" value that is not an object' }
+  if (agent === 'gemini') {
+    const problem = geminiWithAgentsFile(settings)
+    if (problem) return { error: problem }
+  }
   const hooks = settings.hooks ?? {}
   const entries = agentHookEntries(agent, dir)
   for (const name of Object.keys(entries)) {
