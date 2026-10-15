@@ -133,7 +133,7 @@ export function parseConfig(text) {
   }
 
   // A key this guard does not know is kept, because a later 1.x release may have added it
-  // (spec 15); one within two letters of a known key is a typo, which would silently drop a rule.
+  // (spec 15); one close to a known key is a typo (util's likelyTypo), which would silently drop a rule.
   const unknown = {}
   const unknownKeys = (object, known, parent) => {
     for (const key of Object.keys(object)) {

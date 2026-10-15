@@ -275,10 +275,11 @@ test('editDistance counts insertions, deletions and substitutions', () => {
   assert.equal(editDistance('dir', 'dir'), 0)
   assert.equal(editDistance('kitten', 'sitting'), 3)
   assert.equal(editDistance('wip', 'wipe'), 1)
+  assert.equal(editDistance('Lnae', 'Lane'), 1)
   assert.equal(editDistance('ä', 'a'), 1)
 })
 
-test('likelyTypo finds the closest known name within two edits, ignoring case', () => {
+test('likelyTypo finds the closest known name, ignoring case', () => {
   const known = ['dir', 'base', 'branchPattern', 'branchPrefix']
   assert.equal(likelyTypo('DIR', known), 'dir')
   assert.equal(likelyTypo('bse', known), 'base')
@@ -286,6 +287,26 @@ test('likelyTypo finds the closest known name within two edits, ignoring case', 
   assert.equal(likelyTypo('branchPatern', known), 'branchPattern')
   assert.equal(likelyTypo('directory', known), null)
   assert.equal(likelyTypo('x', []), null)
+})
+
+test('likelyTypo allows two letters for a known name of six or more, one for a shorter one', () => {
+  // Spec 5.2 and 5.3: two letters are half of a four-letter name.
+  assert.equal(likelyTypo('Later', ['Lane']), null)
+  assert.equal(likelyTypo('id', ['dir']), null)
+  assert.equal(likelyTypo('Staus', ['Status']), 'Status')
+  assert.equal(likelyTypo('Stts', ['Status']), 'Status')
+  assert.equal(likelyTypo('Pln', ['Plan']), 'Plan')
+  assert.equal(likelyTypo('wipp', ['wip']), 'wip')
+  // A swap of two neighbouring letters is one letter of typo.
+  assert.equal(likelyTypo('Lnae', ['Lane']), 'Lane')
+  assert.equal(likelyTypo('Pl', ['Plan']), null)
+})
+
+test('a short unknown key is kept, with a notice, when it is two letters from a short known key', () => {
+  const { config, problems } = parseConfig(JSON.stringify({ version: 2, id: 'x' }))
+  assert.deepEqual(problems, [])
+  assert.deepEqual(config.unknown, { id: 'x' })
+  assert.match(invalid({ version: 2, wipp: 3 }).message, /unknown key "wipp"; did you mean "wip"\?/)
 })
 
 test('the config command prints the effective JSON, and fails on an invalid file', () => {

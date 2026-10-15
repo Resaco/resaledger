@@ -102,7 +102,7 @@ Every key except `version` has a default. Keys marked † take their default fro
 
 Further rules:
 
-- A key within two letters of a known key, at the top level, in `gates`, `ci` and `agent`, or in a deny rule, is refused as a typo, and the message names the known key. Any other unknown key is kept, with a notice from `check`, because a later 1.x release may have added it; `ci` lists a change to it without judging it.
+- A key close to a known key, within two letters of a known key of six letters or more or within one letter of a shorter one, at the top level, in `gates`, `ci` and `agent`, or in a deny rule, is refused as a typo, and the message names the known key. Any other unknown key is kept, with a notice from `check`, because a later 1.x release may have added it; `ci` lists a change to it without judging it.
 - `gates`, `ci` and `agent` must be objects. A key left out takes its default.
 - A preset only sets the defaults of `protected`, `requirePushed` and `claimPush`. A key written in the file wins over the preset.
 
@@ -234,7 +234,7 @@ Fields are a bullet list of `- Name: value` lines straight after the heading. Bl
 | `Taken over from` | no | Written by `claim --take`: the previous lane and commit. |
 
 - A known field may appear only once.
-- Other fields are allowed and kept. A field name within two letters of a known one, ignoring case, is refused as a likely typo: `Staus` or `Lanes`. Pick names for your own fields that are not that close.
+- Other fields are allowed and kept. A field name close to a known one, ignoring case, is refused as a likely typo: within two letters of a known name of six letters or more, such as `Staus` for `Status`, or within one letter of a shorter one, such as `Lanes` or `Lnae` for `Lane`. A swap of two neighbouring letters counts as one. A free field such as `Later` is not taken for `Lane`. Pick names for your own fields that are not that close.
 - Every relative link in the file must resolve inside the repository, and an anchor into a Markdown file must name one of its headings.
 
 ### Sections
