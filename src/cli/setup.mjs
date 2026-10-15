@@ -123,7 +123,7 @@ export function turnOnHooks(root) {
 
 /** The line that explains a hooks state that turnOnHooks did not change. */
 export function hooksNote(result, dir) {
-  const calls = `node ${dir}/scripts/records.mjs pre-commit, commit-msg "$1", pre-push "$@"`
+  const calls = `node ${dir}/scripts/records.mjs pre-commit, pre-merge-commit, commit-msg "$1", pre-push "$@"`
   if (result.state === 'activated') return `✔ git hooks turned on: core.hooksPath is ${HOOKS_FOLDER}`
   if (result.state === 'active') return `✔ git hooks are on: core.hooksPath is ${HOOKS_FOLDER}`
   if (result.state === 'manager') return `! ${result.manager} manages the git hooks here, so core.hooksPath was not changed; the guard runs from ${result.manager}'s hooks (${calls})`

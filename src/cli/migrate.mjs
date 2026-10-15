@@ -39,7 +39,7 @@ const WAITING_PHRASE = /(?:^|[.;]\s+)(?:waits? (?:for|on)|waiting (?:for|on)|blo
 
 // The hooks are staged as executable, so a migration committed on Windows still runs on Linux and macOS.
 export const COMMIT_COMMAND =
-  'git add -A && git add --chmod=+x .githooks/pre-commit .githooks/commit-msg .githooks/pre-push && git commit -m "chore: migrate to ResaLedger 1.0" -m "Task: maintenance"'
+  'git add -A && git add --chmod=+x .githooks/pre-commit .githooks/pre-merge-commit .githooks/commit-msg .githooks/pre-push && git commit -m "chore: migrate to ResaLedger 1.0" -m "Task: maintenance"'
 // Root pathspecs, so that the undo is whole when it is run from a subfolder.
 export const UNDO_COMMAND = 'git restore -- :/ && git clean -fd -- :/'
 

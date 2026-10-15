@@ -57,7 +57,7 @@ describe('a clean update', () => {
 
   test('finds every managed file unchanged and writes nothing', () => {
     assert.equal(result.status, 0, result.out)
-    assert.match(result.out, /Unchanged \(5\):\n {2}ledger\/scripts\/records\.mjs\n {2}\.githooks\/pre-commit\n {2}\.githooks\/commit-msg\n {2}\.githooks\/pre-push\n {2}AGENTS\.md \(managed block\)\n/)
+    assert.match(result.out, /Unchanged \(6\):\n {2}ledger\/scripts\/records\.mjs\n {2}\.githooks\/pre-commit\n {2}\.githooks\/pre-merge-commit\n {2}\.githooks\/commit-msg\n {2}\.githooks\/pre-push\n {2}AGENTS\.md \(managed block\)\n/)
     assert.match(result.out, /Nothing to change\./)
     assert.equal(r.git('status', '--porcelain').out, '')
   })
@@ -84,7 +84,7 @@ describe('an update from a released version', () => {
   test('the release script records the older version', () => {
     assert.equal(released.status, 0, released.out)
     const table = JSON.parse(readFileSync(join(old, 'templates', 'released.json'), 'utf8'))
-    assert.deepEqual(Object.keys(table).sort(), ['agents-block', 'guard', 'hooks/commit-msg', 'hooks/pre-commit', 'hooks/pre-push'])
+    assert.deepEqual(Object.keys(table).sort(), ['agents-block', 'guard', 'hooks/commit-msg', 'hooks/pre-commit', 'hooks/pre-merge-commit', 'hooks/pre-push'])
     for (const versions of Object.values(table)) assert.deepEqual(Object.keys(versions), ['0.9.0'])
     const check = run(old, process.execPath, [join(old, 'scripts', 'release-hashes.mjs'), '--check'])
     assert.equal(check.status, 0, check.out)
@@ -93,7 +93,7 @@ describe('an update from a released version', () => {
   test('replaces the files that are the older release and keeps the rest', () => {
     assert.equal(result.status, 0, result.out)
     assert.match(result.out, /Replaced \(3\):\n {2}ledger\/scripts\/records\.mjs \(was 0\.9\.0\)\n {2}\.githooks\/pre-commit \(was 0\.9\.0\)\n {2}AGENTS\.md \(managed block\) \(was 0\.9\.0\)\n/)
-    assert.match(result.out, /Unchanged \(2\):\n {2}\.githooks\/commit-msg\n {2}\.githooks\/pre-push\n/)
+    assert.match(result.out, /Unchanged \(3\):\n {2}\.githooks\/pre-merge-commit\n {2}\.githooks\/commit-msg\n {2}\.githooks\/pre-push\n/)
     assert.equal(r.read(GUARD), readFileSync(join(current, 'dist', 'records.mjs'), 'utf8'))
     assert.ok(executable(r, GUARD))
     assert.doesNotMatch(r.read('.githooks/pre-commit'), /an older wording/)
@@ -123,7 +123,7 @@ describe('an update from a released version', () => {
     assert.equal(committed.status, 0, committed.out)
     const again = r.node(join(current, 'bin', 'resaledger.mjs'), 'update')
     assert.equal(again.status, 0, again.out)
-    assert.match(again.out, /Unchanged \(5\)/)
+    assert.match(again.out, /Unchanged \(6\)/)
     assert.match(again.out, /Nothing to change\./)
   })
 })
@@ -199,6 +199,25 @@ describe('the guard\'s calls in husky\'s hooks', () => {
     assert.equal(forced.status, 0, forced.out)
     assert.match(forced.out, /Replaced \(1\):\n {2}\.husky\/commit-msg: the guard's call, changed by hand, replaced with --force\n/)
     assert.match(r.read('.husky/commit-msg'), /^# resaledger: commit-msg call, managed by ResaLedger; do not edit\nnode "ledger\/scripts\/records\.mjs" commit-msg "\$1"\n$/)
+  })
+})
+
+describe('a setup from before pre-merge-commit was shipped', () => {
+  const r = setUp()
+  r.git('rm', '-q', '.githooks/pre-merge-commit')
+  assert.equal(r.git('commit', '-q', '-m', 'chore: an older setup', '-m', 'Task: maintenance').status, 0)
+  const off = r.node(GUARD, 'hooks')
+  const result = update(r)
+
+  test('has its hooks reported as off, and update restores the hook', () => {
+    assert.equal(off.status, 1, off.out)
+    assert.match(off.out, /the git hooks are not active in this clone/)
+    assert.equal(result.status, 0, result.out)
+    assert.match(result.out, /Restored \(1\):\n {2}\.githooks\/pre-merge-commit\n/)
+    assert.equal(r.read('.githooks/pre-merge-commit'), readFileSync(join(PACKAGE, 'templates', 'hooks', 'pre-merge-commit'), 'utf8').replaceAll('{{dir}}', 'ledger'))
+    assert.ok(executable(r, '.githooks/pre-merge-commit'))
+    assert.match(printedCommit(result.out), /git add --chmod=\+x \.githooks\/pre-merge-commit/)
+    assert.equal(r.node(GUARD, 'hooks').status, 0)
   })
 })
 

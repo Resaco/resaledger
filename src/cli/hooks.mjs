@@ -2,8 +2,10 @@
 // adding the guard's calls to a hook manager that a repository already uses.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { GIT_HOOKS } from '../guard/githooks.mjs'
 
-export const HOOK_NAMES = ['pre-commit', 'commit-msg', 'pre-push']
+// pre-merge-commit runs pre-commit's checks for a merge that commits by itself, which runs no pre-commit.
+export const HOOK_NAMES = GIT_HOOKS
 
 const TEMPLATES = new URL('../../templates/hooks/', import.meta.url)
 const LEFTHOOK_FILES = ['lefthook.yml', 'lefthook.yaml', '.lefthook.yml', '.lefthook.yaml']
@@ -16,7 +18,7 @@ export function renderHook(name, dir) {
 }
 
 /** The arguments each hook passes on to the guard, in sh syntax. */
-const HOOK_ARGUMENTS = { 'pre-commit': '', 'commit-msg': ' "$1"', 'pre-push': ' "$@"' }
+const HOOK_ARGUMENTS = { 'pre-commit': '', 'pre-merge-commit': '', 'commit-msg': ' "$1"', 'pre-push': ' "$@"' }
 
 /** The shell command that calls the guard for one hook. */
 export function guardCall(name, dir) {
@@ -92,6 +94,10 @@ pre-commit:
   commands:
     resaledger:
       run: node "${dir}/scripts/records.mjs" pre-commit
+pre-merge-commit:
+  commands:
+    resaledger:
+      run: node "${dir}/scripts/records.mjs" pre-merge-commit
 commit-msg:
   commands:
     resaledger:
@@ -117,6 +123,13 @@ function preCommitSnippet(dir) {
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      - id: resaledger-pre-merge-commit
+        name: ResaLedger pre-merge-commit
+        entry: node "${dir}/scripts/records.mjs" pre-merge-commit
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-merge-commit]
       - id: resaledger-commit-msg
         name: ResaLedger commit-msg
         entry: node "${dir}/scripts/records.mjs" commit-msg
@@ -131,7 +144,7 @@ function preCommitSnippet(dir) {
         always_run: true
         stages: [pre-push]
 
-Then run "pre-commit install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push".`
+Then run "pre-commit install --hook-type pre-commit --hook-type pre-merge-commit --hook-type commit-msg --hook-type pre-push".`
 }
 
 /**

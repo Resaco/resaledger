@@ -92,15 +92,54 @@ test('a commit on a protected branch is refused', () => {
   refused(r.commit('docs: notes'), /"main" is a protected branch.*claim <id>.*pull request/)
 })
 
-test('a merge commit on a protected branch is refused', () => {
+test('a clean git merge onto a protected branch is refused by pre-merge-commit', () => {
   const r = workspace({ config: { preset: 'team' } })
+  const setup = r.git('rev-parse', 'HEAD').out.trim()
   r.git('checkout', '-q', '-b', 'lane')
-  r.write('notes.md', 'Notes.\n')
-  passed(r.commit('docs: notes'))
+  task(r, 'S1', 'Print the answer', { status: 'doing', lane: 'lane' })
+  r.write('x.js', 'x\n')
+  passed(r.commit('feat: x', 'Task: S1'))
   r.git('checkout', '-q', 'main')
+  // A merge that commits by itself runs pre-merge-commit, never pre-commit.
+  const noFf = r.git('merge', '-q', '--no-ff', '-m', 'Merge lane', 'lane')
+  refused(noFf, /"main" is a protected branch, so nothing is committed on it, not even a merge.*A fast-forward merge makes no commit, so no commit hook sees it; pre-push refuses it/)
+  assert.equal(r.git('rev-parse', 'HEAD').out.trim(), setup, 'no merge commit was made')
+  r.git('merge', '--abort')
+  // A true merge of diverged branches, with main moved on past the hooks.
+  r.write('notes.md', 'Notes.\n')
+  r.git('add', '-A')
+  assert.equal(r.git('commit', '-q', '--no-verify', '-m', 'docs: notes').status, 0)
+  const diverged = r.git('rev-parse', 'HEAD').out.trim()
+  refused(r.git('merge', '-q', '-m', 'Merge lane', 'lane'), /"main" is a protected branch/)
+  assert.equal(r.git('rev-parse', 'HEAD').out.trim(), diverged, 'no merge commit was made')
+  r.git('merge', '--abort')
+  // A merge stopped with --no-commit is committed through pre-commit.
   const merging = r.git('merge', '--no-ff', '--no-commit', 'lane')
   assert.equal(merging.status, 0, merging.out)
   refused(r.git('commit', '-q', '--no-edit'), /"main" is a protected branch/)
+})
+
+test('a clean merge onto a lane passes pre-merge-commit, and a bad merge is refused', () => {
+  const r = workspace({ tasks: [['S1', 'Bake bread', { status: 'doing', lane: 'other' }]] })
+  r.git('checkout', '-q', '-b', 'other')
+  task(r, 'S1', 'Bake bread', { status: 'doing', lane: 'other', note: 'Rye.' })
+  passed(r.commit('docs: S1 note'))
+  r.git('checkout', '-q', 'main')
+  r.git('checkout', '-q', '-b', 'mine')
+  r.write('notes.md', 'Notes.\n')
+  passed(r.commit('docs: notes'))
+  // The merged lane's own change to its task passes.
+  passed(r.git('merge', '-q', '--no-ff', '-m', 'Merge other', 'other'))
+  assert.equal(r.git('rev-list', '--count', '--merges', 'HEAD').out.trim(), '1')
+  // A merge that brings an invalid record is refused before git makes the commit.
+  r.git('checkout', '-q', '-b', 'broken', 'main')
+  r.write('ledger/tasks/S2.md', '# S2 Broken\n\n- Status: baking\n')
+  r.git('add', '-A')
+  assert.equal(r.git('commit', '-q', '--no-verify', '-m', 'docs: S2').status, 0)
+  r.git('checkout', '-q', 'mine')
+  const head = r.git('rev-parse', 'HEAD').out.trim()
+  refused(r.git('merge', '-q', '--no-ff', '-m', 'Merge broken', 'broken'), /ledger\/tasks\/S2\.md:3: .*baking/)
+  assert.equal(r.git('rev-parse', 'HEAD').out.trim(), head)
 })
 
 test('a branch name that fails branchPattern is refused; the base branch passes', () => {
@@ -277,4 +316,88 @@ test('a failing commit gate refuses the commit', () => {
   refused(result, /the commit gate "node -e "process\.exit\(3\)"" failed/)
   assert.match(result.out, /exited with 3/)
   assert.equal(r.git('rev-list', '--count', 'HEAD').out.trim(), '1')
+})
+
+test("a staged configuration does not lift the protection of its own commit; HEAD's rules judge it", () => {
+  const r = workspace({ config: { preset: 'team' } })
+  r.write('.resaledger.json', '{ "version": 2, "preset": "team", "protected": [], "gates": { "commit": [], "verify": [] } }\n')
+  r.write('evil.js', 'evil\n')
+  refused(r.commit('chore: loosen', 'Task: maintenance'), /"main" is a protected branch/)
+  r.write('.resaledger.json', '{ "version": 2, "preset": "solo" }\n')
+  refused(r.commit('chore: loosen', 'Task: maintenance'), /"main" is a protected branch/)
+  // Once the looser rules are committed (here past the hooks), they judge the next commit.
+  assert.equal(r.git('commit', '-q', '--no-verify', '-m', 'chore: loosen', '-m', 'Task: maintenance').status, 0)
+  r.write('notes.md', 'Notes.\n')
+  passed(r.commit('docs: notes'))
+})
+
+test("a staged branchPattern or base does not loosen HEAD's", () => {
+  const r = workspace({ config: { branchPattern: '^(feat|fix)/' } })
+  r.git('checkout', '-q', '-b', 'wip')
+  r.write('.resaledger.json', '{ "version": 2 }\n')
+  refused(r.commit('chore: drop the pattern', 'Task: maintenance'), /the branch name "wip" does not match branchPattern "\^\(feat\|fix\)\/"/)
+  r.write('.resaledger.json', '{ "version": 2, "base": "wip", "branchPattern": "^(feat|fix)/" }\n')
+  refused(r.commit('chore: move the base', 'Task: maintenance'), /the branch name "wip" does not match branchPattern/)
+})
+
+test("the commit gates are HEAD's: a staged configuration neither drops nor adds one", () => {
+  const marker = join(temporary(), 'gate-ran')
+  const gate = `node -e "require('fs').appendFileSync(process.argv[1], 'x')" "${marker.replace(/\\/g, '/')}"`
+  const r = workspace({ config: { gates: { commit: ['node -e "process.exit(3)"'] } } })
+  r.write('.resaledger.json', '{ "version": 2, "gates": { "commit": [] } }\n')
+  r.write('src/app.js', 'console.log(1)\n')
+  refused(r.commit('feat: app', 'Task: maintenance'), /the commit gate "node -e "process\.exit\(3\)"" failed/)
+  r.write('.resaledger.json', `${JSON.stringify({ version: 2, gates: { commit: [gate] } })}\n`)
+  refused(r.commit('feat: app', 'Task: maintenance'), /the commit gate "node -e "process\.exit\(3\)"" failed/)
+  assert.equal(existsSync(marker), false, 'the staged gate did not run')
+})
+
+test('the index still names the workspace folder, and a commit without HEAD takes all its rules from the index', () => {
+  const r = repository()
+  install(r, { preset: 'team' })
+  r.git('config', 'core.hooksPath', '.githooks')
+  refused(r.commit('chore: start', 'Task: maintenance'), /"main" is a protected branch/)
+  r.git('checkout', '-q', '-b', 'setup')
+  passed(r.commit('chore: start', 'Task: maintenance'))
+  // The staged configuration names another workspace folder; the records are checked there.
+  r.write('.resaledger.json', '{ "version": 2, "preset": "team", "dir": "records" }\n')
+  r.write('records/README.md', README)
+  r.write('records/tasks/S1.md', '# S1 Broken\n\n- Status: baking\n')
+  refused(r.commit('chore: move the workspace', 'Task: maintenance'), /records\/tasks\/S1\.md:3: .*baking/)
+})
+
+test("after merging another lane in, a task that lane holds is not deleted", () => {
+  const r = workspace()
+  r.git('checkout', '-q', '-b', 'lane-b')
+  task(r, 'S9', 'Other work', { status: 'doing', lane: 'lane-b' })
+  passed(r.commit('chore: claim S9'))
+  r.git('checkout', '-q', 'main')
+  r.git('checkout', '-q', '-b', 'lane-a')
+  r.write('ledger/decisions/2026-10-15-a-choice.md', '# A choice\n\n- Date: 2026-10-15\n- Decided by: Alex\n\nBecause.\n')
+  passed(r.commit('docs: decision'))
+  passed(r.git('merge', '-q', '--no-ff', '-m', 'Merge lane-b', 'lane-b'))
+  r.git('rm', '-q', 'ledger/tasks/S9.md')
+  refused(r.commit('chore: drop S9'), /ledger\/tasks\/S9\.md: task S9 is deleted or its id renamed, but lane "lane-b" holds it \(Status: doing\)/)
+  // The holding lane may still remove a task it created and never merged.
+  r.git('reset', '-q', '--hard')
+  r.git('checkout', '-q', 'lane-b')
+  r.git('rm', '-q', 'ledger/tasks/S9.md')
+  passed(r.commit('chore: drop S9'))
+})
+
+test('a pull that merges another lane\'s change to its task passes pre-merge-commit', () => {
+  const r = workspace({ tasks: [['S1', 'Bake bread', { status: 'doing', lane: 'other' }]] })
+  r.remote()
+  assert.equal(r.push('main').status, 0)
+  r.git('checkout', '-q', '-b', 'other')
+  task(r, 'S1', 'Bake bread', { status: 'doing', lane: 'other', note: 'Rye.' })
+  passed(r.commit('docs: S1 note'))
+  assert.equal(r.push('other').status, 0)
+  r.git('checkout', '-q', 'main')
+  r.git('checkout', '-q', '-b', 'mine')
+  r.write('notes.md', 'Notes.\n')
+  passed(r.commit('docs: notes'))
+  r.git('branch', '-q', '-D', 'other')
+  passed(r.git('pull', '-q', '--no-rebase', '--no-edit', 'origin', 'other'))
+  assert.equal(r.git('rev-list', '--count', '--merges', 'HEAD').out.trim(), '1')
 })
