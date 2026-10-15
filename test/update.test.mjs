@@ -48,7 +48,8 @@ function packageCopy(version, change = () => {}) {
 }
 
 const update = (r, ...args) => r.node(CLI, 'update', ...args)
-const executable = (r, path) => (statSync(join(r.root, path)).mode & 0o111) !== 0
+// Windows keeps no executable bit on disk; there the commit command stages the hooks as executable.
+const executable = (r, path) => process.platform === 'win32' || (statSync(join(r.root, path)).mode & 0o111) !== 0
 
 describe('a clean update', () => {
   const r = setUp()
@@ -114,7 +115,10 @@ describe('an update from a released version', () => {
 
   test('prints a commit command that commits through the new hooks, and a second run changes nothing', () => {
     const command = printedCommit(result.out)
-    assert.equal(command, `git add .githooks/pre-commit AGENTS.md ${GUARD} && git commit -m "chore: update ResaLedger to ${VERSION}" -m "Task: maintenance"`)
+    assert.equal(
+      command,
+      `git add AGENTS.md ${GUARD} && git add --chmod=+x .githooks/pre-commit && git commit -m "chore: update ResaLedger to ${VERSION}" -m "Task: maintenance"`
+    )
     const committed = r.run('sh', ['-c', command])
     assert.equal(committed.status, 0, committed.out)
     const again = r.node(join(current, 'bin', 'resaledger.mjs'), 'update')

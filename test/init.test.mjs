@@ -66,7 +66,7 @@ describe('a solo setup off a terminal', () => {
   test('the workspace holds the README and the guard, and no empty folder', () => {
     assert.deepEqual(readdirSync(join(r.root, 'ledger')).sort(), ['README.md', 'scripts'])
     assert.deepEqual(readdirSync(join(r.root, 'ledger', 'scripts')), ['records.mjs'])
-    assert.ok(statSync(join(r.root, 'ledger', 'scripts', 'records.mjs')).mode & 0o100)
+    if (process.platform !== 'win32') assert.ok(statSync(join(r.root, 'ledger', 'scripts', 'records.mjs')).mode & 0o100)
     const readme = r.read('ledger/README.md')
     assert.match(readme, /^# shop-front\n\n## Goal\n\nTODO\(resaledger\): what is being built/)
     assert.match(readme, /## Environments\n\nTODO\(resaledger\): /)
@@ -76,7 +76,7 @@ describe('a solo setup off a terminal', () => {
   test('writes the git hooks and turns them on', () => {
     for (const name of ['pre-commit', 'commit-msg', 'pre-push']) {
       assert.match(r.read(`.githooks/${name}`), new RegExp(`"ledger/scripts/records\\.mjs" ${name}`))
-      assert.ok(statSync(join(r.root, '.githooks', name)).mode & 0o100)
+      if (process.platform !== 'win32') assert.ok(statSync(join(r.root, '.githooks', name)).mode & 0o100)
     }
     assert.equal(r.git('config', '--get', 'core.hooksPath').out.trim(), '.githooks')
     assert.match(result.out, /✔ git hooks turned on/)
@@ -94,14 +94,20 @@ describe('a solo setup off a terminal', () => {
     assert.match(result.out, /Created \(7\):\n {2}\.githooks\/commit-msg\n {2}\.githooks\/pre-commit\n {2}\.githooks\/pre-push\n {2}\.resaledger\.json\n {2}AGENTS\.md\n {2}ledger\/README\.md\n {2}ledger\/scripts\/records\.mjs\n/)
     assert.match(result.out, /Write the project's own text in ledger\/README\.md .*\(Goal, Environments, Manual checks\)/)
     assert.match(result.out, /3\. Start working: node ledger\/scripts\/records\.mjs work/)
-    assert.equal(printedCommit(result.out), 'git add .githooks/commit-msg .githooks/pre-commit .githooks/pre-push .resaledger.json AGENTS.md ledger/README.md ledger/scripts/records.mjs && git commit -m "chore: set up ResaLedger" -m "Task: maintenance"')
+    assert.equal(
+      printedCommit(result.out),
+      'git add .resaledger.json AGENTS.md ledger/README.md ledger/scripts/records.mjs && git add --chmod=+x .githooks/commit-msg .githooks/pre-commit .githooks/pre-push && git commit -m "chore: set up ResaLedger" -m "Task: maintenance"'
+    )
   })
 
   test('the printed commit command commits through the installed hooks and leaves the tree clean', () => {
     r.write('notes.txt', 'unrelated work in progress\n')
     // The hooks run: the same files with a broken task file staged are refused by pre-commit.
     r.write('ledger/tasks/X1-broken.md', '# X1 Broken\n\n- Status: nonsense\n')
-    const files = printedCommit(result.out).replace(/^git add /, '').replace(/ && git commit .*$/, '').split(' ')
+    const files = printedCommit(result.out)
+      .split(' && ')
+      .filter((part) => part.startsWith('git add '))
+      .flatMap((part) => part.replace(/^git add (--chmod=\+x )?/, '').split(' '))
     assert.equal(r.git('add', ...files, 'ledger/tasks/X1-broken.md').status, 0)
     const refused = r.git('commit', '-q', '-m', 'chore: set up ResaLedger', '-m', 'Task: maintenance')
     assert.notEqual(refused.status, 0, refused.out)
@@ -112,6 +118,8 @@ describe('a solo setup off a terminal', () => {
     assert.equal(committed.status, 0, committed.out)
     assert.equal(r.git('status', '--porcelain').out, '?? notes.txt\n')
     assert.match(r.git('log', '-1', '--format=%B').out, /^chore: set up ResaLedger\n\nTask: maintenance\n/)
+    // The hooks are committed as executable on every platform, Windows included.
+    for (const name of ['pre-commit', 'commit-msg', 'pre-push']) assert.match(r.git('ls-files', '-s', `.githooks/${name}`).out, /^100755 /)
   })
 
   test('a second init is refused as already set up and changes nothing', () => {

@@ -34,7 +34,9 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/
 // a sentence in it: what a blocked task waits for, which 1.0 records in its own field.
 const WAITING_PHRASE = /(?:^|[.;]\s+)(?:waits? (?:for|on)|waiting (?:for|on)|blocked (?:on|by))\s*:?\s+(?:the\s+)?([^.:;,()\n]{1,60}?)\s*(?=[.:;,(]|$)/i
 
-export const COMMIT_COMMAND = 'git add -A && git commit -m "chore: migrate to ResaLedger 1.0" -m "Task: maintenance"'
+// The hooks are staged as executable, so a migration committed on Windows still runs on Linux and macOS.
+export const COMMIT_COMMAND =
+  'git add -A && git add --chmod=+x .githooks/pre-commit .githooks/commit-msg .githooks/pre-push && git commit -m "chore: migrate to ResaLedger 1.0" -m "Task: maintenance"'
 // Root pathspecs, so that the undo is whole when it is run from a subfolder.
 export const UNDO_COMMAND = 'git restore -- :/ && git clean -fd -- :/'
 

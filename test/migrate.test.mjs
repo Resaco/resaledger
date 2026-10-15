@@ -343,7 +343,10 @@ describe('migrate, from end to end', () => {
     assert.match(result.out, /4 tasks, 2 decisions, 2 log entries/)
     assert.match(result.out, /Rename \(1\):\n {2}\.agent-ledger\.json → \.resaledger\.json/)
     assert.match(result.out, /✔ records valid: 4 tasks, 2 decisions, 3 log entries/)
-    assert.match(result.out, /git add -A && git commit -m "chore: migrate to ResaLedger 1\.0" -m "Task: maintenance"/)
+    assert.match(
+      result.out,
+      /git add -A && git add --chmod=\+x \.githooks\/pre-commit \.githooks\/commit-msg \.githooks\/pre-push && git commit -m "chore: migrate to ResaLedger 1\.0" -m "Task: maintenance"/
+    )
     assert.match(result.out, /git restore -- :\/ && git clean -fd -- :\/ && git config --unset core\.hooksPath/)
     const check = r.node(`${DIR}/scripts/records.mjs`, 'check')
     assert.equal(check.status, 0, check.out)
@@ -351,7 +354,7 @@ describe('migrate, from end to end', () => {
     assert.equal(read(`${DIR}/scripts/records.mjs`), readFileSync(join(PACKAGE, 'dist', 'records.mjs'), 'utf8'))
     for (const name of Object.keys(HOOKS)) {
       assert.match(read(`.githooks/${name}`), /^# resaledger: .* hook, managed by ResaLedger; do not edit$/m)
-      assert.ok((lstatSync(join(r.root, '.githooks', name)).mode & 0o111) !== 0, name)
+      if (process.platform !== 'win32') assert.ok((lstatSync(join(r.root, '.githooks', name)).mode & 0o111) !== 0, name)
     }
   })
 

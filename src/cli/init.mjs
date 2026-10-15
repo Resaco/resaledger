@@ -282,5 +282,12 @@ function shellWord(path) {
 /** The command that commits exactly the given files, by default with init's message. */
 export function commitCommand(files, message = INIT_COMMIT_MESSAGE) {
   const [header, trailer] = message
-  return `git add ${files.map(shellWord).join(' ')} && git commit -m "${header}" -m "${trailer}"`
+  // The hooks are staged as executable: a file system without an executable bit, as on Windows,
+  // would otherwise commit them so that git on Linux and macOS skips them.
+  const hooks = files.filter((file) => file.startsWith(`${HOOKS_FOLDER}/`))
+  const others = files.filter((file) => !file.startsWith(`${HOOKS_FOLDER}/`))
+  const adds = []
+  if (others.length > 0) adds.push(`git add ${others.map(shellWord).join(' ')}`)
+  if (hooks.length > 0) adds.push(`git add --chmod=+x ${hooks.map(shellWord).join(' ')}`)
+  return `${adds.join(' && ')} && git commit -m "${header}" -m "${trailer}"`
 }
