@@ -1,9 +1,14 @@
 // The package's own command line: `npx resaledger <command>`.
-// init and update come in later tasks.
+// update comes in a later task.
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { applyMigration, BUILT_GUARD, COMMIT_COMMAND, PACKAGE_ROOT, planMigration, UNDO_COMMAND } from './migrate.mjs'
+import { createInterface } from 'node:readline/promises'
+import { hooksActive } from '../guard/githooks.mjs'
+import { SETUP_MARKER } from '../guard/records.mjs'
+import { applyInit, commitCommand, initOptions, parseInitArgs, planInit, presetFromAnswer } from './init.mjs'
+import { applyMigration, COMMIT_COMMAND, planMigration, UNDO_COMMAND } from './migrate.mjs'
+import { ensureGuard, hooksNote, turnOnHooks } from './setup.mjs'
 
 const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
 
@@ -12,6 +17,11 @@ const HELP = `ResaLedger ${version}
 Usage: npx resaledger <command>
 
 Commands:
+  init [--team] [--dir <name>] [--yes]
+            set ResaLedger up in this repository: the configuration, the
+            workspace README, the guard, the git hooks and the AGENTS.md block;
+            --team chooses the team preset, --dir names the workspace folder
+            (default ledger), --yes asks nothing and takes the defaults
   migrate [--dry-run] [--force] [--accept-problems]
             convert an agent-ledger 0.x workspace to ResaLedger 1.0 in place;
             --dry-run only shows the plan, --force replaces 0.x git hooks that
@@ -49,12 +59,9 @@ export function migrateCommand(args) {
     process.exit(1)
   }
   const root = top.stdout.trim()
-  if (!existsSync(BUILT_GUARD)) {
-    const built = spawnSync(process.execPath, [join(PACKAGE_ROOT, 'scripts', 'bundle.mjs')], { stdio: 'inherit' })
-    if (built.status !== 0) {
-      console.error('resaledger: the guard could not be built')
-      process.exit(1)
-    }
+  if (!ensureGuard()) {
+    console.error('resaledger: the guard could not be built')
+    process.exit(1)
   }
 
   const plan = planMigration(root, { force: options.force })
@@ -98,14 +105,9 @@ export function migrateCommand(args) {
 
   applyMigration(root, plan)
   const dir = JSON.parse(plan.writes.get('.resaledger.json')).dir
-  let hooksNote = ''
-  const hooksPath = spawnSync('git', ['config', '--get', 'core.hooksPath'], { cwd: root, encoding: 'utf8' }).stdout.trim()
-  if (hooksPath === '') {
-    spawnSync('git', ['config', '--local', 'core.hooksPath', '.githooks'], { cwd: root })
-    hooksNote = ' && git config --unset core.hooksPath'
-    console.log('\n✔ git hooks turned on: core.hooksPath is .githooks')
-  } else if (hooksPath.replace(/^\.\//, '').replace(/\/+$/, '') !== '.githooks')
-    console.log(`\n! core.hooksPath is "${hooksPath}", so the hooks in .githooks/ do not run; call the guard from your hooks instead (node ${dir}/scripts/records.mjs pre-commit, commit-msg "$1", pre-push "$@")`)
+  const hooks = turnOnHooks(root)
+  const undoHooks = hooks.state === 'activated' ? ' && git config --unset core.hooksPath' : ''
+  if (hooks.state !== 'active') console.log(`\n${hooksNote(hooks, dir)}`)
   console.log(`\nwritten. Checking with the new guard: node ${dir}/scripts/records.mjs check`)
   const check = spawnSync(process.execPath, [join(root, dir, 'scripts', 'records.mjs'), 'check'], { cwd: root, stdio: 'inherit' })
   if (check.status !== 0 && plan.problems.length === 0) {
@@ -117,14 +119,90 @@ Review the change, then commit it:
   ${COMMIT_COMMAND}
 Then run "node ${dir}/scripts/records.mjs verify" to write the first stamp.
 To undo everything instead:
-  ${UNDO_COMMAND}${hooksNote}`)
+  ${UNDO_COMMAND}${undoHooks}`)
   if (check.status !== 0 && plan.problems.length === 0) process.exit(1)
+}
+
+/** Asks solo or team (unless --team answered it) and the goal, on a terminal. */
+async function askInit(flags) {
+  const prompt = createInterface({ input: process.stdin, output: process.stdout })
+  try {
+    const answers = {}
+    if (!flags.team) {
+      for (;;) {
+        answers.preset = await prompt.question('Solo or team? A team protects the base branch and pushes claims. [solo] ')
+        if (presetFromAnswer(answers.preset)) break
+        console.log('  Answer "solo" or "team".')
+      }
+    }
+    answers.goal = await prompt.question('The goal, in one sentence: what is being built, for whom, and what counts as finished? (empty leaves a marker) ')
+    return answers
+  } finally {
+    prompt.close()
+  }
+}
+
+function refuseInit(messages) {
+  console.error('✖ resaledger init changed nothing:')
+  for (const message of messages) console.error(`  ✖ ${message}`)
+  process.exit(1)
+}
+
+/** init [--team] [--dir <name>] [--yes], in the repository of the current folder. */
+export async function initCommand(args) {
+  const { flags, error } = parseInitArgs(args)
+  if (error) {
+    console.error(`resaledger: ${error}`)
+    process.exit(1)
+  }
+  const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' })
+  if (top.status !== 0) refuseInit(['this folder is not in a git repository; run "git init" first, or run init inside a repository'])
+  const root = top.stdout.trim()
+  if (!ensureGuard()) refuseInit(['the guard could not be built'])
+
+  // The refusals do not depend on the answers, so they come before the questions.
+  let plan = planInit(root, initOptions(flags))
+  if (plan.refusals.length > 0) refuseInit(plan.refusals)
+  if (!flags.yes && process.stdin.isTTY && process.stdout.isTTY) {
+    plan = planInit(root, initOptions(flags, await askInit(flags)))
+    if (plan.refusals.length > 0) refuseInit(plan.refusals)
+  }
+
+  const result = applyInit(root, plan)
+  const { dir } = plan
+  console.log(`resaledger init: ResaLedger is set up in ${dir}/, with the ${plan.preset} preset`)
+  list('Created', result.created)
+  list('Changed', result.changed)
+  list('Warnings', plan.warnings.map((warning) => `! ${warning}`))
+  console.log(`\n${hooksNote(result.hooks, dir)}`)
+  if (result.instructions) console.log(`\n${result.instructions}`)
+  const active = hooksActive()
+  const how = plan.manager === 'husky' ? 'install husky\'s hooks with "npx husky"' : 'see above'
+  console.log(active ? '✔ the git hooks run the guard in this clone' : `! the git hooks do not run the guard in this clone yet; ${how}`)
+
+  console.log(`\nChecking with the installed guard: node ${dir}/scripts/records.mjs check`)
+  const check = spawnSync(process.execPath, [join(root, dir, 'scripts', 'records.mjs'), 'check'], { cwd: root, stdio: 'inherit' })
+  if (check.status !== 0) console.error('✖ the new workspace does not pass check; this is a bug in resaledger, please report it')
+
+  const files = [...new Set([...result.created, ...result.changed])].sort()
+  const steps = []
+  const sections = [...(plan.goalMarker ? ['Goal'] : []), 'Environments', 'Manual checks']
+  steps.push(`Write the project's own text in ${dir}/README.md where a ${SETUP_MARKER} marker is (${sections.join(', ')}); "handoff" asks for it.`)
+  steps.push(`Commit the setup:\n       ${commitCommand(files)}`)
+  steps.push(`Start working: node ${dir}/scripts/records.mjs work`)
+  console.log(`\nNext steps:\n${steps.map((step, index) => `  ${index + 1}. ${step}`).join('\n')}`)
+  if (check.status !== 0) process.exit(1)
 }
 
 export function main(argv) {
   const [command = 'help'] = argv
   if (command === 'version' || command === '--version') console.log(version)
   else if (command === 'help' || command === '--help') process.stdout.write(HELP)
+  else if (command === 'init')
+    initCommand(argv.slice(1)).catch((error) => {
+      console.error(`resaledger: ${error.message}`)
+      process.exitCode = 1
+    })
   else if (command === 'migrate') migrateCommand(argv.slice(1))
   else {
     console.error(`resaledger: unknown command "${command}"; run "resaledger help" for the list`)
