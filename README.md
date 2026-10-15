@@ -38,6 +38,10 @@ npx resaledger handoff                                # may this session end?
 
 Agents follow the same loop from the block in `AGENTS.md`, and `npx resaledger work` shows where everything stands. [Working alone](docs/guides/solo.md) walks through it with real output, including three agents in three worktrees.
 
+<img alt="A terminal session: init finds the lint and test scripts and keeps them as gates; a commit with no task is refused; task T1 is created, claimed, committed and verified; two more tasks are claimed into their own worktrees, merged without a conflict and verified; handoff passes." src="docs/assets/demo/demo.gif">
+
+The demo is a real run, recorded with [VHS](https://github.com/charmbracelet/vhs) from [`docs/assets/demo/demo.tape`](docs/assets/demo/demo.tape).
+
 ## How it works
 
 <picture>

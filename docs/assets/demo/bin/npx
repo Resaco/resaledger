@@ -1,0 +1,4 @@
+#!/bin/sh
+# Stands in for npx in the demo: runs this repository's own package, so the demo needs no registry.
+[ "$1" = "resaledger" ] && shift
+exec node "$(dirname "$0")/../../../../bin/resaledger.mjs" "$@"

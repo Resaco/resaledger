@@ -42,3 +42,14 @@ test('the README graphics are small, self-contained SVG files with a title', () 
     assert.doesNotMatch(text, /@import|url\((?!#)/, `${name} loads a stylesheet or a file`)
   }
 })
+
+test('the terminal demo is small, and its tape and scripts run from the repository without a local path', () => {
+  const folder = join(PACKAGE, 'docs', 'assets', 'demo')
+  assert.ok(statSync(join(folder, 'demo.gif')).size < 3 * 1024 * 1024, 'demo.gif is over 3 MB')
+  const tape = readFileSync(join(folder, 'demo.tape'), 'utf8')
+  assert.match(tape, /^Output docs\/assets\/demo\/demo\.gif$/m)
+  assert.match(tape, /source docs\/assets\/demo\/steps\.sh && source docs\/assets\/demo\/setup\.sh/)
+  for (const name of ['demo.tape', 'setup.sh', 'steps.sh', 'bin/npx']) {
+    assert.doesNotMatch(readFileSync(join(folder, name), 'utf8'), /\/Users\/|\/home\/[a-z]/, `${name} names a local path`)
+  }
+})
