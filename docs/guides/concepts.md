@@ -25,7 +25,7 @@ A lane is a branch with someone working on it: you, an agent, a colleague, a clo
 - Three agents in three worktrees are three lanes.
 - Twelve colleagues' branches are twelve lanes.
 
-A task that is `doing` belongs to the lane in its `Lane:` field, and only that lane changes its file. The pre-commit hook refuses a change to it from any other lane, and sees a claim in another local worktree before that claim is committed. That rule is what keeps parallel work free of conflicts in the records. A lane holds at most three tasks in progress at once by default (`wip` in the configuration).
+A task that is `doing` belongs to the lane in its `Lane:` field, and only that lane changes its file. The pre-commit hook refuses a change to it from any other lane, and sees a claim in another local worktree before that claim is committed. CI refuses it in a pull request. A branch stacked on another lane carries that lane's tasks unchanged: CI compares them with the holding lane's branch, so a stale copy fails until the stacked branch rebases on the holder. That rule is what keeps parallel work free of conflicts in the records. A lane holds at most three tasks in progress at once by default (`wip` in the configuration).
 
 ## Claims
 

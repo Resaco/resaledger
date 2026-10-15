@@ -352,5 +352,6 @@ git commit --allow-empty -m "chore: try main" -m "Task: maintenance"
 ```
 
 - **A task claimed twice.** Two people claim the same task before either has fetched. `claim` fetches first in the team preset, so this is rare; when it happens, CI reports the task held in two open branches. One of them gives it up, or takes it over with `claim <id> --take`.
+- **A stacked lane.** A branch built on another lane's branch carries that lane's tasks. CI compares each one with the holding lane's branch and fails when the copies differ, also when that branch is not in the clone. Rebase the stacked branch on the holder; to change the task yourself, take it over with `claim <id> --take`.
 - **A stale claim.** A lane's branch is merged or deleted while its task is still `doing`. `work --all --fetch` shows it; take it over with `claim <id> --take`.
 - **Someone changes the workflow in a pull request.** GitHub runs that pull request's copy of the workflow. CI lists the change and fails it without a decision, but a pull request that removes the check never runs it. CODEOWNERS and the required check close that gap.
