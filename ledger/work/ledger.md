@@ -179,11 +179,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: A dated decision or log name counts as taken when any branch has it, through the one-batch scan that `ids.mjs` now shares (`branchFolderNames`). `Decided by` falls back to a dash, which `check` refuses on purpose, so nobody commits a decision unsigned.
 
 ### W4 `claim`
-- Status: todo
+- Status: doing
 - Depends on: W2, W3
 - Plan: [W-work.md](../plan/W-work.md#w4-claim)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `w4-claim` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### W5 `changes`
 - Status: todo

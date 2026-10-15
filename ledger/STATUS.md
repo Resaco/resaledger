@@ -8,7 +8,7 @@ Building. Done: the foundation (F), the record format (R), the git hooks (H), th
 
 ## Active work
 
-[T5.1](work/ledger.md#t51-data-safety-in-migrate) and [A1](work/ledger.md#a1-the-agent-hook-core-claude-code-and-codex), with workers. The How it works animation (G3) is in the repository and waits for the owner.
+[T5.1](work/ledger.md#t51-data-safety-in-migrate), [A1](work/ledger.md#a1-the-agent-hook-core-claude-code-and-codex) and [W4](work/ledger.md#w4-claim), with workers. The How it works animation (G3) is in the repository and waits for the owner.
 
 ## Last verified
 
