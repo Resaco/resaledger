@@ -172,11 +172,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: A worker builds it on branch `w2-work-all` in its own worktree, and moves pre-commit's fix for git's hook variables into `localLanes`. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### W3 `task` and `new`
-- Status: doing
+- Status: done
 - Depends on: W1
 - Plan: [W-work.md](../plan/W-work.md#w3-task-and-new)
-- Evidence: —
-- Notes: A worker builds it on branch `w3-task-new` in its own worktree; `new` reuses C1's id scan (`ids.mjs`). Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs` on `main` after the merge: 525 of 525 on Node 24.18.0, 22.23.3 and 20.20.2; the 17 tests in [create.test.mjs](../../test/create.test.mjs) cover a gap in the numbers, a child of a child, ids taken in another worktree, on a local branch and on a remote-tracking branch, non-ASCII, long and duplicate titles for tasks, decisions and log entries, `task` with and without a plan section, and `--issue` with a stand-in for `gh`; every file created passes `check`. Not verified: Windows (CI; the `--issue` tests skip there).
+- Notes: A dated decision or log name counts as taken when any branch has it, through the one-batch scan that `ids.mjs` now shares (`branchFolderNames`). `Decided by` falls back to a dash, which `check` refuses on purpose, so nobody commits a decision unsigned.
 
 ### W4 `claim`
 - Status: todo
@@ -255,11 +255,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: —
 
 ### I3 `update` and the package's command line
-- Status: todo
+- Status: doing
 - Depends on: I1
 - Plan: [I-installer.md](../plan/I-installer.md#i3-update-and-the-packages-command-line)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `i3-update` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ## M: Migration
 
@@ -278,11 +278,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: On review the lead made the undo command use root pathspecs, so it is whole when run from a subfolder, and made `migrate` count untracked files that `status.showUntrackedFiles` hides, because the undo's `git clean` would delete them. This workspace's own records must stay valid under the 1.0 rules until M4, or the self-migration test fails.
 
 ### M3 Verification on real workspaces
-- Status: doing
+- Status: done
 - Depends on: M2
 - Plan: [M-migration.md](../plan/M-migration.md#m3-verification-on-real-workspaces)
-- Evidence: —
-- Notes: The lead runs it on copies of private 0.x workspaces in a temporary folder outside this repository; their names, paths and numbers stay in private notes. Next: migrate each copy, check it, read a sample, record the outcome.
+- Evidence: The lead migrated copies of two private 0.x workspaces in a temporary folder outside this repository: both migrated with no line lost and pass `check` with the 1.0 guard, and a sample of tasks, decisions, log entries, the README and the managed `AGENTS.md` block read correctly. The rule for blocked tasks is tested in [migrate.test.mjs](../../test/migrate.test.mjs); the names, paths and counts are in private notes. Not verified: a commit of the result through the hooks, because the copies' commit gates need their projects' dependencies.
+- Notes: The run showed that real blocked tasks say what they wait for in their notes, so `migrate` now takes Waiting for from the first "Waits for …" or "Blocked on …" phrase and lists each one; spec section 14 says so. Free-text status lines in plans stay a 1.0 problem for the owner to fix before migrating, because rewriting them would be interpretation.
 
 ### M4 This repository moves to 1.0
 - Status: todo
@@ -322,11 +322,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: —
 
 ### T5 Independent review of `migrate`
-- Status: todo
+- Status: doing
 - Depends on: M3
 - Plan: [T-acceptance.md](../plan/T-acceptance.md#t5-independent-review-of-migrate)
 - Evidence: —
-- Notes: —
+- Notes: A reviewer running Fable 5.1 reads M1–M3 at a fixed commit and reports findings; each finding becomes a child task of T5. Next: record the review, fix or answer every finding.
 
 ## D: Documentation and repository files
 

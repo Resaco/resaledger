@@ -4,19 +4,19 @@ Updated: 2026-10-15 · by the lead agent
 
 ## Phase
 
-Building. The foundation (F), the record format (R), the git hooks (H), the end-of-session check (V3), `migrate` (M2), `init` (I1), the CI check (C1) and the brand identity (G2) are done. `task` and `new` (W3) and `work --all` (W2) are being built, and the lead verifies `migrate` on copies of real workspaces (M3).
+Building. The foundation (F), the record format (R), the git hooks (H), the end-of-session check (V3), `migrate` and its verification on real workspaces (M2, M3), `init` (I1), `task` and `new` (W3), the CI check (C1) and the brand identity (G2) are done. `work --all` (W2) and `update` (I3) are being built, and Fable 5.1 reviews `migrate` (T5) before this repository moves to 1.0 (M4).
 
 ## Active work
 
-[W3](work/ledger.md#w3-task-and-new) and [W2](work/ledger.md#w2-work---all-across-pushed-branches), with workers; [M3](work/ledger.md#m3-verification-on-real-workspaces), by the lead.
+[W2](work/ledger.md#w2-work---all-across-pushed-branches) and [I3](work/ledger.md#i3-update-and-the-packages-command-line), with workers; [T5](work/ledger.md#t5-independent-review-of-migrate), with a reviewer.
 
 ## Last verified
 
-- `verify` passed on the current code (2026-10-15): the bundle check, and `npm test` with 507 of 507 tests on Node 24, 22 and 20, after I1 and H2's fix merged.
+- `verify` passed on the current code (2026-10-15): the bundle check, and `npm test` with 525 of 525 tests on Node 24, 22 and 20, after W3 merged.
 
 ## Next step
 
-Review W3 and W2 when their workers report, and finish M3. Then I3 and C2, then A1 and G3.
+Review W2 and I3 when their workers report, and record T5's findings as child tasks. Then W4 (claim), C2 and A1, then M4 and G3.
 
 ## Waiting for the owner
 

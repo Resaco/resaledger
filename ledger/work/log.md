@@ -69,3 +69,7 @@ C1 and H2 merged. `ci` judges a pull request by the rules of the commit it merge
 ## 2026-10-15 · `init`
 
 I1 merged: `npx resaledger init` sets ResaLedger up in a repository in the solo or the team preset. It refuses before writing anything when a file it must change is dirty, when the workspace folder exists or when the repository already has a configuration, points a 0.x workspace to `migrate`, works with husky and simple-git-hooks, and prints a commit command that passes the hooks it installed. It shares the managed `AGENTS.md` block, the guard build and turning the hooks on with `migrate`. H2's fix landed too: the assistant names that are also people's first names are refused only in forms no person has. 507 tests pass on Node 24, 22 and 20. W2 started, and the lead verifies `migrate` on copies of real workspaces.
+
+## 2026-10-15 · `task` and `new`, and `migrate` on real workspaces
+
+W3 merged: `task <id>` prints one task with its plan section, and `new` creates tasks, child tasks, decisions and log entries whose ids and file names nothing visible already uses, in this worktree, the other worktrees or any branch. The lead verified `migrate` on copies of two private 0.x workspaces (M3): no line lost, and `check` passes. The run showed that real blocked tasks say what they wait for in their notes, so `migrate` now takes Waiting for from them and lists each value for review. 525 tests pass on Node 24, 22 and 20. I3 and the independent review of `migrate` (T5) started.

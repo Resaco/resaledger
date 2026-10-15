@@ -40,7 +40,7 @@ The guard is written as modules in `src/guard/` and bundled into one file ([F1](
 | `claim.mjs` | W4 | `claimCommand(args)` |
 | `changes.mjs` | W5 | `changesCommand(args)` |
 | `ownership.mjs` | C1 | `taskRecordsById(reader, dir) → Map<id, { task, text }>`; `ownershipProblems({ before, after, lane, config, kept?, holders?, accepted?, baseName? }) → problems`, the rules of spec 6.2 that pre-commit and `ci` share |
-| `ids.mjs` | C1, then W3 | `branchTaskFiles({ root, dir, exclude? }) → [{ ref, branch, commit, files }]`, the task ids of every local and remote-tracking branch from one batch; `idCollisions(added, others, config) → problems` |
+| `ids.mjs` | C1, W3 | `branchFolderNames({ root, folder, exclude? }) → [{ ref, branch, commit, names }]`, the file names in one folder on every local and remote-tracking branch, from one batch; `branchTaskFiles({ root, dir, exclude? }) → [{ ref, branch, commit, files }]`, the task ids built on it; `idCollisions(added, others, config) → problems` |
 | `ci.mjs` | C1–C3 | `ciOptions(args, env)`; `ciResult(options)`, the check as data (`checks`, `moved`, `gates`, `rules`, and `enforcement` for C2); `ciCommand(args)`, the text and the exit code |
 | `agents.mjs` | A1, A2 | `hookCommand(agent, event)` and the input adapters. The command line in every agent's configuration is `node <dir>/scripts/records.mjs hook <agent> <event>`, with `<agent>` one of `claude`, `codex`, `cursor`, `gemini`, `copilot` and `<event>` one of `session-start`, `pre-tool`, `stop` |
 | `cli/hooks.mjs` (package side) | H3 | `HOOK_NAMES`; `renderHook(name, dir)`; `detectHookManager(root)`; `integrateHookManager(root, manager, dir) → { changed, instructions }` |
