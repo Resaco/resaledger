@@ -27,13 +27,14 @@ export function parseAgentsValue(value) {
   return { agents, error: null }
 }
 
-/** Parses init's arguments: { flags: { team, dir, yes, agents }, error }. error is null or a message; agents is null when not given. */
+/** Parses init's arguments: { flags: { team, dir, yes, agents, gates }, error }. error is null or a message; agents is null when not given; gates is false with --no-gates. */
 export function parseInitArgs(args) {
-  const flags = { team: false, dir: null, yes: false, agents: null }
+  const flags = { team: false, dir: null, yes: false, agents: null, gates: true }
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]
     if (arg === '--team') flags.team = true
     else if (arg === '--yes' || arg === '-y') flags.yes = true
+    else if (arg === '--no-gates') flags.gates = false
     else if (arg === '--dir' || arg.startsWith('--dir=')) {
       // A shell's completion adds a trailing '/', so one is dropped here; the configuration stays strict.
       const given = arg === '--dir' ? args[++index] : arg.slice('--dir='.length)
@@ -45,7 +46,7 @@ export function parseInitArgs(args) {
       const parsed = parseAgentsValue(arg === '--agents' ? args[++index] : arg.slice('--agents='.length))
       if (parsed.error) return { flags, error: parsed.error }
       flags.agents = parsed.agents
-    } else return { flags, error: `unknown option "${arg}" for init; use --team, --dir <name>, --agents <names> or --yes` }
+    } else return { flags, error: `unknown option "${arg}" for init; use --team, --dir <name>, --agents <names>, --no-gates or --yes` }
   }
   return { flags, error: null }
 }
@@ -176,8 +177,9 @@ export function planAgentConfigs(root, agents, dir, writes) {
 }
 
 /**
- * Plans the setup without writing anything. options is { preset, dir, goal, guardPath, agents };
- * agents null finds the agents in use. Returns { refusals, writes (path → text), executable,
+ * Plans the setup without writing anything. options is { preset, dir, goal, guardPath, agents,
+ * gates, commitStyle }; agents null finds the agents in use, gates is { commit, verify } (none
+ * when absent) and commitStyle "conventional" or "free" (the default, not written). Returns { refusals, writes (path → text), executable,
  * created, changed, managerFiles, manager, instructions, warnings, dir, preset, config, goalMarker, agents }. Nothing may be written when
  * refusals is not empty.
  */
@@ -251,7 +253,8 @@ export function planInit(root, options = {}) {
   if (dir !== DEFAULTS.dir) config.dir = dir
   const base = detectBase(root)
   if (base) config.base = base
-  config.gates = { commit: [], verify: [] }
+  if (options.commitStyle === 'conventional') config.commitStyle = 'conventional'
+  config.gates = { commit: [...(options.gates?.commit ?? [])], verify: [...(options.gates?.verify ?? [])] }
   const configText = `${JSON.stringify(config, null, 2)}\n`
   const parsed = parseConfig(configText)
   if (!parsed.config) for (const problem of parsed.problems) refuse(`the planned ${CONFIG_FILE} is invalid, which is a bug in resaledger: ${problem.message}`)

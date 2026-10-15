@@ -367,7 +367,7 @@ function githooksNamesAi(line) {
 // A trailer whose key ends in -by or -with: Co-authored-by, Signed-off-by, Assisted-by, Generated-with.
 const GITHOOKS_ATTRIBUTION_TRAILER = /^[A-Za-z0-9][A-Za-z0-9-]*-(?:by|with)[ \t]*:/i
 // type(scope)!: description, after any of git's fixup!, squash! and amend! prefixes.
-const GITHOOKS_CONVENTIONAL = /^(?:(?:fixup|squash|amend)! )*[a-z]+(?:\([^()\s][^()]*\))?!?: \S/
+export const GITHOOKS_CONVENTIONAL = /^(?:(?:fixup|squash|amend)! )*[a-z]+(?:\([^()\s][^()]*\))?!?: \S/
 const GITHOOKS_ZERO_OID = /^0+$/
 
 /** The comment prefix of commit messages: core.commentString or core.commentChar, '#' by default and for "auto". */
