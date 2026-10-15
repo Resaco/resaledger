@@ -356,10 +356,60 @@ describe('agent.pushNeedsHandoff', () => {
     refused(bash(r, 'git push', 'push'), /uncommitted path \(\.resaledger\.json\)/)
   })
 
+  test('a push after a change in the same command is refused with the advice to push on its own, for every adapter', () => {
+    // The check runs before the command, so it would judge the tree before the commit.
+    const r = lane()
+    r.write('src/app.js', 'console.log("changed")\n')
+    const own = /"git push" follows "git (\w+)" in the same command[^]*Run "git push" as a command of its own, after the rest has run/
+    for (const agent of Object.keys(SHELLS)) {
+      const result = shell(r, agent, 'git add -A && git commit -m "feat: change" -m "Task: S1" && git push')
+      refused(result, own)
+      assert.match(result.out, /follows "git commit"/)
+      assert.doesNotMatch(result.out, /Not ready to hand off/)
+    }
+    // On a clean tree too: what the earlier part changes is not known before it runs.
+    const clean = lane()
+    for (const command of ['git switch -c S2-lane && git push -u origin HEAD', 'git pull; git push', 'git stash && git push origin S1-lane', 'npm test && git -C . merge main && git push']) {
+      refused(shell(clean, 'claude', command), own)
+      refused(shell(clean, 'codex', command), own)
+    }
+    // Earlier commands that change nothing, and a push before the change, are judged as before.
+    for (const command of ['git status && git log --oneline -1 && git push', 'git fetch && git diff --stat && git push', 'git push && git commit -m x']) allowed(shell(clean, 'claude', command))
+  })
+
+  test('a dry run is not judged; a tag push is', () => {
+    const r = lane()
+    r.write('src/app.js', 'console.log("changed")\n')
+    for (const agent of Object.keys(SHELLS)) {
+      allowed(shell(r, agent, 'git push --dry-run'))
+      allowed(shell(r, agent, 'git push -n -u origin HEAD'))
+    }
+    allowed(shell(r, 'claude', 'git commit -am "feat: change" -m "Task: S1" && git push --dry-run'))
+    refused(shell(r, 'claude', 'git push origin v1.0.0'), /Not ready to hand off/)
+    refused(shell(r, 'codex', 'git push --tags'), /Not ready to hand off/)
+    // The other push rules still judge a dry run.
+    refused(shell(r, 'claude', 'git push --dry-run --force'), /forced push/)
+  })
+
+  test('a lane that branched before ResaLedger was set up is told to merge the base', () => {
+    const r = lane()
+    // A commit from before adoption: an empty tree, so no .resaledger.json.
+    const empty = r.git('hash-object', '-t', 'tree', '/dev/null').out.trim()
+    const before = r.git('commit-tree', empty, '-m', 'chore: before').out.trim()
+    const path = join(r.base, 'old')
+    assert.equal(r.git('worktree', 'add', '-q', '-b', 'S3-old', path, before).status, 0)
+    for (const agent of ['claude', 'codex']) {
+      const result = shell(r, agent, `git -C ${JSON.stringify(path)} push -u origin HEAD`)
+      refused(result, /"S3-old" has no \.resaledger\.json at its last commit: the lane branched before ResaLedger was set up\. Merge the base branch into it, which brings the configuration, and push again/)
+      assert.doesNotMatch(result.out, /npx resaledger init/)
+    }
+  })
+
   test('without the key, a push from a dirty tree is allowed', () => {
     const r = lane({})
     r.write('src/app.js', 'console.log("changed")\n')
     for (const agent of Object.keys(SHELLS)) allowed(shell(r, agent, 'git push -u origin HEAD'))
+    for (const command of ['git add -A && git commit -m "feat: change" -m "Task: S1" && git push', 'git switch -c S2-lane && git push -u origin HEAD']) allowed(shell(r, 'claude', command))
   })
 })
 
