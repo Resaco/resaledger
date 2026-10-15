@@ -4,6 +4,7 @@
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { CONFIG_FILE, loadConfig } from './config.mjs'
+import { enforcementCheck } from './enforcement.mjs'
 import { runGates, stampPath, verifiedStamp } from './gates.mjs'
 import { branchTaskFiles, idCollisions } from './ids.mjs'
 import { ownershipProblems, taskRecordsById } from './ownership.mjs'
@@ -252,7 +253,14 @@ function ciPullRequest(root, options) {
 
   const { check, gates } = ciGatesCheck(root, config, head)
   checks.push(check)
-  return { mergeBase, rules, checks, moved, gates }
+
+  // The pull request's own changes start at the merge base; a merge base from before the base
+  // added ResaLedger has no configuration, so the base stands in for it.
+  const mergeBaseConfig = loadConfig(treeReader({ kind: 'commit', rev: mergeBase, root })).config
+  const from = mergeBaseConfig ? mergeBase : base
+  const enforcement = enforcementCheck(root, { from, mergeBase, head, adds: rules.adds })
+  checks.push(enforcement.check)
+  return { mergeBase, rules, checks, moved, gates, enforcement: enforcement.changes }
 }
 
 /** The checks of a push, in order, and its result. */
@@ -274,7 +282,7 @@ function ciPush(root, options) {
   const tasksAt = (commit) => taskRecordsById(treeReader({ kind: 'commit', rev: commit, root }), config.dir)
   const moved = from === null ? [] : ciMovedTasks(tasksAt(from), tasksAt(after))
   checks.push({ name: 'moved', ok: true, problems: [], counts: { moved: moved.length }, note: null })
-  return { from, rules, checks, moved, gates: null }
+  return { from, rules, checks, moved, gates: null, enforcement: null }
 }
 
 /**
@@ -286,11 +294,14 @@ function ciPush(root, options) {
  * - rules: { from: 'base' | 'head' | 'before' | 'after', commit, adds } (adds: the change adds
  *   ResaLedger and is judged by its own rules);
  * - checks: [{ name, ok, skipped?, problems, counts, note }] in the order they ran: records,
- *   commits, ownership, ids, moved, gates for a pull request; records, commits, moved for a push;
+ *   commits, ownership, ids, moved, gates, enforcement for a pull request; records, commits,
+ *   moved for a push;
  * - moved: [{ id, title, file, from, to, evidence }];
  * - gates: { mode: 'run' | 'stamp' | 'none', ranOn, passed: [{ command, seconds }], failure,
  *   stamp } for a pull request, null for a push;
- * - enforcement: null, for C2.
+ * - enforcement: for a pull request, the changes to enforcement from the merge base to the head,
+ *   [{ id, kind: 'listed' | 'weakening', file, what, decidedBy: { file, by } | null }]; empty
+ *   when nothing changed or when the change adds ResaLedger; null for a push.
  * Throws a CiError when the check cannot run, such as for a missing commit.
  */
 export function ciResult(options) {
@@ -319,7 +330,7 @@ export function ciResult(options) {
     checks: outcome.checks,
     moved: outcome.moved,
     gates: outcome.gates,
-    enforcement: null,
+    enforcement: outcome.enforcement,
     ok: outcome.checks.every((check) => check.ok)
   }
 }
@@ -386,6 +397,12 @@ function ciCheckLine(check, result) {
       return `ids: ${problems}${plural(counts.added, 'new id')}, against ${plural(counts.branches, 'branch', 'branches')}${note}`
     case 'moved':
       return `tasks moved: ${counts.moved}`
+    case 'enforcement': {
+      if (check.skipped) return `enforcement: not compared (${check.note})`
+      if (counts.changes === 0) return 'enforcement: unchanged'
+      const undecided = check.problems.length > 0 ? `${plural(check.problems.length, 'weakening change')} no decision names; ` : ''
+      return `enforcement: ${undecided}${plural(counts.changes, 'change')}, ${counts.weakening} weakening`
+    }
     case 'gates': {
       if (check.skipped) return `gates: none${note}`
       const gates = result.gates
@@ -397,6 +414,14 @@ function ciCheckLine(check, result) {
     default:
       return `${check.name}: ${problems}`.replace(/; $/, '')
   }
+}
+
+/** The line of one change to enforcement: its id, what changed, and why it passes or fails. */
+function ciChangeLine(change, check) {
+  if (change.kind === 'listed') return `${change.id}: ${change.what}`
+  if (change.decidedBy) return `${change.id}: ${change.what} · weakening, decided in ${change.decidedBy.file}${change.decidedBy.by ? ` by ${change.decidedBy.by}` : ''}`
+  const problem = check.problems.find(({ id }) => id === change.id)
+  return `✖ ${change.id}: ${problem ? problem.message : change.what}`
 }
 
 /** ci [--base <rev> --head <rev> [--lane <branch>]]: runs the CI check, prints it and exits 1 when a check fails. */
@@ -420,6 +445,10 @@ export function ciCommand(args) {
   else out.push(`Rules from the ${result.rules.from} ${ciShort(result.rules.commit)}.`)
   for (const check of result.checks) {
     out.push(`${check.ok ? '✔' : '✖'} ${ciCheckLine(check, result)}`)
+    if (check.name === 'enforcement') {
+      for (const change of result.enforcement) out.push(`  ${ciChangeLine(change, check)}`)
+      continue
+    }
     for (const { file, line, message } of check.problems) out.push(`  ${file ? `${file}${line ? `:${line}` : ''}: ` : ''}${message}`)
     if (check.name === 'moved') {
       for (const task of result.moved) {

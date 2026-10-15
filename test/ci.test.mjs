@@ -127,9 +127,10 @@ describe('ci on a pull request', () => {
     assert.match(result.out, /✔ ids: 0 new ids/)
     assert.match(result.out, /✔ tasks moved: 1\n {2}S1 Bake bread: todo → done · Evidence: `npm test`: 3 of 3/)
     assert.match(result.out, /✔ gates: none \(no gates are configured\)/)
+    assert.match(result.out, /✔ enforcement: unchanged\n/)
     // The order of the checks is fixed.
     const order = [...result.out.matchAll(/^[✔✖] (\w+)/gm)].map((match) => match[1])
-    assert.deepEqual(order, ['records', 'commits', 'ownership', 'ids', 'tasks', 'gates'])
+    assert.deepEqual(order, ['records', 'commits', 'ownership', 'ids', 'tasks', 'gates', 'enforcement'])
   })
 
   test('invalid records in the head fail', () => {
