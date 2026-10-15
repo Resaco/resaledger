@@ -13,7 +13,7 @@ import { detectCommitStyle, detectGates } from './detect.mjs'
 import { agentTrustLines, applyInit, commitCommand, initOptions, parseAgentsValue, parseInitArgs, planInit, presetFromAnswer } from './init.mjs'
 import { LEGACY_CONFIG_FILE } from './legacy.mjs'
 import { applyMigration, COMMIT_COMMAND, planMigration, UNDO_COMMAND } from './migrate.mjs'
-import { currentBranch, ensureGuard, hooksNote, setupCommitSteps, turnOnHooks } from './setup.mjs'
+import { currentBranch, ensureGuard, GITATTRIBUTES_FILE, hooksNote, setupCommitSteps, turnOnHooks } from './setup.mjs'
 import { applyUpdate, planUpdate, UPDATE_COMMIT_MESSAGE } from './update.mjs'
 
 const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
@@ -108,6 +108,7 @@ export function migrateCommand(args) {
   list('Change', report.changed)
   list('Rename', report.renamed)
   list('Delete', report.deleted)
+  list(`Lines rewritten in ${GITATTRIBUTES_FILE}`, report.attributes.map(({ line, from, to }) => `${GITATTRIBUTES_FILE}:${line}: ${from} → ${to}`))
   const rewritten = report.links.filter((link) => !link.unresolved)
   const unresolved = report.links.filter((link) => link.unresolved)
   if (rewritten.length > 0) console.log(`\nLinks rewritten into the new files: ${rewritten.length}`)

@@ -2,6 +2,7 @@
 // a whole migration that passes, every refusal, a hand-edited hook, an injected loss,
 // --dry-run, a 1.0 problem, a second run, and this repository's own 0.x workspace.
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
@@ -302,6 +303,23 @@ function legacyRepository({ claude = 'file', files = {} } = {}) {
 }
 
 const migrate = (r, ...args) => r.node(CLI, 'migrate', ...args)
+
+/** The paths in a tar archive: the name field of each header, with the ustar prefix. */
+function tarNames(buffer) {
+  const names = []
+  for (let at = 0; at + 512 <= buffer.length; ) {
+    const header = buffer.subarray(at, at + 512)
+    if (header.every((byte) => byte === 0)) break
+    const field = (start, length) => header.subarray(start, start + length).toString('utf8').replace(/\0.*$/s, '')
+    const prefix = field(345, 155)
+    const name = `${prefix ? `${prefix}/` : ''}${field(0, 100)}`
+    const size = parseInt(field(124, 12).trim() || '0', 8)
+    // Pax headers ("g" and "x") describe the next entry; they are not entries themselves.
+    if (header[156] !== 0x67 && header[156] !== 0x78) names.push(name.replace(/\/$/, ''))
+    at += 512 + Math.ceil(size / 512) * 512
+  }
+  return names
+}
 
 /** Every file under root except .git, as path → content (a link as "-> target"). */
 function snapshot(root) {
@@ -811,6 +829,35 @@ describe('the LF rule for the hooks and a protected base', () => {
     const r = legacyRepository({ files: { '.gitattributes': `* text=auto eol=lf\n${UNION}` } })
     assert.equal(migrate(r).status, 0)
     assert.equal(r.read('.gitattributes'), '* text=auto eol=lf\n')
+  })
+
+  test('a rule for the old configuration file names the new one, and git archive leaves the configuration out', () => {
+    const attributes = `* text=auto\n.agent-ledger.json export-ignore\n/.agent-ledger.json  -diff\nbackup/.agent-ledger.json export-ignore\n${UNION}`
+    const r = legacyRepository({ files: { '.gitattributes': attributes } })
+    const dry = migrate(r, '--dry-run')
+    assert.equal(dry.status, 0, dry.out)
+    const listed = /Lines rewritten in \.gitattributes \(2\):\n {2}\.gitattributes:2: \.agent-ledger\.json export-ignore → \.resaledger\.json export-ignore\n {2}\.gitattributes:3: \/\.agent-ledger\.json {2}-diff → \/\.resaledger\.json {2}-diff\n/
+    assert.match(dry.out, listed)
+    const result = migrate(r)
+    assert.equal(result.status, 0, result.out)
+    assert.match(result.out, listed)
+    // A longer pattern that only contains the old name is reported, not rewritten.
+    assert.match(result.out, /! \.gitattributes:4: the pattern "backup\/\.agent-ledger\.json" contains \.agent-ledger\.json, so migrate left the line as it is; change it by hand if it should name \.resaledger\.json/)
+    assert.equal(r.read('.gitattributes'), '* text=auto\n.resaledger.json export-ignore\n/.resaledger.json  -diff\nbackup/.agent-ledger.json export-ignore\n.githooks/* text eol=lf\n')
+    assert.equal(r.commit('chore: migrate to ResaLedger 1.0', 'Task: maintenance').status, 0)
+    const archive = spawnSync('git', ['archive', '--format=tar', 'HEAD'], { cwd: r.root, maxBuffer: 1024 * 1024 * 1024 })
+    assert.equal(archive.status, 0, String(archive.stderr))
+    const names = tarNames(archive.stdout)
+    assert.ok(names.includes(`${DIR}/README.md`), names.join('\n'))
+    assert.ok(!names.includes('.resaledger.json'), names.join('\n'))
+  })
+
+  test('a CRLF .gitattributes keeps its line endings when the old name is rewritten', () => {
+    const r = legacyRepository({ files: { '.gitattributes': '.agent-ledger.json export-ignore\r\n.githooks/* text eol=lf\r\n' } })
+    const plan = planMigration(r.root)
+    assert.deepEqual(plan.refusals, [])
+    assert.equal(plan.writes.get('.gitattributes'), '.resaledger.json export-ignore\r\n.githooks/* text eol=lf\r\n')
+    assert.deepEqual(plan.report.attributes, [{ line: 1, from: '.agent-ledger.json export-ignore', to: '.resaledger.json export-ignore' }])
   })
 
   test('on a protected base, the printed steps commit the migration on a setup branch and push it', () => {

@@ -22,6 +22,7 @@ The records become one file per record. The text of each record is kept word for
 | `.agent-ledger.json` | `.resaledger.json`, format version 2, with the solo preset. Gates, code paths, commit style, AI attribution, deny rules, protected branches and `requirePushed` are kept. |
 | The guard, the git hooks, the `AGENTS.md` pointer block, the Claude Code hook entries | Replaced by 1.0's. |
 | The `.gitattributes` union rules | Removed. The file gets `.githooks/* text eol=lf`. |
+| A `.gitattributes` rule for `.agent-ledger.json`, such as `export-ignore` | Names `.resaledger.json`, with its attributes kept, and the report lists it. A longer pattern that only contains the old name is listed as a warning and left for you to change. |
 
 Whatever has no place in 1.0 is kept word for word in one log entry, `log/<today>-migrated-to-resaledger-1-0.md`: the ledger's preamble and phase headings, the whole `STATUS.md`, the template sections of `standards.md` and the workspace `AGENTS.md`, and configuration keys with no 1.0 meaning.
 

@@ -537,7 +537,7 @@ export function planMigration(root, options = {}) {
     renames: [],
     executable: new Set(),
     logEntry: null,
-    report: { created: [], changed: [], deleted: [], renamed: [], warnings: [], links: [], waiting: [], laneGiven: [], laneFromBranch: [], lane: null, unmappedKeys: [], counts: {} },
+    report: { created: [], changed: [], deleted: [], renamed: [], warnings: [], links: [], waiting: [], laneGiven: [], laneFromBranch: [], lane: null, unmappedKeys: [], attributes: [], counts: {} },
     problems: [],
     refusals: []
   }
@@ -827,7 +827,20 @@ export function planMigration(root, options = {}) {
   const attributesText = existsSync(join(root, GITATTRIBUTES_FILE)) ? readSource(GITATTRIBUTES_FILE) : null
   const attributeLines = attributesText === null ? [] : sourceLines(attributesText)
   const union = new Set([`${dir}/work/log.md merge=union`, `${dir}/DECISIONS.md merge=union`, UNION_COMMENT])
+  // A rule for the old configuration file names the new one, so export-ignore and the like still hold.
   let cut = false
+  attributeLines.forEach((line, index) => {
+    const rule = line.match(/^(\s*)(\/?)(\S+)(.*)$/)
+    if (!rule || rule[3].startsWith('#')) return
+    if (rule[3] === LEGACY_CONFIG_FILE) {
+      attributeLines[index] = `${rule[1]}${rule[2]}${CONFIG_FILE}${rule[4]}`
+      plan.report.attributes.push({ line: index + 1, from: line, to: attributeLines[index] })
+      cut = true
+    } else if (rule[3].includes(LEGACY_CONFIG_FILE))
+      plan.report.warnings.push(
+        `${GITATTRIBUTES_FILE}:${index + 1}: the pattern "${rule[2]}${rule[3]}" contains ${LEGACY_CONFIG_FILE}, so migrate left the line as it is; change it by hand if it should name ${CONFIG_FILE}`
+      )
+  })
   for (let at = attributeLines.findIndex((line) => union.has(line.trim())); at !== -1; at = attributeLines.findIndex((line) => union.has(line.trim()))) {
     cutLines(attributeLines, at, 1)
     cut = true
