@@ -594,6 +594,7 @@ Cut from 1.0 does not mean never. The last column says which cuts are worth buil
 | Status files per lane, a required session log, a review status | Computed, or covered by git and by pull request reviews ([6.10](#610-why-lanes-have-no-status-files), [5.5](#55-log-entries)). | No. |
 | Validating project-defined fields, priorities, estimates | Unknown fields are kept. Validate them when a real need appears. | Field validation, if projects ask. |
 | Installers other than npm and the plugin marketplace | Node is required anyway. | If a real platform needs one. |
+| Personal settings | Each person's agent instructions already set how their agent talks and works; the repository's configuration holds the shared rules, and enforcement must not differ between clones. A few behaviours of ResaLedger itself, such as the end-of-turn reminder, could be personal, in `git config resaledger.<key>`, which is never committed. Which ones needs thought. | Yes, in 1.1, once it is clear what they adjust. |
 
 ## 18. Launch
 

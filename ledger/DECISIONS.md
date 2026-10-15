@@ -28,3 +28,4 @@ Decisions the owner made, and significant technical decisions made inside an app
 | 2026-10-15 | The ResaLedger mark is C1, three parallel ruled lanes, with grain only and no spray texture anywhere. The palette is monochrome (asphalt, wall, bone concrete, concrete). | Niko Alho |
 | 2026-10-15 | The brand typeface is Host Grotesk (SIL OFL), and the cover is made on the dark wall first, with a light variant. These stand until the owner says otherwise. | Lead agent, as defaults |
 | 2026-10-15 | The final identity (G2) is approved as delivered, with its two deliberate deviations: square inner corners on the 16 px mark, and the wall colour for the light cover's small text. | Niko Alho |
+| 2026-10-15 | Personal settings wait for 1.1. The shared rules stay in the repository's configuration and each person's agent instructions set how their agent communicates; what ResaLedger's own personal settings, in `git config`, would adjust needs more thought first. | Niko Alho |

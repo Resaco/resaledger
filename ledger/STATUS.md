@@ -22,4 +22,3 @@ Review T5.1 and A1 when their workers report; then T5.2, T5.3, W4 and C2; then M
 ## Waiting for the owner
 
 - Whether the How it works animation stays one 11-second loop or becomes three, one per promise ([G3](work/ledger.md#g3-animated-explanations-of-how-it-works)).
-- A push of `main`, so that CI checks the fixes on Windows, Linux and macOS.
