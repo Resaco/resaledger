@@ -99,6 +99,7 @@ Every key except `version` has a default. Keys marked † take their default fro
 | `ci.runGates` | `true` | CI runs the gates. With `false`, CI only checks that the head carries a stamp for its own code. |
 | `phases` | `[]` | An order of id prefixes for "Ready next", such as `["F", "S"]`. Each is one to four capital letters. |
 | `agent.deny` | `[]` | Extra commands that agent hooks refuse: `{ "pattern": "…", "reason": "…" }`. `pattern` is a non-empty regular expression that must compile; `reason` is an optional string. |
+| `agent.pushNeedsHandoff` | `false` | With `true`, agent hooks refuse an agent's `git push` while `handoff` fails in the worktree the push runs in, leaving out its check that the lane is pushed. `true` or `false`. See the [agents guide](guides/agents.md#push-only-what-is-handed-over). |
 
 Further rules:
 
@@ -138,7 +139,8 @@ Further rules:
   },
   "phases": [],
   "agent": {
-    "deny": []
+    "deny": [],
+    "pushNeedsHandoff": false
   }
 }
 ```

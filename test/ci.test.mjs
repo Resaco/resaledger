@@ -556,7 +556,8 @@ describe('ci and changes to enforcement', () => {
     ['requirePushed', { preset: 'team' }, { preset: 'team', requirePushed: false }],
     ['claimPush', { preset: 'team' }, { preset: 'team', claimPush: false }],
     ['codePaths', { codePaths: ['tools'] }, {}],
-    ['commitStyle', { commitStyle: 'conventional' }, {}]
+    ['commitStyle', { commitStyle: 'conventional' }, {}],
+    ['agent.pushNeedsHandoff', { agent: { pushNeedsHandoff: true } }, { agent: { pushNeedsHandoff: false } }]
   ].map(([id, before, after]) => [id, { '.resaledger.json': json(before) }, { '.resaledger.json': json(after) }])
   weakening.push(
     ['guard', { 'ledger/scripts/records.mjs': '// a guard\n' }, { 'ledger/scripts/records.mjs': '// a guard, edited\n' }],
@@ -608,6 +609,13 @@ describe('ci and changes to enforcement', () => {
     symlinkSync('../ledger/README.md', join(r.root, '.githooks/pre-commit'))
     commit(r, {}, 'chore: link', 'Task: maintenance')
     failed(ci(r, 'pull_request', pullRequest(r, 'lane-b')), /✖ hooks\/pre-commit: .*; \.githooks\/pre-commit is now a symlink, was executable: this weakens enforcement/)
+  })
+
+  test('turning agent.pushNeedsHandoff on is listed and does not weaken', () => {
+    const r = change({ '.resaledger.json': json({}) }, { '.resaledger.json': json({ agent: { pushNeedsHandoff: true } }) })
+    const result = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
+    passed(result)
+    assert.match(result.out, /✔ enforcement: 1 change, 0 weakening\n {2}agent\.pushNeedsHandoff turned on\n/)
   })
 
   test('a change to .gitattributes is listed', () => {

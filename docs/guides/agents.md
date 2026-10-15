@@ -109,7 +109,8 @@ none
 - a forced push;
 - a push to a protected branch, and file edits on a protected branch;
 - commands that throw work away (`git reset --hard`, `git clean -f`, `git checkout` of paths, `git restore`, `git switch -f`) in a protected branch's checkout, or in a worktree other than the one the session started in;
-- the project's own `agent.deny` commands.
+- the project's own `agent.deny` commands;
+- with `agent.pushNeedsHandoff`, a `git push` while `handoff` fails ([below](#push-only-what-is-handed-over)).
 
 <!-- exits 2 -->
 
@@ -174,6 +175,12 @@ echo '{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"com
 ```
 
 The rules come from the committed configuration, so an agent cannot lift one by editing the file without committing it.
+
+### Push only what is handed over
+
+With `"agent": { "pushNeedsHandoff": true }` in `.resaledger.json`, the hook also refuses an agent's `git push` while `handoff` fails in the worktree the push runs in, such as after `cd` or with `git -C`. It leaves out handoff's check that the lane is pushed, which the push itself does, and runs no gates. The refusal is handoff's own message, so the agent sees what to finish first: commit the tree, write the handoff note, commit the stamp. The other push rules come first. Turning the key off again is a weakening change in CI.
+
+Only an agent's push is checked, because only the agent hook knows its caller is an agent; your own pushes, and an agent without hooks, go through the git hooks and CI as before.
 
 **At the end of a turn**, the hook runs `handoff` when the session changed the repository. If it fails, the agent is reminded once per session to finish the work or tell you exactly what is left.
 

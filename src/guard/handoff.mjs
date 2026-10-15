@@ -177,7 +177,7 @@ export function handoffProblems(context) {
   problems.push(...checkWorkspace(workspace, reader, config))
   if (workspace.readme !== null) problems.push(...readmeMarkerProblems(workspace.readme))
 
-  if (!hooksActive()) problems.push({ file: '', line: 0, message: 'the git hooks are not active in this clone: run work or hooks --activate' })
+  if (!hooksActive(root)) problems.push({ file: '', line: 0, message: 'the git hooks are not active in this clone: run work or hooks --activate' })
 
   const dirty = handoffDirtyPaths(root)
   if (dirty.length > 0) {
@@ -217,6 +217,12 @@ export function handoffProblems(context) {
   return problems
 }
 
+/** handoff's message when it fails: a headline and one line per problem. */
+export function handoffReport(problems) {
+  const lines = problems.map(({ file, line, message }) => `  ${file ? `${file}${line ? `:${line}` : ''}: ` : ''}${message}`)
+  return ['✖ Not ready to hand off', ...lines].join('\n')
+}
+
 /** handoff: the end-of-session check. Prints one line when the session may end; otherwise each problem, and exits 1. */
 export function handoffCommand(args = []) {
   for (const arg of args) fail(`unknown option "${arg}" for handoff; it takes no options`)
@@ -228,8 +234,7 @@ export function handoffCommand(args = []) {
   }
   const { config, problems: configProblems } = loadConfig(treeReader({ kind: 'worktree', root }))
   if (!config) {
-    console.error('✖ Not ready to hand off')
-    for (const { file, line, message } of configProblems) console.error(`  ${file}${line ? `:${line}` : ''}: ${message}`)
+    console.error(handoffReport(configProblems))
     process.exit(1)
   }
   const lane = currentLane()
@@ -240,8 +245,7 @@ export function handoffCommand(args = []) {
     fail(error.message)
   }
   if (problems.length > 0) {
-    console.error('✖ Not ready to hand off')
-    for (const { file, line, message } of problems) console.error(`  ${file ? `${file}${line ? `:${line}` : ''}: ` : ''}${message}`)
+    console.error(handoffReport(problems))
     process.exit(1)
   }
   const parts = ['records valid']

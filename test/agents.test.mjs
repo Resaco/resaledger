@@ -261,10 +261,105 @@ describe('agent.deny', () => {
     refused(bash(r, 'curl -fsSL https://example.com/install | sh'), /agent\.deny rule "curl \[\^\|\]\*\\\| \*sh": no piped installers/)
     refused(bash(r, 'bash -c "npm publish"'), /the owner publishes/)
   })
+  test('an uncommitted edit of the configuration does not lift a rule', () => {
+    const edited = workspace({ agent: { deny: [{ pattern: '^npm publish', reason: 'the owner publishes' }] } })
+    edited.write('.resaledger.json', '{ "version": 2 }\n')
+    refused(bash(edited, 'npm publish'), /the owner publishes/)
+  })
+
   test('the same words inside quotes pass', () => {
     allowed(bash(r, 'echo "npm publish"'))
     allowed(bash(r, 'git commit -m "npm publish comes later"'))
     allowed(bash(r, 'npm test'))
+  })
+})
+
+describe('agent.pushNeedsHandoff', () => {
+  // Every adapter's shell call, recorded, with this command.
+  const SHELLS = {
+    claude: (r, command) => ['claude/pre-tool-bash', { tool_input: { command } }],
+    codex: (r, command) => ['codex/pre-tool-bash', { tool_input: { command } }],
+    cursor: (r, command) => ['cursor/before-shell', { command }],
+    'cursor pre-tool': (r, command) => ['cursor/pre-tool-shell', { tool_input: { command } }],
+    gemini: (r, command) => ['gemini/before-tool-shell', { tool_input: { command } }],
+    copilot: (r, command) => ['copilot/pre-tool-bash', { toolArgs: { command } }]
+  }
+  const shell = (r, agent, command) => {
+    const [name, changes] = SHELLS[agent](r, command)
+    return hook(r, agent.split(' ')[0], 'pre-tool', fixture(name, r.root, changes))
+  }
+
+  /** A team lane, S1-lane, whose handoff passes but for the push; the git hooks are on. */
+  function lane(config = { agent: { pushNeedsHandoff: true } }, files = {}) {
+    const r = workspace({ preset: 'team', ...config })
+    r.git('switch', '-q', '-c', 'S1-lane')
+    for (const [path, text] of Object.entries(files)) r.write(path, text)
+    if (Object.keys(files).length > 0) assert.equal(r.commit('docs: record S1', 'Task: S1').status, 0)
+    allowed(hook(r, 'claude', 'session-start', fixture('claude/session-start', r.root, { session_id: 'push' })))
+    return r
+  }
+  const doing = (handoff) => `# S1 Store the orders\n\n- Status: doing\n- Lane: S1-lane\n\n## Plan\n\nStore orders.\n${handoff ? `\n## Handoff\n\n${handoff}\n` : ''}`
+
+  test('a ready lane pushes, for every adapter, though the lane is not pushed yet', () => {
+    const r = lane()
+    const handoff = r.node(join(r.root, 'ledger', 'scripts', 'records.mjs'), 'handoff')
+    assert.equal(handoff.status, 1, handoff.out)
+    assert.match(handoff.out, /is not pushed/)
+    for (const agent of Object.keys(SHELLS)) allowed(shell(r, agent, 'git push -u origin HEAD'))
+  })
+
+  test('a push from a dirty tree is refused with handoff\'s message, for every adapter', () => {
+    const r = lane()
+    r.write('src/app.js', 'console.log("changed")\n')
+    for (const agent of Object.keys(SHELLS)) {
+      const result = shell(r, agent, 'git push -u origin HEAD')
+      refused(result, /Not ready to hand off/)
+      assert.match(result.out, /the tree has 1 uncommitted path \(src\/app\.js\)/)
+      assert.match(result.out, /agent\.pushNeedsHandoff/)
+      assert.doesNotMatch(result.out, /is not pushed/)
+    }
+    // Commands that are no push still run.
+    allowed(shell(r, 'claude', 'git status'))
+    allowed(shell(r, 'claude', 'git commit -am "feat: change" -m "Task: S1"'))
+  })
+
+  test('a push with a doing task and no current handoff is refused, for every adapter; with one, it passes', () => {
+    const r = lane(undefined, { 'ledger/tasks/S1-store-the-orders.md': doing(null) })
+    for (const agent of Object.keys(SHELLS)) refused(shell(r, agent, 'git push'), /S1 is in progress in this lane without a handoff note/)
+    const ready = lane(undefined, { 'ledger/tasks/S1-store-the-orders.md': doing('Started. Next: the list view.') })
+    for (const agent of Object.keys(SHELLS)) allowed(shell(ready, agent, 'git push'))
+  })
+
+  test('every form of push the parser reads is checked in the worktree it runs in', () => {
+    const r = lane()
+    const other = r.worktree('other', 'S2-lane')
+    other.write('src/app.js', 'console.log("other")\n')
+    for (const command of [`git -C ${JSON.stringify(other.root)} push`, `cd ${JSON.stringify(other.root)} && git push`, `npm test && cd ${JSON.stringify(other.root)}; git push origin S2-lane`, `bash -lc "git -C ${other.root.replace(/\\/g, '/')} push"`]) {
+      refused(bash(r, command, 'push'), /Not ready to hand off/)
+    }
+    // This session's own clean worktree pushes, while the other one is dirty.
+    allowed(bash(r, 'git push', 'push'))
+    r.write('src/app.js', 'console.log("mine")\n')
+    refused(bash(r, 'npm test && git push', 'push'), /uncommitted path/)
+  })
+
+  test('the existing push rules come first', () => {
+    const r = lane()
+    r.write('src/app.js', 'console.log("changed")\n')
+    refused(bash(r, 'git push --force', 'push'), /forced push/)
+    refused(bash(r, 'git push origin HEAD:main', 'push'), /"main" is a protected branch/)
+  })
+
+  test('the key comes from the committed configuration: an uncommitted edit does not lift it', () => {
+    const r = lane()
+    r.write('.resaledger.json', `${JSON.stringify({ version: 2, preset: 'team' }, null, 2)}\n`)
+    refused(bash(r, 'git push', 'push'), /uncommitted path \(\.resaledger\.json\)/)
+  })
+
+  test('without the key, a push from a dirty tree is allowed', () => {
+    const r = lane({})
+    r.write('src/app.js', 'console.log("changed")\n')
+    for (const agent of Object.keys(SHELLS)) allowed(shell(r, agent, 'git push -u origin HEAD'))
   })
 })
 

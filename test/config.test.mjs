@@ -42,7 +42,7 @@ test('a minimal solo configuration gets every default', () => {
   assert.deepEqual(config.gates, { commit: [], verify: [] })
   assert.deepEqual(config.ci, { runGates: true })
   assert.deepEqual(config.phases, [])
-  assert.deepEqual(config.agent, { deny: [] })
+  assert.deepEqual(config.agent, { deny: [], pushNeedsHandoff: false })
 })
 
 test('the team preset protects the base and wants pushes', () => {
@@ -62,6 +62,7 @@ test('the exported presets and defaults match the specification', () => {
   assert.deepEqual(PRESETS.team.protected('main'), ['main'])
   assert.equal(DEFAULTS.dir, 'ledger')
   assert.equal(DEFAULTS.ci.runGates, true)
+  assert.equal(DEFAULTS.agent.pushNeedsHandoff, false)
 })
 
 test('explicit keys beat the preset', () => {
@@ -90,7 +91,7 @@ test('every key can be set', () => {
     gates: { commit: ['npm run lint'], verify: ['npm test', 'npm run build'] },
     ci: { runGates: false },
     phases: ['S', 'API'],
-    agent: { deny: [{ pattern: 'rm -rf /', reason: 'never' }, { pattern: 'deploy' }] }
+    agent: { deny: [{ pattern: 'rm -rf /', reason: 'never' }, { pattern: 'deploy' }], pushNeedsHandoff: true }
   })
   assert.equal(config.dir, 'work/ledger')
   assert.equal(config.base, 'staging')
@@ -108,13 +109,14 @@ test('every key can be set', () => {
   assert.equal(config.agent.deny.length, 2)
   assert.equal(config.agent.deny[1].reason, '')
   assert.ok(config.agent.deny[0].regex.test('sudo rm -rf /'))
+  assert.equal(config.agent.pushNeedsHandoff, true)
 })
 
 test('the effective JSON has every key and no compiled regular expressions', () => {
   const config = valid({ version: 2, branchPattern: '^lane/', agent: { deny: [{ pattern: 'x', reason: 'y' }] } })
   const json = JSON.parse(effectiveConfigJson(config))
   assert.equal(json.branchRegex, undefined)
-  assert.deepEqual(json.agent, { deny: [{ pattern: 'x', reason: 'y' }] })
+  assert.deepEqual(json.agent, { deny: [{ pattern: 'x', reason: 'y' }], pushNeedsHandoff: false })
   assert.deepEqual(Object.keys(json), [
     'version',
     'dir',
@@ -210,6 +212,7 @@ test('wrong types and values are problems', () => {
     [{ phases: ['s'] }, /"phases\[0\]" must be an id prefix of one to four capital letters/],
     [{ phases: ['ABCDE'] }, /"phases\[0\]" must be an id prefix/],
     [{ agent: { deny: {} } }, /"agent\.deny" must be an array/],
+    [{ agent: { pushNeedsHandoff: 'yes' } }, /"agent\.pushNeedsHandoff" must be true or false/],
     [{ agent: { deny: ['rm'] } }, /"agent\.deny\[0\]" must be an object/],
     [{ agent: { deny: [{ reason: 'x' }] } }, /"agent\.deny\[0\]\.pattern" must be a non-empty string/],
     [{ agent: { deny: [{ pattern: 'x', reason: 1 }] } }, /"agent\.deny\[0\]\.reason" must be a string/]
