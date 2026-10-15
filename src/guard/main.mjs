@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DEFAULTS, effectiveConfigJson, loadConfig } from './config.mjs'
+import { gatesCommand, verifyCommand } from './gates.mjs'
 import { activateHooks, commitMsg, hooksActive, preCommit, prePush } from './githooks.mjs'
 import { fail, repositoryRoot } from './util.mjs'
 import { checkCommand } from './workspace.mjs'
@@ -19,8 +20,12 @@ Commands:
   check     validate the records in the working tree
             (--index: the staged files; --rev <rev>: a commit)
   config    print the effective configuration
+  gates     list the commit gates and the verify gates
   hooks [--activate]
             say whether the git hooks are active; --activate turns them on
+  verify [--force]
+            run the gates on the committed code and write its stamp
+            (--force: run them even when the stamp exists)
   version   print the version
   help      print this help
 `
@@ -106,6 +111,8 @@ export function main(argv) {
   else if (command === 'work' || command === 'status') workCommand(argv.slice(1))
   else if (command === 'check') checkCommand(argv.slice(1))
   else if (command === 'config') configCommand()
+  else if (command === 'gates') gatesCommand()
+  else if (command === 'verify') verifyCommand(argv.slice(1))
   else if (command === 'hooks') hooksCommand(argv.slice(1))
   else if (command === 'pre-commit') preCommit()
   else if (command === 'commit-msg') {
