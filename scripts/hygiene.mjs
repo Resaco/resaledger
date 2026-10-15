@@ -18,6 +18,8 @@ const AGENT_MEMORY = /\.claude[\\/](?:clients|projects|memory)(?![\w-])/g
 
 const EMAIL = /(?<![\w.%+-])[A-Za-z0-9._%+-]+@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})(?![\w-])/g
 const EXAMPLE_DOMAINS = ['example.com', 'example.org', 'example.net']
+// Top-level names reserved for examples and tests (RFC 2606, RFC 6761): no mail reaches them.
+const RESERVED_TOP_LEVEL = ['example', 'invalid', 'test', 'localhost']
 
 // GitHub's own committer for merges made on github.com: public, and named by the CI check.
 const GITHUB_WEB_FLOW = 'noreply@github.com'
@@ -26,6 +28,7 @@ function allowedEmail(address) {
   if (address.toLowerCase() === GITHUB_WEB_FLOW) return true
   const host = address.slice(address.indexOf('@') + 1).toLowerCase()
   if (host === 'users.noreply.github.com') return true
+  if (RESERVED_TOP_LEVEL.includes(host.slice(host.lastIndexOf('.') + 1))) return true
   return EXAMPLE_DOMAINS.some((reserved) => host === reserved || host.endsWith(`.${reserved}`))
 }
 

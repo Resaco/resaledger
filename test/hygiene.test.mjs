@@ -48,8 +48,11 @@ test('email addresses are caught unless no-reply or reserved examples', () => {
   const rules = (text) => checkText(text).map((hit) => hit.rule)
   assert.deepEqual(rules(`mail jane${AT}corp.fi`), ['email'])
   assert.deepEqual(rules(`1+bot${AT}users.noreply.github.com`), [])
-  for (const domain of ['example.com', 'example.org', 'example.net', 'mail.example.com']) {
+  for (const domain of ['example.com', 'example.org', 'example.net', 'mail.example.com', 'example.invalid', 'shop.test', 'host.example', 'dev.localhost']) {
     assert.deepEqual(rules(`a${AT}${domain}`), [], domain)
+  }
+  for (const domain of ['invalid.fi', 'test.com', 'example.co', 'localhost.org']) {
+    assert.deepEqual(rules(`a${AT}${domain}`), ['email'], domain)
   }
   assert.deepEqual(rules(`react${AT}18.3.1 and actions/checkout${AT}v4`), [])
 })
