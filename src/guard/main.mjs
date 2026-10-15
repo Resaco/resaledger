@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DEFAULTS, effectiveConfigJson, loadConfig } from './config.mjs'
 import { gatesCommand, verifyCommand } from './gates.mjs'
+import { handoffCommand } from './handoff.mjs'
 import { activateHooks, commitMsg, hooksActive, preCommit, prePush } from './githooks.mjs'
 import { checkRange } from './range.mjs'
 import { fail, repositoryRoot } from './util.mjs'
@@ -23,6 +24,8 @@ Commands:
             --range <from>..<to>: also that every commit names its task)
   config    print the effective configuration
   gates     list the commit gates and the verify gates
+  handoff   the end-of-session check: records, hooks, a clean tree, the
+            stamp, current handoff notes and recorded, pushed commits
   hooks [--activate]
             say whether the git hooks are active; --activate turns them on
   verify [--force]
@@ -115,6 +118,7 @@ export function main(argv) {
   else if (command === 'config') configCommand()
   else if (command === 'gates') gatesCommand()
   else if (command === 'verify') verifyCommand(argv.slice(1))
+  else if (command === 'handoff') handoffCommand(argv.slice(1))
   else if (command === 'hooks') hooksCommand(argv.slice(1))
   else if (command === 'pre-commit') preCommit()
   else if (command === 'commit-msg') {
