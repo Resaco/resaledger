@@ -139,6 +139,23 @@ function githooksOwnershipProblems(root, branch, config, head, headTasks, staged
   return ownershipProblems({ before: headTasks, after: stagedTasks, lane: branch, config, kept, accepted })
 }
 
+// The variables git sets for a hook that point at this worktree's repository and index.
+const GITHOOKS_LOCATION_VARIABLES = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_PREFIX']
+
+/**
+ * The other worktrees as lanes, read without the hook's location variables: git sets
+ * GIT_INDEX_FILE for pre-commit, and another worktree read with it would list this index.
+ */
+function githooksOtherWorktrees(config) {
+  const saved = new Map(GITHOOKS_LOCATION_VARIABLES.filter((name) => name in process.env).map((name) => [name, process.env[name]]))
+  for (const name of saved.keys()) delete process.env[name]
+  try {
+    return localLanes(config)
+  } finally {
+    for (const [name, value] of saved) process.env[name] = value
+  }
+}
+
 /**
  * The id problems of the staged tasks (spec 6.7 and 9): an id that this commit adds and that a
  * locally visible branch has in another file. The other branches are the local branches and the
@@ -153,7 +170,7 @@ function githooksIdProblems(root, branch, config, headTasks, stagedTasks) {
     own = new Set([`refs/heads/${branch}`, ...remotes.map((remote) => `refs/remotes/${remote}/${branch}`)])
   }
   const others = branchTaskFiles({ root, dir: config.dir, exclude: (ref) => own.has(ref.ref) })
-  for (const lane of localLanes(config)) {
+  for (const lane of githooksOtherWorktrees(config)) {
     others.push({ branch: lane.branch, worktree: true, files: new Map(lane.tasks.filter((task) => task.id).map((task) => [task.id, task.file])) })
   }
   return idCollisions(added, others, config)
