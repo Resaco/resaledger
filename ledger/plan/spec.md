@@ -447,7 +447,32 @@ One implementation serves every column. A hook calls the same functions as `ci`.
 - One workflow, `.github/workflows/resaledger.yml`, runs `ci` on pull requests and on pushes to the base branch. `ci` reads the event to find the base and the head. Other CI systems call `ci --base <ref> --head <ref>`.
 - **The rules come from the base.** The workflow takes the guard and the configuration from the base commit and judges the head with them, so a pull request cannot weaken the check that judges it. The first pull request that adds ResaLedger is judged by its own rules, and the comment says so.
 - **On a pull request**, `ci` checks the records in the head; every commit from the merge base to the head, each against its own tree; task ownership and deleted tasks against the base; ids against the base and the other open branches; evidence on every task that becomes `done`; the gates, run on the head with the base's commands (with `ci.runGates: false`, the head must carry a stamp for its own code instead); and changes to enforcement.
-- **Changes to enforcement** are any diff to the configuration, the guard, the hooks or the workflow, and they are listed. A weakening change fails the check unless the pull request adds a decision file that names it, so reviewers see who decided: a gate removed or changed, a protected branch removed, `wip` raised, `aiAttribution` loosened, a deny rule removed. Updating the guard to a released version is listed and does not fail.
+- **Changes to enforcement** are any diff to the configuration, the guard, the hooks or the workflow, and they are listed. A weakening change fails the check unless the pull request adds a decision file that names it, so reviewers see who decided: a gate removed or changed, a protected branch removed, `wip` raised, `aiAttribution` loosened, a deny rule removed. Updating the guard to a released version is listed and does not fail. The rules:
+  - **What is compared.** The configuration, `<dir>/scripts/records.mjs`, every file in `.githooks/` and `.github/workflows/resaledger.yml`, from the merge base to the head: the pull request's own changes, not the base's later ones. When the merge base has no configuration, the base stands in for it. When the base has none, the pull request adds ResaLedger, there is nothing to compare against, and the output says so. The agents' hook configurations are not compared: they share files with the project's own settings, and what they block, CI checks again.
+  - **Each change has an id**, printed in the output, and is listed or weakening by the table below. A direction that is unclear counts as weakening; a decision lets it through.
+  - **A decision names a change** with a `Weakens:` field that lists ids, separated by commas: `- Weakens: wip, gates.verify`. Only a decision the pull request adds counts (a file in `<dir>/decisions/` that the merge base does not have), so an old decision never lets a new change through. Its `Decided by` is printed next to the change.
+  - **The released versions** are the hashes of `templates/released.json`, which the bundle embeds, plus the running guard's own. A guard or hook whose new text is a released version is listed; any other new text, and a removed file, weakens. A guard newer than the one that runs is not in its table, so that update needs a decision unless the workflow runs a guard at least as new.
+
+  | Id | Weakening | Listed |
+  | --- | --- | --- |
+  | `config` | `.resaledger.json` removed, or invalid in the head | |
+  | `dir` | any change | |
+  | `base` | any change | |
+  | `preset` | | any change; what it sets is compared key by key |
+  | `protected` | a branch removed | a branch added |
+  | `requirePushed`, `claimPush`, `ci.runGates` | turned off | turned on |
+  | `branchPattern` | removed or changed | added where there was none |
+  | `branchPrefix` | | any change |
+  | `wip` | raised | lowered |
+  | `commitStyle` | `conventional` to `free` | `free` to `conventional` |
+  | `aiAttribution` | `forbid` to `allow` | `allow` to `forbid` |
+  | `codePaths` | a folder removed | a folder added |
+  | `gates.commit`, `gates.verify` | a command removed or changed | a command added; a new order |
+  | `phases` | | any change |
+  | `agent.deny` | a pattern removed or changed | a pattern added; a reason changed |
+  | `guard` | removed, or new text that is no released version | new text that is a released version |
+  | `hooks/<name>`, such as `hooks/pre-commit` | removed, or new text that is no released version | new text that is a released version |
+  | `workflow` | removed, or new text that is no released version | new text that is a released version |
 - **On a push to the base**, `ci` checks the records and the new commits, except merge commits and commits that GitHub made when merging a pull request, which were checked in the pull request. Squash merges therefore work: enforcement checks the pull request and its commits, not the base branch's history after a squash. A team that wants `Task:` lines on the base can set GitHub's squash message to the pull request description; the pull request template has a `Task:` line.
 - **Output.** A job summary always. With write permission, which pull requests from the same repository have, one comment on the pull request, updated in place:
 
@@ -502,7 +527,7 @@ Rules taken from how the five agents behave today. Hooks stay fast, because the 
 | The host: branch protection, the required check, CODEOWNERS on enforcement files | merging without the check, or enforcement changes without review | nothing in this list |
 
 - **A stamp is a claim.** Anyone can write one by hand. CI reruns the gates by default, so a forged stamp never gets through CI. For a solo developer without CI, the stamp guards against forgetting, not against the developer.
-- **A pull request can change the gates, the guard or the workflow.** CI judges it with the base's rules, lists every enforcement change and fails a weakening one unless a decision file names it. The workflow file itself is beyond any check's reach; the team guide protects it with CODEOWNERS.
+- **A pull request can change the gates, the guard or the workflow.** CI judges it with the base's rules, lists every enforcement change and fails a weakening one unless a decision file names it ([section 10](#10-ci)). The workflow file itself is beyond any check's reach, because a pull request's own workflow is the one that runs: a change to it that is no released template needs a decision, which makes an honest change visible, but a pull request that removes the check never runs it. The team guide protects the file with CODEOWNERS.
 - **Gates run the pull request's code.** They run under `pull_request`, with no secrets and a read-only token for forks, never under `pull_request_target`.
 - **The guard runs only commands from a configuration it trusts.** The rules (the base, the protected branches, the branch pattern and the gates) come from a committed configuration the change cannot alter: HEAD's in pre-commit, pre-merge-commit and commit-msg, the remote base's as last fetched (else HEAD's) in pre-push, and the base branch's in CI. Staging `"protected": []` does not unprotect the commit that stages it.
 

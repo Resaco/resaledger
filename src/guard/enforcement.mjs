@@ -9,7 +9,7 @@ import { treeReader } from './workspace.mjs'
 const ENFORCEMENT_HOOKS = '.githooks/'
 const ENFORCEMENT_WORKFLOW = '.github/workflows/resaledger.yml'
 // The decision field that names the weakening changes a decision allows (spec 10).
-const ENFORCEMENT_FIELD = 'weakens'
+const ENFORCEMENT_FIELD = 'Weakens'
 
 /** One change: { id, kind: 'listed' | 'weakening', file, what }. */
 function enforcementChange(id, weakening, what, file = CONFIG_FILE) {
@@ -137,11 +137,11 @@ function addedDecisions(mergeBaseReader, headReader, dir) {
   for (const file of headReader.list(`${dir}/decisions`)) {
     if (!/\.md$/i.test(file) || mergeBaseReader.read(file) !== null) continue
     const decision = parseDecision(file, headReader.read(file) ?? '')
-    const field = (name) => decision.fields.find((item) => item.name.toLowerCase() === name)
+    const field = (name) => decision.fields.find((item) => item.name === name)
     const weakens = field(ENFORCEMENT_FIELD)
     if (!weakens) continue
     const ids = [weakens.value, ...weakens.items].join(' ').replace(/`/g, '').split(/[\s,]+/).filter((id) => id !== '')
-    decisions.push({ file, by: field('decided by')?.value || null, ids: new Set(ids) })
+    decisions.push({ file, by: field('Decided by')?.value || null, ids: new Set(ids) })
   }
   return decisions
 }

@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
+import { contentHash, normalizeManaged } from '../src/guard/managed.mjs'
 import { ENV, PACKAGE, repository, run, temporary } from './helpers.mjs'
 
 const GUARD = join(temporary(), 'records.mjs')
@@ -338,6 +339,7 @@ describe('ci on a pull request', () => {
     const result = ci(r, 'pull_request', pullRequest(r, 'adopt'))
     passed(result)
     assert.match(result.out, /This change adds ResaLedger, so it is judged by its own rules, from the head [0-9a-f]{7}\./)
+    assert.match(result.out, /✔ enforcement: not compared \(the base has no configuration, so there is nothing to compare against\)/)
     // Its commits are still checked by those rules.
     commit(r, { 'src/app.js': '2\n' }, 'feat: change the app')
     failed(ci(r, 'pull_request', pullRequest(r, 'adopt')), /"feat: change the app" changes code but names no task/)
@@ -355,6 +357,155 @@ describe('ci on a pull request', () => {
     const none = run(r.root, process.execPath, [GUARD, 'ci'])
     assert.equal(none.status, 1)
     assert.match(none.out, /no CI event found/)
+  })
+})
+
+describe('ci and changes to enforcement', () => {
+  const PASS = 'node -e "process.exit(0)"'
+  const json = (config) => `${JSON.stringify({ version: 2, ...config }, null, 2)}\n`
+  const hook = (name) => readFileSync(join(PACKAGE, 'templates', 'hooks', name), 'utf8').replaceAll('{{dir}}', 'ledger')
+
+  /** A decision that names changes on its "- Weakens:" line. */
+  function decision(ids, slug = 'allow-it') {
+    const text = `# Allow it\n\n- Date: 2026-10-15\n- Decided by: alice\n- Weakens: ${ids}\n\nThe team agreed.\n`
+    return { [`ledger/decisions/2026-10-15-${slug}.md`]: text }
+  }
+
+  /** Main with the files of `before`, and a lane-a commit that writes the files of `after`. */
+  function change(before, after) {
+    const r = setup()
+    commit(r, { 'notes.md': 'Before.\n', ...before }, 'chore: before', 'Task: maintenance')
+    r.git('checkout', '-q', '-b', 'lane-a')
+    commit(r, after, 'chore: change enforcement', 'Task: maintenance')
+    return r
+  }
+
+  // Each kind of weakening change: its id, the files on main, and the files the pull request writes.
+  const weakening = [
+    ['gates.verify', { gates: { verify: [PASS] } }, { gates: {} }],
+    ['gates.commit', { gates: { commit: [PASS] } }, { gates: { commit: ['node -e "process.exit()"'] } }],
+    ['protected', { preset: 'team' }, { preset: 'team', protected: [] }],
+    ['wip', { wip: 3 }, { wip: 5 }],
+    ['aiAttribution', { aiAttribution: 'forbid' }, {}],
+    ['agent.deny', { agent: { deny: [{ pattern: 'rm -rf', reason: 'no' }] } }, {}],
+    ['base', {}, { base: 'trunk' }],
+    ['branchPattern', { branchPattern: '^lane-' }, { branchPattern: '' }],
+    ['ci.runGates', {}, { ci: { runGates: false } }],
+    ['requirePushed', { preset: 'team' }, { preset: 'team', requirePushed: false }],
+    ['claimPush', { preset: 'team' }, { preset: 'team', claimPush: false }],
+    ['codePaths', { codePaths: ['tools'] }, {}],
+    ['commitStyle', { commitStyle: 'conventional' }, {}]
+  ].map(([id, before, after]) => [id, { '.resaledger.json': json(before) }, { '.resaledger.json': json(after) }])
+  weakening.push(
+    ['guard', { 'ledger/scripts/records.mjs': '// a guard\n' }, { 'ledger/scripts/records.mjs': '// a guard, edited\n' }],
+    ['hooks/pre-commit', { '.githooks/pre-commit': hook('pre-commit') }, { '.githooks/pre-commit': `${hook('pre-commit')}exit 0\n` }],
+    ['workflow', { '.github/workflows/resaledger.yml': 'name: resaledger\n' }, { '.github/workflows/resaledger.yml': 'name: resaledger\non: push\n' }]
+  )
+
+  for (const [id, before, after] of weakening) {
+    test(`a weakening change to ${id} fails without a decision and passes with one that names it`, () => {
+      const r = change(before, after)
+      const without = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
+      failed(without, /✖ enforcement: 1 weakening change no decision names; 1 change, 1 weakening/)
+      const escaped = id.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+      assert.match(without.out, new RegExp(`\\n {2}✖ ${escaped}: .*this weakens enforcement, and no decision this pull request adds names it\\. Add one in ledger/decisions/ with the line "- Weakens: ${escaped}"`))
+
+      commit(r, decision(id), 'docs: decide', 'Task: maintenance')
+      const decided = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
+      passed(decided)
+      assert.match(decided.out, new RegExp(`✔ enforcement: 1 change, 1 weakening\\n {2}${escaped}: .* · weakening, decided in ledger/decisions/2026-10-15-allow-it\\.md by alice`))
+    })
+  }
+
+  test('removing a gate lists it with its command', () => {
+    const r = change({ '.resaledger.json': json({ gates: { verify: [PASS] } }) }, { '.resaledger.json': json({}) })
+    failed(ci(r, 'pull_request', pullRequest(r, 'lane-a')), /✖ gates\.verify: gates\.verify: removed "node -e \\"process\.exit\(0\)\\""/)
+  })
+
+  test('a decision that names a different change, or one already on the base, does not help', () => {
+    const r = setup()
+    commit(r, { '.resaledger.json': json({ wip: 3 }), ...decision('wip', 'old') }, 'chore: before', 'Task: maintenance')
+    r.git('checkout', '-q', '-b', 'lane-a')
+    commit(r, { '.resaledger.json': json({ wip: 5 }), ...decision('gates.verify, protected') }, 'chore: raise wip', 'Task: maintenance')
+    failed(ci(r, 'pull_request', pullRequest(r, 'lane-a')), /✖ wip: wip raised from 3 to 5: this weakens enforcement/)
+  })
+
+  test('one decision can name several changes, and each one it does not name still fails', () => {
+    const r = change({ '.resaledger.json': json({ wip: 3, aiAttribution: 'forbid' }) }, { '.resaledger.json': json({ wip: 4 }), ...decision('`wip`, aiAttribution') })
+    passed(ci(r, 'pull_request', pullRequest(r, 'lane-a')))
+    commit(r, { '.resaledger.json': json({ wip: 4, ci: { runGates: false } }) }, 'chore: stop the gates', 'Task: maintenance')
+    const result = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
+    failed(result, /✖ enforcement: 1 weakening change no decision names; 3 changes, 3 weakening/)
+    assert.match(result.out, /✖ ci\.runGates: ci\.runGates turned off/)
+  })
+
+  test('a pull request that only tightens passes and lists every change', () => {
+    const r = change(
+      { '.resaledger.json': json({ gates: { commit: [PASS] } }) },
+      { '.resaledger.json': json({ preset: 'team', wip: 2, aiAttribution: 'forbid', commitStyle: 'conventional', branchPattern: '^lane-', codePaths: ['tools'], gates: { commit: [PASS], verify: [PASS] }, agent: { deny: [{ pattern: 'rm -rf' }] } }) }
+    )
+    const result = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
+    passed(result)
+    assert.match(result.out, /✔ enforcement: 11 changes, 0 weakening/)
+    for (const line of [
+      'preset: preset changed from "solo" to "team"',
+      'protected: protected: added "main"',
+      'requirePushed: requirePushed turned on',
+      'claimPush: claimPush turned on',
+      'branchPattern: branchPattern changed from none to "^lane-"',
+      'wip: wip lowered from 3 to 2',
+      'commitStyle: commitStyle changed from "free" to "conventional"',
+      'aiAttribution: aiAttribution changed from "allow" to "forbid"',
+      'codePaths: codePaths: added "tools"',
+      'gates.verify: gates.verify: added "node -e \\"process.exit(0)\\""',
+      'agent.deny: agent.deny: added "rm -rf"'
+    ]) {
+      assert.ok(result.out.includes(`\n  ${line}\n`), `missing "${line}" in:\n${result.out}`)
+    }
+  })
+
+  test('an update of the guard or a hook to a released version is listed and passes', () => {
+    const newer = '#!/usr/bin/env node\n// ResaLedger 9.0.0\n// a newer guard\n'
+    const table = join(temporary(), 'released.json')
+    writeFileSync(table, JSON.stringify({ guard: { '9.0.0': contentHash(normalizeManaged(newer)) } }))
+    const guard = join(temporary(), 'records.mjs')
+    const bundled = run(PACKAGE, process.execPath, [join(PACKAGE, 'scripts', 'bundle.mjs'), '--out', guard, '--released', table])
+    assert.equal(bundled.status, 0, bundled.out)
+
+    const r = change(
+      { 'ledger/scripts/records.mjs': '#!/usr/bin/env node\n// ResaLedger 8.0.0\n', '.githooks/pre-commit': '#!/bin/sh\nexit 0\n' },
+      { 'ledger/scripts/records.mjs': newer, '.githooks/pre-commit': hook('pre-commit') }
+    )
+    // This guard, built with its own table, takes the pull request from the flags.
+    const result = run(r.root, process.execPath, [guard, 'ci', '--base', 'main', '--head', 'lane-a', '--lane', 'lane-a'])
+    passed(result)
+    assert.match(result.out, /✔ enforcement: 2 changes, 0 weakening\n {2}guard: ledger\/scripts\/records\.mjs changed: ResaLedger 9\.0\.0, a released version\n {2}hooks\/pre-commit: \.githooks\/pre-commit changed: ResaLedger [^ ]+, a released version/)
+
+    // The guard that runs knows its own text as a released version too.
+    commit(r, { 'ledger/scripts/records.mjs': readFileSync(GUARD, 'utf8') }, 'chore: update the guard', 'Task: maintenance')
+    const own = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
+    passed(own)
+    assert.match(own.out, /guard: ledger\/scripts\/records\.mjs changed: ResaLedger [^ ]+, a released version/)
+  })
+
+  test('a removed guard weakens enforcement', () => {
+    const r = setup()
+    commit(r, { 'ledger/scripts/records.mjs': '// a guard\n' }, 'chore: add a guard', 'Task: maintenance')
+    r.git('checkout', '-q', '-b', 'lane-a')
+    r.git('rm', '-q', 'ledger/scripts/records.mjs')
+    commit(r, {}, 'chore: remove the guard', 'Task: maintenance')
+    failed(ci(r, 'pull_request', pullRequest(r, 'lane-a')), /✖ guard: ledger\/scripts\/records\.mjs removed: this weakens enforcement/)
+  })
+
+  test('a change the base made after the merge base is not the pull request\'s change', () => {
+    const r = setup({ config: { wip: 5 } })
+    r.git('checkout', '-q', '-b', 'lane-a')
+    commit(r, { 'notes.md': 'Notes.\n' }, 'docs: notes')
+    r.git('checkout', '-q', 'main')
+    commit(r, { '.resaledger.json': json({ wip: 2 }) }, 'chore: lower wip', 'Task: maintenance')
+    const result = ci(r, 'pull_request', pullRequest(r, 'lane-a'))
+    passed(result)
+    assert.match(result.out, /✔ enforcement: unchanged/)
   })
 })
 
