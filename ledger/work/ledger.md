@@ -126,27 +126,27 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: On review the lane rule became range-wide: a Lane set inside the checked range is accepted, so the rule only refuses tasks another lane held before the range. Taking a held task is caught by the ownership checks in H1 and C1.
 
 ### V3 `handoff`
-- Status: doing
+- Status: done
 - Depends on: V1, V2, H3
 - Plan: [V-verify.md](../plan/V-verify.md#v3-handoff)
-- Evidence: —
-- Notes: A worker builds it on branch `v3-handoff` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs` on `main` after the merge and the lead's fix: 359 of 359 on Node 24.18.0, 22.23.3 and 20.20.2; the 19 tests in [handoff.test.mjs](../../test/handoff.test.mjs) cover every failure, a one-commit session, a detached HEAD, the team preset's push checks and a commit made with `--no-verify`. Not verified: Windows (CI).
+- Notes: On review the lead made only code commits count as the last commit on a task, so a claim or a stamp that names the task does not make its handoff note stale.
 
 ## H: Git hooks
 
 ### H1 pre-commit
-- Status: doing
+- Status: done
 - Depends on: R5
 - Plan: [H-hooks.md](../plan/H-hooks.md#h1-pre-commit)
-- Evidence: —
-- Notes: A worker builds it on branch `h1-pre-commit` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs` on `main` after the merge: 359 of 359 on Node 24.18.0, 22.23.3 and 20.20.2; the 17 tests in [precommit.test.mjs](../../test/precommit.test.mjs) commit through git with the bundled guard, one per refusal, and prove that a partial commit is judged on git's temporary index, not on the working tree. Not verified: Windows (CI).
+- Notes: During a merge, a held task staged exactly as the merged commit has it passes, because it is that lane's own change. The check that ids are unique across locally visible branches (spec section 9) moved to C1, which builds it for CI and adds it to pre-commit.
 
 ### H2 commit-msg and pre-push
-- Status: todo
+- Status: doing
 - Depends on: V2
 - Plan: [H-hooks.md](../plan/H-hooks.md#h2-commit-msg-and-pre-push)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `h2-commit-msg-pre-push` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### H3 Hook scripts and activation
 - Status: done
@@ -195,11 +195,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 ## C: The CI check
 
 ### C1 The CI check
-- Status: todo
+- Status: doing
 - Depends on: V1, V2, H1
 - Plan: [C-ci.md](../plan/C-ci.md#c1-the-ci-check)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `c1-ci-check` in its own worktree, including the id check that pre-commit shares. Next: review the worker's report against the acceptance checks, merge, record the evidence.
 
 ### C2 Changes to enforcement
 - Status: todo
