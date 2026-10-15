@@ -187,6 +187,17 @@ describe('the job summary and the comment, rendered from fixtures', () => {
     assert.doesNotMatch(markdown.replace(/`[^`]*`/g, ''), /(^|[^\w])@\w|#\d|GH-\d/)
   })
 
+  test('a URL keeps its # and a path keeps its gh-, while references are still neutralised', () => {
+    // A joiner after a URL's # would end GitHub's autolink there; one in a path is an invisible
+    // character someone copies. GitHub reads neither as a reference.
+    const joiner = '⁠'
+    const result = fixture('pull-request')
+    result.moved[0].evidence = 'https://host.example/page#12 and ledger/tasks/gh-2-fix.md, src/GH-3-notes.md, fix-GH-4; #12, owner/repo#12, GH-12 and @name'
+    const markdown = ciMarkdown(result)
+    const evidence = markdown.split('\n').find((text) => text.startsWith('  Evidence: '))
+    assert.equal(evidence, `  Evidence: https://host.example/page#12 and ledger/tasks/gh-2-fix.md, src/GH-3-notes.md, fix-GH-4; #${joiner}12, owner/repo#${joiner}12, GH${joiner}-12 and @${joiner}name`)
+  })
+
   test('a failing pull request lists the problems, the failed gate and the undecided weakening change', () => {
     const markdown = ciMarkdown(fixture('pull-request-failing'))
     assert.match(markdown, /^### ResaLedger · this pull request · ✖ 3 checks failed\n/)

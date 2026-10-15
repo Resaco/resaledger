@@ -158,15 +158,18 @@ function ciClosingRun(text, from, length) {
  * Plain text outside code spans, escaped: backslashes, Markdown's inline punctuation and `<`.
  * Mentions (@name), issue references (#12, owner/repo#12, GH-12) get a word joiner (U+2060)
  * after the @, the # or GH: it is invisible, but GitHub then neither notifies anyone nor leaves
- * a reference in another issue. A backslash or an HTML entity would not stop either.
+ * a reference in another issue. A backslash or an HTML entity would not stop either. A # inside
+ * a URL and a GH- inside a path or slug are no references and stay as written.
  */
 function ciMarkdownEscape(text) {
   return text
     .replace(/[\\`*_[\]~]/g, '\\$&')
     .replace(/</g, '&lt;')
     .replace(/(^|[^\w])@(?=\w)/g, '$1@\u2060')
-    .replace(/#(?=\d)/g, '#\u2060')
-    .replace(/\bGH(?=-\d)/gi, '$&\u2060')
+    // A joiner after a URL's # would end GitHub's autolink there.
+    .replace(/\S+/g, (token) => (token.includes('://') ? token : token.replace(/#(?=\d)/g, '#\u2060')))
+    // GH-12 in capitals, not inside a path or a slug such as tasks/gh-2-fix.md or fix-GH-4.
+    .replace(/(^|[^\w/.\\-])GH(?=-\d)/g, '$1GH\u2060')
 }
 
 /** A command as a Markdown code span, on one line. */
