@@ -44,7 +44,7 @@ function rangeUnreadable(what) {
  * Reads objects in one `git cat-file --batch`. Each spec is an object name such as an id or
  * "<rev>:<path>". Returns a Map from spec to { type, data } (a Buffer); missing objects are left out.
  */
-function rangeObjects(root, specs) {
+export function rangeObjects(root, specs) {
   const objects = new Map()
   const unique = [...new Set(specs)]
   if (unique.length === 0) return objects

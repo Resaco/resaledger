@@ -4,6 +4,7 @@ import { readFileSync, readSync } from 'node:fs'
 import { join } from 'node:path'
 import { isatty } from 'node:tty'
 import { hookCommand } from './agents.mjs'
+import { changesCommand } from './changes.mjs'
 import { ciCommand } from './ci.mjs'
 import { claimCommand } from './claim.mjs'
 import { DEFAULTS, effectiveConfigJson, loadConfig } from './config.mjs'
@@ -43,6 +44,11 @@ Commands:
             base, or with --branch, it creates the lane branch first;
             --worktree creates it in a new worktree; with claimPush or
             --push it commits the claim alone and pushes the branch
+  changes [--since <ref>] [--json]
+            the tasks that became done since a tag (the newest by default),
+            with their evidence, grouped as Added, Changed and Fixed from
+            the Conventional Commits that name them: a changelog draft in
+            Markdown; read-only
   check     validate the records in the working tree
             (--index: the staged files; --rev <rev>: a commit;
             --range <from>..<to>: also that every commit names its task)
@@ -179,6 +185,7 @@ export function main(argv) {
   else if (command === 'task') taskCommand(argv[1])
   else if (command === 'new') newCommand(argv.slice(1))
   else if (command === 'claim') claimCommand(argv.slice(1))
+  else if (command === 'changes') changesCommand(argv.slice(1))
   else if (command === 'ci') ciCommand(argv.slice(1))
   else if (command === 'check') checkCommand(argv.slice(1), checkRange)
   else if (command === 'config') configCommand()
