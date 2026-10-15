@@ -1,0 +1,55 @@
+# Publishes the package to npm when the owner pushes a version tag, such as v1.0.0.
+# The steps and the npm settings it needs are in docs/releasing.md.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The tests read this repository's records from before it moved to 1.0.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Check that the tag matches package.json
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "${TAG}" != "v${version}" ]; then
+            echo "The tag ${TAG} does not match the version ${version} in package.json." >&2
+            exit 1
+          fi
+      - run: npm test
+      - run: node scripts/bundle.mjs
+      - run: node scripts/release-hashes.mjs --check
+      - name: Publish with provenance
+        env:
+          # Empty with trusted publishing; set the NPM_TOKEN secret only when it is not used.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # A prerelease such as v1.0.0-rc.1 goes to the "next" dist-tag, never to "latest".
+          case "${TAG}" in
+            *-*) dist_tag=next ;;
+            *) dist_tag=latest ;;
+          esac
+          npm publish --provenance --access public --tag "${dist_tag}"
