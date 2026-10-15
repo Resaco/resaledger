@@ -30,19 +30,18 @@ function idsTreeNames(data, hashBytes) {
 }
 
 /**
- * The task files of every branch in the clone, local (refs/heads) and remote-tracking
- * (refs/remotes), from one `git for-each-ref` and one `git cat-file --batch`, without reading
- * any task file: the id comes from the file name. Symbolic refs such as origin/HEAD are skipped.
+ * The file names directly in one folder on every branch in the clone, local (refs/heads) and
+ * remote-tracking (refs/remotes), from one `git for-each-ref` and one `git cat-file --batch`.
+ * Symbolic refs such as origin/HEAD are skipped.
  *
- * options is { root, dir, exclude }: the repository, the workspace folder, and an optional
- * exclude({ ref, branch, commit }) that leaves a branch out.
+ * options is { root, folder, exclude }: the repository, the repository-relative folder, and an
+ * optional exclude({ ref, branch, commit }) that leaves a branch out.
  *
- * Returns [{ ref, branch, commit, files }], where branch is the short name (origin/S4-x) and
- * files is a Map from id to the task file's repository path. A branch without a tasks folder
- * has an empty Map.
+ * Returns [{ ref, branch, commit, names }], where branch is the short name (origin/S4-x) and
+ * names are the files' names (blobs only, no subfolders). A branch without the folder has none.
  */
-export function branchTaskFiles(options) {
-  const { root, dir } = options
+export function branchFolderNames(options) {
+  const { root, folder } = options
   const exclude = options.exclude ?? (() => false)
   const branches = []
   const output = idsGit(root, ['for-each-ref', '--format=%(objectname)%00%(objecttype)%00%(refname)%00%(refname:short)%00%(symref)', 'refs/heads/', 'refs/remotes/'])
@@ -50,36 +49,50 @@ export function branchTaskFiles(options) {
     if (line === '') continue
     const [commit, type, ref, branch, symref] = line.split('\0')
     if (type !== 'commit' || symref !== '') continue
-    const entry = { ref, branch, commit, files: new Map() }
+    const entry = { ref, branch, commit, names: [] }
     if (!exclude(entry)) branches.push(entry)
   }
   if (branches.length === 0) return branches
 
-  const folder = `${dir}/tasks`
   const commits = [...new Set(branches.map((entry) => entry.commit))]
   const batch = idsGit(root, ['cat-file', '--batch'], `${commits.map((commit) => `${commit}:${folder}`).join('\n')}\n`)
   const hashBytes = commits[0].length / 2
-  const filesOf = new Map()
+  const namesOf = new Map()
   let at = 0
   for (const commit of commits) {
     const end = batch.indexOf(10, at)
     if (end === -1) break
     const header = batch.toString('utf8', at, end).split(' ')
     at = end + 1
-    if (header.length < 3) continue // missing or ambiguous: no tasks folder
+    if (header.length < 3) continue // missing or ambiguous: no such folder
     const size = Number(header[2])
-    const files = new Map()
-    if (header[1] === 'tree') {
-      for (const name of idsTreeNames(batch.subarray(at, at + size), hashBytes)) {
-        const named = name.match(IDS_FILE_NAME)
-        if (named && !files.has(named[1])) files.set(named[1], `${folder}/${name}`)
-      }
-    }
-    filesOf.set(commit, files)
+    namesOf.set(commit, header[1] === 'tree' ? idsTreeNames(batch.subarray(at, at + size), hashBytes) : [])
     at += size + 1
   }
-  for (const entry of branches) entry.files = filesOf.get(entry.commit) ?? new Map()
+  for (const entry of branches) entry.names = namesOf.get(entry.commit) ?? []
   return branches
+}
+
+/**
+ * The task files of every branch in the clone, local and remote-tracking, read as
+ * branchFolderNames reads them, without reading any task file: the id comes from the file name.
+ *
+ * options is { root, dir, exclude }: the repository, the workspace folder, and an optional
+ * exclude({ ref, branch, commit }) that leaves a branch out.
+ *
+ * Returns [{ ref, branch, commit, files }], where files is a Map from id to the task file's
+ * repository path. A branch without a tasks folder has an empty Map.
+ */
+export function branchTaskFiles(options) {
+  const folder = `${options.dir}/tasks`
+  return branchFolderNames({ root: options.root, folder, exclude: options.exclude }).map(({ ref, branch, commit, names }) => {
+    const files = new Map()
+    for (const name of names) {
+      const named = name.match(IDS_FILE_NAME)
+      if (named && !files.has(named[1])) files.set(named[1], `${folder}/${name}`)
+    }
+    return { ref, branch, commit, files }
+  })
 }
 
 /**

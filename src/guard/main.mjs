@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ciCommand } from './ci.mjs'
 import { DEFAULTS, effectiveConfigJson, loadConfig } from './config.mjs'
+import { newCommand, taskCommand } from './create.mjs'
 import { gatesCommand, verifyCommand } from './gates.mjs'
 import { handoffCommand } from './handoff.mjs'
 import { activateHooks, commitMsg, hooksActive, preCommit, prePush } from './githooks.mjs'
@@ -20,6 +21,16 @@ Commands:
   work [--json]
             the state: this lane, the other local worktrees, what is ready
             (also: status); turns on the git hooks
+  task <id> one task file, then the plan section its Plan link points to
+  new [<prefix>] "<title>" [--under <id>] [--issue <n>]
+            a todo task with the next free id (prefix T by default):
+            higher than any in this worktree, the other worktrees and
+            the fetched branches; --under S4 makes the next child, S4.1;
+            --issue records the issue and, with no title, asks gh for it
+  new decision "<title>"
+            a decision file with today's date
+  new log "<title>"
+            a log entry with today's date and this lane
   check     validate the records in the working tree
             (--index: the staged files; --rev <rev>: a commit;
             --range <from>..<to>: also that every commit names its task)
@@ -119,6 +130,8 @@ export function main(argv) {
   if (command === 'version' || command === '--version') console.log(VERSION)
   else if (command === 'help' || command === '--help') process.stdout.write(HELP)
   else if (command === 'work' || command === 'status') workCommand(argv.slice(1))
+  else if (command === 'task') taskCommand(argv[1])
+  else if (command === 'new') newCommand(argv.slice(1))
   else if (command === 'ci') ciCommand(argv.slice(1))
   else if (command === 'check') checkCommand(argv.slice(1), checkRange)
   else if (command === 'config') configCommand()
