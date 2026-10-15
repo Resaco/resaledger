@@ -186,11 +186,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: A dated decision or log name counts as taken when any branch has it, through the one-batch scan that `ids.mjs` now shares (`branchFolderNames`). `Decided by` falls back to a dash, which `check` refuses on purpose, so nobody commits a decision unsigned.
 
 ### W4 `claim`
-- Status: doing
+- Status: done
 - Depends on: W2, W3
 - Plan: [W-work.md](../plan/W-work.md#w4-claim)
-- Evidence: —
-- Notes: A worker builds it on branch `w4-claim` in its own worktree. Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs` on `main` after the merge: 581 of 581 on Node 24.18.0, 22.23.3 and 20.20.2. The 12 tests in [claim.test.mjs](../../test/claim.test.mjs) cover a double claim between two worktrees and then `--take`, which pre-commit accepts; a double claim between two clones through a bare remote in the team preset; `--worktree`; `--push`; the WIP limit and a missing plan; a fetch that fails; and byte-for-byte editing of the task file. Not verified: Windows (CI).
+- Notes: A lane branch is named `<branchPrefix><id in lowercase>-<slug>`, as spec section 6.3 now says. `claim` does not check that a takeover branch starts from the old lane, and a stale claim gets the same refusal as a live one, with the advice to take it over.
 
 ### W5 `changes`
 - Status: todo
@@ -225,11 +225,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 ## A: Agent integrations
 
 ### A1 The agent hook core, Claude Code and Codex
-- Status: doing
+- Status: done
 - Depends on: W1, H1
 - Plan: [A-agents.md](../plan/A-agents.md#a1-the-agent-hook-core-claude-code-and-codex)
-- Evidence: —
-- Notes: A worker builds it on branch `a1-agent-hooks` in its own worktree. M4 now depends on it, because `migrate` writes the `hook` command into `.claude/settings.json` (T5 finding 3). Next: review the worker's report against the acceptance checks, merge, record the evidence.
+- Evidence: `node scripts/test.mjs` on `main` after the merge: 679 of 679 on Node 24.18.0, 22.23.3 and 20.20.2. The 59 tests in [agents.test.mjs](../../test/agents.test.mjs) use recorded input for every event of both agents ([fixtures](../../test/fixtures/agents/claude-pre-tool-bash.json)); quoted text never triggers a refusal; the reminder fires once when called twice; every refusal kind, `agent.deny`, an edit on a protected branch, unknown input and merging into an existing `settings.json` are covered. Not verified: a live Claude Code or Codex session, and Windows.
+- Notes: The input formats come from the agents' documentation; Codex loads project hooks only for a trusted project. Known gaps, listed in the module header: `cp`, `mv`, `perl -i`, other editor tools and variables that disable other hook managers. Open: `update` adds the configuration back for an agent whose folder exists even when a project removed it on purpose; A2 decides with the other agents.
 
 ### A2 Cursor, Gemini CLI and GitHub Copilot
 - Status: todo
@@ -301,11 +301,11 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 ## T: Acceptance and independent review
 
 ### T1 The parallel-lanes acceptance test
-- Status: todo
+- Status: doing
 - Depends on: W4, V3, H2, C1
 - Plan: [T-acceptance.md](../plan/T-acceptance.md#t1-the-parallel-lanes-acceptance-test)
 - Evidence: —
-- Notes: —
+- Notes: A worker builds it on branch `t1-acceptance` in its own worktree. Next: review, merge, and see it pass in CI on all three systems.
 
 ### T2 Performance and Windows
 - Status: todo
@@ -336,25 +336,25 @@ Every task, in the order it should be done. Format and rules: [standards.md](../
 - Notes: Waits for its child tasks: T5.1, T5.2 and T5.3 fix or answer every finding.
 
 ### T5.1 Data safety in migrate
-- Status: doing
+- Status: done
 - Depends on: T5
 - Plan: [The review](../evidence/t5/review.md#findings), findings 1, 2, 4, 5, 6 and 14
-- Evidence: —
-- Notes: A worker fixes them on branch `t5-1-migrate-safety`: refuse planned paths that git ignores, print the undo when writing fails, refuse bytes that are not UTF-8, refuse symlinks and untracked targets, compare paths case-insensitively, refuse names Windows reserves.
+- Evidence: `node scripts/test.mjs` on `main` after the merges: 581 of 581 on Node 24.18.0, 22.23.3 and 20.20.2 before A1, and the full suite again after it. A new suite in [migrate.test.mjs](../../test/migrate.test.mjs), "data safety at the edges of git", refuses a `.gitignore` rule and a global excludes rule, prints and proves the undo after a failure halfway, refuses bytes that are not UTF-8, a symlinked workspace and a symlinked hook, and keeps two ids that differ only in case apart; [tasks.test.mjs](../../test/tasks.test.mjs) covers names Windows reserves.
+- Notes: An untracked, ignored stamp file is left in place with a warning, because the undo could not bring it back; a file that is not UTF-8 blocks the run only when `migrate` would write or delete it.
 
 ### T5.2 A faithful conversion
-- Status: todo
+- Status: doing
 - Depends on: T5.1
 - Plan: [The review](../evidence/t5/review.md#findings), findings 7 to 13
 - Evidence: —
-- Notes: —
+- Notes: A worker fixes findings 7 to 13 on branch `t5-2-faithful` in its own worktree. Next: review, merge, record.
 
 ### T5.3 The agent hook command that migrate writes
-- Status: todo
+- Status: done
 - Depends on: A1
 - Plan: [The review](../evidence/t5/review.md#findings), finding 3
-- Evidence: —
-- Notes: A1 adds `hook <agent> <event>` to the guard; this task adds a test that runs every command `migrate` writes into `.claude/settings.json` against the bundled guard.
+- Evidence: [agents.test.mjs](../../test/agents.test.mjs) runs every command line that `migrate` writes into `.claude/settings.json` against the bundled guard with recorded input: each exits 0 or 2, never "unknown command".
+- Notes: A1 built the `hook` command and its test.
 
 ## D: Documentation and repository files
 

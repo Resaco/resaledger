@@ -332,7 +332,7 @@ This is what makes the parallel-lanes acceptance test ([section 16](#16-testing)
 `claim <id>`:
 
 1. Refuses if another lane holds the task anywhere it can see: this worktree, other local worktrees, and pushed branches as last fetched. The team preset fetches first. `--take` takes the task over.
-2. On a protected branch (team), it first creates the lane: a branch named `<branchPrefix><id>-<slug>`, or `--branch <name>`. `--worktree <path>` creates the branch in a new worktree, which is how a solo developer starts a parallel agent.
+2. On a protected branch (team), it first creates the lane: a branch named `<branchPrefix><id>-<slug>` with the id in lowercase (`s4-store-documents`), or `--branch <name>`. `--worktree <path>` creates the branch in a new worktree, which is how a solo developer starts a parallel agent.
 3. Sets Status to `doing` and Lane to the branch, and checks the WIP limit and that a plan exists.
 4. With `claimPush` (the team default) or `--push`, commits the claim on its own (`chore: claim S4` with `Task: S4`) and pushes the branch, so others see it at once. Opening a draft pull request is the team's choice.
 
@@ -471,7 +471,7 @@ Three layers, from what every agent has to what only some have.
 
 | Agent | Configuration | Session start | Before a tool | End of turn |
 | --- | --- | --- | --- | --- |
-| Claude Code | `.claude/settings.json` | `SessionStart` | `PreToolUse` (Bash, Edit, Write) | `Stop` |
+| Claude Code | `.claude/settings.json` | `SessionStart` | `PreToolUse` (Bash, Edit, Write, MultiEdit, NotebookEdit) | `Stop` |
 | Codex | `.codex/hooks.json` | `SessionStart` | `PreToolUse` (Bash, apply_patch) | `Stop` |
 | Cursor | `.cursor/hooks.json` | `sessionStart`; in cloud agents the first `beforeShellExecution` | `beforeShellExecution`, `preToolUse` | `stop` with `loop_limit: 1` |
 | Gemini CLI | `.gemini/settings.json` | `SessionStart` | `BeforeTool` (shell, write, replace) | `AfterAgent` |
