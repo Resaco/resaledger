@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { CONFIG_FILE, loadConfig } from './config.mjs'
 import { parseDecision, parseLogEntry, parseReadme, planStatus, validateDecision, validateLogEntry, validatePlanStatus, validateReadme } from './records.mjs'
 import { parseTask, validateTask, validateTaskSet } from './tasks.mjs'
-import { fail, repositoryRoot } from './util.mjs'
+import { fail, recordCounts, repositoryRoot } from './util.mjs'
 
 const WORKSPACE_IMAGE = /\.(avif|gif|jpe?g|png|svg|webp)$/i
 const WORKSPACE_MARKDOWN = /\.(md|markdown)$/i
@@ -319,7 +319,7 @@ export function checkCommand(args, rangeCheck = null) {
     for (const { file, line, message } of problems) console.error(`✖ ${file}${line ? `:${line}` : ''}: ${message}`)
     process.exit(1)
   }
-  console.log(`✔ records valid: ${workspace.tasks.length} tasks, ${workspace.decisions.length} decisions, ${workspace.logs.length} log entries`)
+  console.log(`✔ records valid: ${recordCounts(workspace.tasks.length, workspace.decisions.length, workspace.logs.length)}`)
   if (range === null) return
   const lane = workspaceCurrentBranch(root)
   let rangeProblems

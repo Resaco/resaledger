@@ -1,6 +1,7 @@
 // The output of the CI check (spec 10): plain text for the log, Markdown for the job summary and
 // the pull request comment, and the comment itself, posted once and then updated in place.
 import { appendFileSync } from 'node:fs'
+import { plural, recordCounts } from './util.mjs'
 
 // The hidden first line of ResaLedger's pull request comment, which finds it again on later runs.
 export const CI_COMMENT_MARKER = '<!-- resaledger:ci -->'
@@ -12,33 +13,28 @@ export function ciShort(commit) {
   return commit ? commit.slice(0, 7) : 'none'
 }
 
-/** A count and its noun: "1 task", "2 tasks". */
-function ciPlural(count, word, many = `${word}s`) {
-  return `${count} ${count === 1 ? word : many}`
-}
-
 /** The one-line summary of a check, after its ✔ or ✖. */
 export function ciCheckLine(check, result) {
-  const problems = check.problems.length > 0 ? `${ciPlural(check.problems.length, 'problem')}; ` : ''
+  const problems = check.problems.length > 0 ? `${plural(check.problems.length, 'problem')}; ` : ''
   const note = check.note ? ` (${check.note})` : ''
   const { counts } = check
   switch (check.name) {
     case 'records':
-      return `records: ${problems}${ciPlural(counts.tasks, 'task')}, ${ciPlural(counts.decisions, 'decision')}, ${ciPlural(counts.logs, 'log entry', 'log entries')}${note}`
+      return `records: ${problems}${recordCounts(counts.tasks, counts.decisions, counts.logs)}${note}`
     case 'commits':
       if (check.skipped) return `commits: not checked${note}`
-      return `commits: ${problems}${ciPlural(counts.commits, 'commit')} ${result.event === 'push' ? 'pushed' : 'from the merge base to the head'}${note}`
+      return `commits: ${problems}${plural(counts.commits, 'commit')} ${result.event === 'push' ? 'pushed' : 'from the merge base to the head'}${note}`
     case 'ownership':
-      return `ownership: ${problems}${ciPlural(counts.changed, 'task')} changed${note}`
+      return `ownership: ${problems}${plural(counts.changed, 'task')} changed${note}`
     case 'ids':
-      return `ids: ${problems}${ciPlural(counts.added, 'new id')}, against ${ciPlural(counts.branches, 'branch', 'branches')}${note}`
+      return `ids: ${problems}${plural(counts.added, 'new id')}, against ${plural(counts.branches, 'branch', 'branches')}${note}`
     case 'moved':
       return `tasks moved: ${counts.moved}`
     case 'enforcement': {
       if (check.skipped) return `enforcement: not compared (${check.note})`
       if (counts.changes === 0) return 'enforcement: unchanged'
-      const undecided = check.problems.length > 0 ? `${ciPlural(check.problems.length, 'weakening change')} no decision names; ` : ''
-      return `enforcement: ${undecided}${ciPlural(counts.changes, 'change')}, ${counts.weakening} weakening`
+      const undecided = check.problems.length > 0 ? `${plural(check.problems.length, 'weakening change')} no decision names; ` : ''
+      return `enforcement: ${undecided}${plural(counts.changes, 'change')}, ${counts.weakening} weakening`
     }
     case 'gates': {
       if (check.skipped) return `gates: none${note}`
@@ -71,12 +67,14 @@ function ciProblemLine({ file, line, message }) {
   return `${file ? `${file}${line ? `:${line}` : ''}: ` : ''}${message}`
 }
 
+// The commit the rules came from, by rules.from: a pull request's base or head, a push's commits.
+const CI_RULES_SOURCES = { base: 'base', head: 'head', before: 'commit before the push', after: 'last pushed commit' }
+
 /** Where the rules came from, as a sentence. */
 function ciRulesLine(result) {
   const { rules, release } = result
-  const from = rules.adds
-    ? `This change adds ResaLedger, so it is judged by its own rules, from the ${rules.from} ${ciShort(rules.commit)}.`
-    : `Rules from the ${rules.from} ${ciShort(rules.commit)}.`
+  const source = `the ${CI_RULES_SOURCES[rules.from] ?? rules.from} ${ciShort(rules.commit)}`
+  const from = rules.adds ? `This change adds ResaLedger, so it is judged by its own rules, from ${source}.` : `Rules from ${source}.`
   return release ? `${from} ResaLedger ${release.version} counts as released (--release).` : from
 }
 
@@ -129,7 +127,7 @@ function ciMarkdownCode(text) {
 function ciMarkdownTitle(result) {
   const what = result.event === 'push' ? `push${result.ref ? ` to ${result.ref.replace(/^refs\/heads\//, '')}` : ''}` : 'this pull request'
   const failed = result.checks.filter((check) => !check.ok).length
-  const verdict = result.skipped ? 'not checked' : failed === 0 ? '✔ passed' : `✖ ${ciPlural(failed, 'check')} failed`
+  const verdict = result.skipped ? 'not checked' : failed === 0 ? '✔ passed' : `✖ ${plural(failed, 'check')} failed`
   return `### ResaLedger · ${ciMarkdownText(what)} · ${verdict}`
 }
 
@@ -138,7 +136,7 @@ function ciCommitsSummary(result) {
   const check = result.checks.find(({ name }) => name === 'commits')
   if (!check) return null
   if (check.skipped) return `**Commits:** not checked${check.note ? ` (${ciMarkdownText(check.note)})` : ''}`
-  const verdict = check.ok ? 'all pass' : ciPlural(check.problems.length, 'problem')
+  const verdict = check.ok ? 'all pass' : plural(check.problems.length, 'problem')
   return `**Commits:** ${check.counts.commits} checked, ${verdict}`
 }
 

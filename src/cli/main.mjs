@@ -8,8 +8,9 @@ import { createInterface } from 'node:readline/promises'
 import { CONFIG_FILE, DEFAULTS, isSafeFolderPath, parseConfig } from '../guard/config.mjs'
 import { hooksActive } from '../guard/githooks.mjs'
 import { SETUP_MARKER } from '../guard/records.mjs'
+import { recordCounts } from '../guard/util.mjs'
 import { detectCommitStyle, detectGates } from './detect.mjs'
-import { applyInit, commitCommand, initOptions, parseAgentsValue, parseInitArgs, planInit, presetFromAnswer } from './init.mjs'
+import { agentTrustLines, applyInit, commitCommand, initOptions, parseAgentsValue, parseInitArgs, planInit, presetFromAnswer } from './init.mjs'
 import { LEGACY_CONFIG_FILE } from './legacy.mjs'
 import { applyMigration, COMMIT_COMMAND, planMigration, UNDO_COMMAND } from './migrate.mjs'
 import { currentBranch, ensureGuard, hooksNote, setupCommitSteps, turnOnHooks } from './setup.mjs'
@@ -102,7 +103,7 @@ export function migrateCommand(args) {
   }
 
   const { report } = plan
-  console.log(`resaledger migrate: agent-ledger 0.x to ResaLedger 1.0 (${report.counts.tasks} tasks, ${report.counts.decisions} decisions, ${report.counts.logEntries} log entries)`)
+  console.log(`resaledger migrate: agent-ledger 0.x to ResaLedger 1.0 (${recordCounts(report.counts.tasks, report.counts.decisions, report.counts.logEntries)})`)
   list('Create', report.created)
   list('Change', report.changed)
   list('Rename', report.renamed)
@@ -148,13 +149,13 @@ export function migrateCommand(args) {
   const hooks = turnOnHooks(root)
   const undoHooks = hooks.state === 'activated' ? ' && git config --unset core.hooksPath' : ''
   if (hooks.state !== 'active') console.log(`\n${hooksNote(hooks, dir)}`)
-  console.log(`\nwritten. Checking with the new guard: node ${dir}/scripts/records.mjs check`)
+  console.log(`\nWritten. Checking with the new guard: node ${dir}/scripts/records.mjs check`)
   const check = spawnSync(process.execPath, [join(root, dir, 'scripts', 'records.mjs'), 'check'], { cwd: root, encoding: 'utf8' })
   if (check.error) throw check.error
   process.stdout.write(check.stdout)
   process.stderr.write(check.stderr)
   // The counts check prints must be the plan's: a file git does not see passes in memory but is never committed.
-  const counted = check.stdout.match(/records valid: (\d+) tasks, (\d+) decisions, (\d+) log entries/)
+  const counted = check.stdout.match(/records valid: (\d+) tasks?, (\d+) decisions?, (\d+) log entr(?:y|ies)/)
   const expected = report.expected
   const countsDiffer =
     check.status === 0 &&
@@ -163,7 +164,7 @@ export function migrateCommand(args) {
   const failed = (check.status !== 0 && plan.problems.length === 0) || countsDiffer
   if (countsDiffer) {
     console.error(
-      `✖ check counts other records than the plan (${expected.tasks} tasks, ${expected.decisions} decisions, ${expected.logEntries} log entries), so some files are not where git sees them; this passed in memory, not on disk, and is a bug in resaledger. Undo with the command below.`
+      `✖ check counts other records than the plan (${recordCounts(expected.tasks, expected.decisions, expected.logEntries)}), so some files are not where git sees them; this passed in memory, not on disk, and is a bug in resaledger. Undo with the command below.`
     )
   } else if (failed) {
     console.error('✖ the migrated workspace does not pass check although it passed in memory; this is a bug in resaledger. Undo with the command below.')
@@ -263,7 +264,7 @@ export async function initCommand(args) {
   list('Created', result.created)
   list('Changed', result.changed)
   list('Warnings', plan.warnings.map((warning) => `! ${warning}`))
-  if (plan.agents.length > 0) console.log(`\nAgent hooks for: ${plan.agents.join(', ')}. Each agent asks you to trust the project's hooks once; run its /hooks command to review them.`)
+  if (plan.agents.length > 0) console.log(`\nAgent hooks for: ${plan.agents.join(', ')}.\n${agentTrustLines(plan.agents).join('\n')}`)
   console.log(`\n${hooksNote(result.hooks, dir)}`)
   if (result.instructions) console.log(`\n${result.instructions}`)
   const active = hooksActive()
@@ -343,6 +344,7 @@ export function updateCommand(args) {
   }
   const note = (file) => (file.note ? `: ${file.note}` : '')
   show('replaced', 'Replaced', (file) => (file.from ? ` (was ${file.from})` : note(file)))
+  show('added', 'Added', note)
   show('restored', 'Restored', note)
   show('kept', 'Kept', note)
   show('manual', 'To do by hand', note)

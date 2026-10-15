@@ -116,6 +116,18 @@ describe('validateDecision', () => {
     assert.match(problems[0], /"Weaken".*"Weakens"/)
   })
 
+  test('reports a known field below the field list, which would be read as text', () => {
+    const text = '# Allow it\n\n- Date: 2026-10-14\n- Decided by: alice\n\n- Weakens: wip\n\nWhy.\n\n```text\n- Weakens: shown in code\n```\n- Reason: not a known field\n'
+    const problems = validateDecision(parseDecision(DECISION_FILE, text), existing())
+    assert.deepEqual(
+      problems.map((problem) => [problem.line, problem.message]),
+      [[6, '"- Weakens:" is below the field list, so it is read as text, not as a field; move it up into the list after the heading, with no blank line before it']]
+    )
+    // A field the list already has may come up again in the text.
+    const repeated = '# Allow it\n\n- Date: 2026-10-14\n- Decided by: alice\n\nThe old rule said:\n\n- Date: 2025-01-01\n'
+    assert.deepEqual(validateDecision(parseDecision(DECISION_FILE, repeated), existing()), [])
+  })
+
   test('accepts superseded by a link to a decision that exists', () => {
     const parsed = decision({ status: 'superseded by [front matter after all](2026-11-02-front-matter.md)' })
     assert.deepEqual(validateDecision(parsed, existing('ledger/decisions/2026-11-02-front-matter.md')), [])

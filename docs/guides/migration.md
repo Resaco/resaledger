@@ -46,8 +46,8 @@ npx resaledger migrate --dry-run
 ```
 
 ```text
-resaledger migrate: agent-ledger 0.x to ResaLedger 1.0 (2 tasks, 1 decisions, 1 log entries)
-Create (8):
+resaledger migrate: agent-ledger 0.x to ResaLedger 1.0 (2 tasks, 1 decision, 1 log entry)
+Create (7):
 build/tasks/A1-show-the-opening-hours.md
 build/tasks/A2-add-a-price-list.md
 Delete (6):
@@ -84,7 +84,7 @@ npx resaledger migrate
 ```
 
 ```text
-✔ records valid: 2 tasks, 1 decisions, 2 log entries
+✔ records valid: 2 tasks, 1 decision, 2 log entries
 Review the change, then:
 1. Commit the migration:
 git add -A && git add --chmod=+x .githooks/pre-commit .githooks/pre-merge-commit .githooks/commit-msg .githooks/pre-push && git commit -m "chore: migrate to ResaLedger 1.0" -m "Task: maintenance"

@@ -287,9 +287,9 @@ Write the decision, with a `Weakens:` line that names the change by the id CI pr
 ```bash
 node ledger/scripts/records.mjs new decision "Allow five tasks at once per lane"
 decision=$(ls ledger/decisions/*-allow-five-tasks-at-once-per-lane.md)
-awk '{ print } /^- Status:/ { print "- Weakens: wip" }' "$decision" > decision.md
-mv decision.md "$decision"
 cat >> "$decision" <<'EOF'
+- Weakens: wip
+
 Five people share the shop now, and each runs agents on more than three tasks.
 EOF
 cat "$decision"
@@ -303,7 +303,7 @@ cat "$decision"
 - Weakens: wip
 ```
 
-The `Weakens:` line belongs in the list of fields, right under `Status:`. Below a blank line it is text, and CI does not read it.
+The `Weakens:` line belongs in the list of fields. `new decision` ends the file on that list, so a line appended at once joins it. Below a blank line it is text: CI does not read it, and `check` reports it.
 
 ```bash
 git add ledger

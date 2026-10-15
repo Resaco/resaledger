@@ -33,7 +33,12 @@ Created (14):
 .github/hooks/resaledger.json
 Changed (1):
 CLAUDE.md
-Agent hooks for: claude, codex, cursor, gemini, copilot. Each agent asks you to trust the project's hooks once; run its /hooks command to review them.
+Agent hooks for: claude, codex, cursor, gemini, copilot.
+Claude Code asks you to trust the project's hooks; its /hooks command shows them.
+Codex asks you to trust each hook entry, and asks again when an entry's command changes.
+Cursor's cloud agents run the committed hooks without asking.
+Gemini CLI asks you to trust the project's hooks.
+The Copilot CLI asks you to trust the project's hooks; the Copilot cloud agent runs them without asking.
 ```
 
 Each file is merged into what is there: the project's own settings and hooks stay. Two more changes help the agents find `AGENTS.md`:
@@ -165,7 +170,7 @@ echo '{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"com
 ```
 
 ```text
-✖ ResaLedger: this command matches the project's agent.deny rule "npm\\s+publish": Only the owner publishes the shop.
+✖ ResaLedger: this command matches the project's agent.deny rule "npm\s+publish": Only the owner publishes the shop.
 ```
 
 The rules come from the committed configuration, so an agent cannot lift one by editing the file without committing it.

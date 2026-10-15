@@ -910,7 +910,7 @@ function agentsShellRefusal(text, context, folder = context.cwd) {
     for (const rule of context.config.agent.deny) {
       const regex = rule.regex ?? new RegExp(rule.pattern)
       if (texts.some((candidate) => regex.test(candidate))) {
-        return `this command matches the project's agent.deny rule ${JSON.stringify(rule.pattern)}${rule.reason ? `: ${rule.reason}` : ''}`
+        return `this command matches the project's agent.deny rule "${rule.pattern}"${rule.reason ? `: ${rule.reason}` : ''}`
       }
     }
   }

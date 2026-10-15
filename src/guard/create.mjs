@@ -191,10 +191,11 @@ function createRecord(kind, title) {
   if (kind === 'decision') {
     const path = createDatedPath(root, config, 'decisions', title, 'decision')
     const author = createAuthorName()
-    createWrite(root, path, `# ${title}\n\n- Date: ${createToday()}\n- Decided by: ${author ?? CREATE_PLACEHOLDER}\n- Status: accepted\n\n`)
+    // The file ends on the field list, so that a field appended at once, such as Weakens, joins it.
+    createWrite(root, path, `# ${title}\n\n- Date: ${createToday()}\n- Decided by: ${author ?? CREATE_PLACEHOLDER}\n- Status: accepted\n`)
     console.log(`✔ created ${path}`)
     const missing = author ? '' : ' Fill in "Decided by" too: git has no user.name here.'
-    console.log(`Next: write what was decided and why below the fields.${missing} Then run ${guard} check.`)
+    console.log(`Next: add any more fields, such as "- Weakens: <id>", straight below the list, then a blank line and what was decided and why.${missing} Then run ${guard} check.`)
     return
   }
   const path = createDatedPath(root, config, 'log', title, 'entry')

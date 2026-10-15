@@ -173,6 +173,17 @@ export function parseFields(lines, start) {
   return { fields, end: index }
 }
 
+/** The "- Name: value" lines from line index start on, outside code blocks, as { name, line }. */
+export function fieldLinesAfter(lines, start) {
+  const fenced = fencedLines(lines)
+  const found = []
+  for (let index = start; index < lines.length; index += 1) {
+    const field = fenced[index] ? null : lines[index].match(FIELD)
+    if (field) found.push({ name: field[1].trim(), line: index + 1 })
+  }
+  return found
+}
+
 /** Whether a field value means "empty": nothing, or a dash. */
 export function isEmptyValue(value) {
   return EMPTY_VALUES.has(value.trim())

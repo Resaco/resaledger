@@ -167,6 +167,20 @@ function dirtyFiles(root, paths) {
   return status.stdout.split('\n').filter(Boolean).map((line) => line.slice(3))
 }
 
+// What each agent does with the project's hooks before they run (spec 11), for init's output.
+const AGENT_TRUST = {
+  claude: 'Claude Code asks you to trust the project\'s hooks; its /hooks command shows them.',
+  codex: 'Codex asks you to trust each hook entry, and asks again when an entry\'s command changes.',
+  cursor: 'Cursor\'s cloud agents run the committed hooks without asking.',
+  gemini: 'Gemini CLI asks you to trust the project\'s hooks.',
+  copilot: 'The Copilot CLI asks you to trust the project\'s hooks; the Copilot cloud agent runs them without asking.'
+}
+
+/** One line per configured agent on whether it asks you to trust the project's hooks. */
+export function agentTrustLines(agents) {
+  return agents.map((agent) => `  ${AGENT_TRUST[agent]}`)
+}
+
 /**
  * ResaLedger's hook entries in each agent's configuration, merged into what is there: sets
  * writes (path → text) and returns { agents, files, manual }, manual holding { path, reason,

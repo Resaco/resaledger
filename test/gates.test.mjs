@@ -169,6 +169,7 @@ describe('verify', () => {
     const r = project({ commit: [], verify: [counting(counter)] })
     const first = verify(r)
     assert.equal(first.status, 0, first.out)
+    assert.match(first.out, /^✔ the gate passed: wrote ledger\/verified\/[0-9a-f]{16}\.json\. Commit it/m)
     assert.equal(runs(counter), 1)
     const [name] = stamps(r)
     const bytes = r.read(`ledger/verified/${name}`)

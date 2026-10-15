@@ -293,6 +293,7 @@ Small lanes merge sooner.
 
 - The file is `<dir>/decisions/<date>-<slug>.md` and starts with a level-1 heading that says what was decided.
 - A field may appear only once, and a field name within two letters of a known one is refused.
+- A known field below the field list, such as a `- Weakens:` line after a blank line, is refused: there it would be text, not a field.
 - A decision file is added once; marking it superseded is its only later edit.
 - `Weakens` counts only in the pull request that adds the decision. CI lists every change to the configuration, the guard, the hooks and the workflow, each with an id such as `wip`, `gates.verify`, `protected`, `guard` or `hooks/pre-commit`, and fails a weakening change that no added decision names.
 
